@@ -1,0 +1,75 @@
+# Android and Gradle
+.gradle/
+.gradle-home/
+**/build/
+local.properties
+voxide.local.properties
+.kotlin/
+.cxx/
+.externalNativeBuild/
+/android/captures/
+exports/
+
+# Python environments and generated files
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+dist/
+
+# Local credentials and signing material
+.env
+.env.*
+!.env.example
+!.env.*.example
+.envrc
+!.envrc.example
+.direnv/
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+keystore.properties
+
+# JVM diagnostics and packaged Android artifacts
+hs_err_pid*.log
+replay_pid*.log
+*.hprof
+*.apk
+*.aab
+
+# Local media and runtime data, not evaluation fixtures
+/backend/.data/
+/backend/.media/
+/backend/.logs/
+
+# Personal tooling, agent sessions and disposable experiments
+/.local/
+/.scratch/
+/graphify-out/
+**/.claude/settings.local.json
+/.mcp.json
+**/.cursor/mcp.json
+
+# Editor state; shared VS Code tasks and extension recommendations stay visible
+.idea/
+*.iml
+**/.vscode/*
+!**/.vscode/extensions.json
+!**/.vscode/tasks.json
+*~
+*.swp
+*.swo
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,7 @@
+# Experimental browser-SDK protocol adaptation, NOT an officially supported native SDK.
+# Copy to voxide.local.properties (ignored). Values are embedded in the APK.
+# Never use a vox_sk secret. Native authorization must be approved by the provider.
+# Explicit microphone start uploads voice only after setup; no live calls during build/tests.
+enabled=false
+baseUrl=https://voxide.onrender.com
+publishableKey=
