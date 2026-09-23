@@ -1,0 +1,89 @@
+name: Android CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  android:
+    name: Android checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Test change detection
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Detect Android changes
+        id: changes
+        run: python3 .github/scripts/android_changes.py
+
+      - name: Set up JDK 21
+        if: steps.changes.outputs.android == 'true'
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Ensure required Android SDK packages
+        if: steps.changes.outputs.android == 'true'
+        run: |
+          missing=()
+          if [[ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" ]]; then
+            missing+=("platforms;android-35")
+          fi
+          if [[ ! -x "$ANDROID_HOME/build-tools/35.0.0/aapt2" ]]; then
+            missing+=("build-tools;35.0.0")
+          fi
+          if (( ${#missing[@]} )); then
+            sdkmanager --install "${missing[@]}"
+          else
+            echo "Required SDK packages are already installed."
+          fi
+
+      - name: Set up Gradle and validate wrappers
+        if: steps.changes.outputs.android == 'true'
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: enhanced
+          cache-read-only: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+
+      - name: Build, unit test and lint
+        id: build
+        if: steps.changes.outputs.android == 'true'
+        working-directory: android
+        run: >-
+          sh gradlew --no-daemon --console=plain --build-cache --continue
+          :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+
+      - name: Upload test and lint reports
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' && steps.build.outcome != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-reports
+          path: |
+            android/app/build/reports/tests/testDebugUnitTest/
+            android/app/build/test-results/testDebugUnitTest/*.xml
+            android/app/build/reports/lint-results-debug.*
+          retention-days: 7
+          if-no-files-found: warn
