@@ -13,7 +13,7 @@ FIELDS = ("status", "priority", "area")
 FIELD_LABELS = {"status": "Status", "priority": "Priority", "area": "Area"}
 DEFAULT_COLUMNS = ("Ready", "In progress", "In review")
 BLOCKED_LABEL = "blocked"
-TITLE_LIMIT = 20
+TITLE_LIMIT = 25
 INLINE_LIMIT = 8
 
 QUERY = """

@@ -40,7 +40,7 @@ class RenderingTest(unittest.TestCase):
         lines = text.split("\n")
         self.assertEqual(lines[0], '<b><a href="https://github.com/o/r/actions/runs/9">Android checks failed on PR#42</a></b>')
         self.assertEqual(lines[1], RULE)
-        self.assertEqual(lines[2], "<blockquote>fix(capture): relea…</blockquote>")
+        self.assertEqual(lines[2], "<blockquote>fix(capture): release pro…</blockquote>")
         self.assertEqual(lines[3], "")
         self.assertEqual(lines[4], '<b>Commit</b>  <a href="https://github.com/o/r/commit/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678">a1b2c3d</a>')
         self.assertEqual(lines[5], "<b>By</b>  <i>dev</i>")
@@ -60,7 +60,7 @@ class RenderingTest(unittest.TestCase):
         self.assertEqual(text.split("\n")[:4], [
             '<b><a href="https://github.com/o/r/pull/42">PR#42</a></b>',
             RULE,
-            "<blockquote>feat(android): shar…</blockquote>",
+            "<blockquote>feat(android): share &lt;in…</blockquote>",
             "",
         ])
         self.assertIn("<b>Status</b>  Merged into <code>main</code>, closes <a", text)
@@ -81,7 +81,7 @@ class RenderingTest(unittest.TestCase):
         }
         text = render_release(release, "ovrly")
         self.assertTrue(text.endswith(
-            "<blockquote>Notes &amp; more</blockquote>\n\n<b>Type</b>  Pre-release\n<b>By</b>  <i>owner</i>"
+            "<blockquote>Notes &amp; more</blockquote>\n\n<b>Type</b>  pre-release\n<b>By</b>  <i>owner</i>"
         ))
         self.assertNotIn("When", text)
         self.assertNotIn("- item", text)

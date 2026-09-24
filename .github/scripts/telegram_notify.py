@@ -32,7 +32,7 @@ def author(login):
 
 
 RULE = "╌" * 12
-QUOTE_LIMIT = 20
+QUOTE_LIMIT = 25
 GAP = object()
 
 
@@ -104,7 +104,7 @@ def render_card(pr):
 
 def render_release(release, repository_name):
     title = release.get("name") or release["tag_name"]
-    kind = "Pre-release" if release.get("prerelease") else "Release"
+    kind = "pre-release" if release.get("prerelease") else "release"
     summary = truncate(first_line(release.get("body")), QUOTE_LIMIT)
     return compose(
         link(release["html_url"], f"{repository_name} {title}"),
