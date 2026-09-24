@@ -27,6 +27,8 @@ Use a Linux JDK and SDK in WSL, with the checkout and Gradle caches in the Linux
 
 APK: `app/build/outputs/apk/debug/app-debug.apk` (relative to this directory). No backend or provider credentials are required.
 
+Keep personal files in `.local`, experiments in `.scratch` and APK exports in `exports` at the repository root; these directories are Git-ignored.
+
 ## Design gallery
 
 Open `app/src/main/java/app/ovrly/ui/GalleryPreviews.kt` in Studio's Design or Split view. Gallery selections do not change the live overlay; `GlassOverlay.kt` contains the live-control previews.

@@ -1,6 +1,6 @@
 # ovrly
 
-Native Android companion with floating controls and local video-interval capture. Research and backend processing are not connected.
+Native Android companion with floating controls and local video-interval capture.
 
 ## Start here (team)
 
@@ -19,8 +19,6 @@ Requires JDK 21, Android SDK platform 37 and Build Tools 36.0.0. The project bui
 - [Architecture](docs/architecture.md)
 - [Team workflow](WORKFLOW.md)
 - [Changelog](CHANGELOG.md)
-
-Keep personal files in `.local`, experiments in `.scratch` and APK exports in `exports`. These directories are Git-ignored.
 
 ## License
 
