@@ -42,6 +42,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -78,7 +79,7 @@ fun GalleryScreen(onBack: () -> Unit, onDemo: (() -> Unit)? = null) {
     }
     var designName by rememberSaveable { mutableStateOf(StudyDesign.CLEAR_FLOAT.name) }
     var backdropName by rememberSaveable { mutableStateOf(StudyBackdrop.VIDEO.name) }
-    var fixtureIndex by rememberSaveable { mutableStateOf(1) }
+    var fixtureIndex by rememberSaveable { mutableIntStateOf(1) }
     var higherOpacity by rememberSaveable { mutableStateOf(false) }
     var viewName by rememberSaveable { mutableStateOf(GalleryView.STATES.name) }
     var compareAllFamilies by rememberSaveable { mutableStateOf(false) }
@@ -477,7 +478,7 @@ internal fun GalleryStudySample(
     minimalBackdrop: Boolean = false,
 ) {
     var feedback by rememberSaveable(design.name, fixture.title) { mutableStateOf<String?>(null) }
-    var mockBackgroundTaps by rememberSaveable { mutableStateOf(0) }
+    var mockBackgroundTaps by rememberSaveable { mutableIntStateOf(0) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         GalleryBackdrop(

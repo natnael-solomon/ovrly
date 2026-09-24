@@ -1,6 +1,7 @@
 package app.ovrly.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,12 +47,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.ovrly.R
 
 @Composable
 internal fun YourSpaceScreen(
@@ -151,7 +161,39 @@ private fun SampleHeader(title: String, searching: Boolean, onSearch: () -> Unit
     val p = LocalOvrlyPalette.current
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Wordmark(Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            val wordmark = painterResource(R.drawable.wordmark_ovrly)
+            Box {
+                if (!p.dark) {
+                    // Paper is close in value to the chrome. Chrome needs both a highlight and a shadow to
+                    // read: a soft ink drop-shadow below, a warm sheen halo around, and a crisp ink edge.
+                    Image(
+                        wordmark, contentDescription = null,
+                        modifier = Modifier.height(40.dp).offset(y = 3.dp)
+                            .blur(4.dp, BlurredEdgeTreatment.Unbounded),
+                        contentScale = ContentScale.FillHeight,
+                        colorFilter = ColorFilter.tint(p.ink.copy(alpha = 0.6f), BlendMode.SrcIn),
+                    )
+                    Image(
+                        wordmark, contentDescription = null,
+                        modifier = Modifier.height(40.dp).scale(1.06f)
+                            .blur(2.dp, BlurredEdgeTreatment.Unbounded),
+                        contentScale = ContentScale.FillHeight,
+                        colorFilter = ColorFilter.tint(p.sheen.copy(alpha = 0.9f), BlendMode.SrcIn),
+                    )
+                    Image(
+                        wordmark, contentDescription = null,
+                        modifier = Modifier.height(40.dp).scale(1.03f),
+                        contentScale = ContentScale.FillHeight,
+                        colorFilter = ColorFilter.tint(p.ink.copy(alpha = 0.85f), BlendMode.SrcIn),
+                    )
+                }
+                Image(
+                    wordmark, contentDescription = "ovrly",
+                    modifier = Modifier.height(40.dp).chromeGlare(strength = if (p.dark) 0.6f else 0.34f),
+                    contentScale = ContentScale.FillHeight,
+                )
+            }
+            Spacer(Modifier.weight(1f))
             Text("PREVIEW", style = MaterialTheme.typography.labelSmall, color = p.muted)
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

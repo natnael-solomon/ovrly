@@ -59,7 +59,7 @@ internal fun ChromeArtwork(variant: Int, modifier: Modifier = Modifier) {
                         repeat(3) { i ->
                             val x = w * 0.18f + unit * i * 0.14f
                             val y = h * 0.16f + unit * i * 0.055f
-                            val ellipse = Size(unit * 0.68f, unit * 0.62f)
+                            val ellipse = Size(unit * 0.65f, unit * 0.65f)
                             drawOval(Color(0xFF060914).copy(alpha = 0.55f),
                                 Offset(x + 3f, y + 8f), ellipse, style = Stroke(unit * 0.11f))
                             drawOval(steel, Offset(x, y), ellipse, style = Stroke(unit * 0.105f))

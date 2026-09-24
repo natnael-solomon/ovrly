@@ -14,4 +14,15 @@
         <item name="android:forceDarkAllowed">false</item>
     </style>
     <style name="Theme.Ovrly.Starting" parent="Theme.Ovrly.StartingBase" />
+    <!-- Registered at runtime on Android 12+ when the saved appearance is Light, so the next
+         cold start opens on paper instead of Chrome black. Inherits the v33 icon preference. -->
+    <color name="splash_background_light">#F0EFE5</color>
+    <style name="Theme.Ovrly.Starting.Light">
+        <item name="windowSplashScreenBackground">@color/splash_background_light</item>
+        <item name="postSplashScreenTheme">@style/Theme.Ovrly</item>
+        <item name="android:statusBarColor">@color/splash_background_light</item>
+        <item name="android:navigationBarColor">@color/splash_background_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
 </resources>
