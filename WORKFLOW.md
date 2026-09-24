@@ -112,11 +112,12 @@ red under Actions.
   and author. Posts for PR runs are deleted once a later run on that PR passes;
   posts for `main` stay. Cancelled (superseded) runs are ignored.
 - Pull requests: one silent card per PR, edited in place from draft to ready
-  for review to merged or closed, with linked `Closes #N` issues. Becoming
-  ready for review also posts a short silent ping. Dependabot PRs are skipped.
+  for review to merged or closed, with linked `Closes #N` issues. Dependabot
+  PRs are skipped.
 - Published releases: a loud post with the notes in an expandable quote.
-- Manual dispatch: a silent test message, the only way to verify the setup
-  before a real event.
+- Manual dispatch: a silent test message, or a preview of the failure, PR or
+  release layout with synthetic data via the `sample` input. This is the only
+  way to verify the setup before a real event.
 
 **Telegram board** (`telegram-board.yml`) polls the **ovrly development**
 Project every 15 minutes. It keeps one pinned message listing Ready, In

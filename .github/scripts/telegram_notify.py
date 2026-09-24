@@ -101,14 +101,6 @@ def render_card(pr):
     )
 
 
-def render_ready_ping(pr):
-    return compose(
-        link(pr["html_url"], f"PR#{pr['number']} is ready for review"),
-        escape(truncate(pr["title"], 100)),
-        meta=(author(pr["user"]["login"]),),
-    )
-
-
 def render_release(release, repository_name):
     title = release.get("name") or release["tag_name"]
     kind = "Pre-release" if release.get("prerelease") else "Release"
@@ -167,13 +159,9 @@ def handle_pull_request(telegram, state, event):
     if pr["user"]["login"] in BOT_ACTORS:
         return "Skipped bot-authored pull request."
     action = event["action"]
-    if action == "opened":
+    if action in ("opened", "ready_for_review"):
         upsert_card(telegram, state, pr)
-        return f"Posted card for PR #{pr['number']}."
-    if action == "ready_for_review":
-        upsert_card(telegram, state, pr)
-        telegram.send(render_ready_ping(pr), silent=True)
-        return f"Updated card and pinged for PR #{pr['number']}."
+        return f"Updated card for PR #{pr['number']}."
     if action == "closed":
         key = str(pr["number"])
         if key in state.get("pr_cards", {}):

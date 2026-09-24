@@ -122,9 +122,8 @@ class PullRequestTest(unittest.TestCase):
         self.assertEqual(state["pr_cards"], {"42": 101})
 
         handle("pull_request", pr_event("ready_for_review"), telegram, state)
-        self.assertEqual(telegram.methods(), ["sendMessage", "editMessageText", "sendMessage"])
-        self.assertIn("is ready for review</a></b>", telegram.sent()[-1])
-        self.assertTrue(telegram.calls[-1][1]["disable_notification"])
+        self.assertEqual(telegram.methods(), ["sendMessage", "editMessageText"])
+        self.assertIn("<b>Status</b>  Ready for review", telegram.calls[-1][1]["text"])
 
         handle("workflow_run", run_event(), telegram, state)
         handle("pull_request", pr_event("closed", merged=True, state="closed"), telegram, state)
@@ -135,7 +134,7 @@ class PullRequestTest(unittest.TestCase):
     def test_missing_card_is_recreated(self):
         telegram, state = FakeTelegram(missing={5}), {"pr_cards": {"42": 5}}
         handle("pull_request", pr_event("ready_for_review"), telegram, state)
-        self.assertEqual(telegram.methods(), ["editMessageText", "sendMessage", "sendMessage"])
+        self.assertEqual(telegram.methods(), ["editMessageText", "sendMessage"])
         self.assertEqual(state["pr_cards"]["42"], 101)
 
     def test_close_without_card_only_cleans_failures(self):
