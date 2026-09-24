@@ -4,11 +4,11 @@ Our shared contribution process. See the [Android README](android/README.md)
 and [backend README](backend/README.md) for setup, and [AGENTS.md](AGENTS.md)
 for coding-agent instructions.
 
-The CI workflow is in [`.github/workflows/android.yml`](.github/workflows/android.yml).
-It becomes active after publication to GitHub. The public
+The CI workflow is in [`.github/workflows/android.yml`](.github/workflows/android.yml)
+and runs on every pull request and push to `main`. The public
 [ovrly development Project](https://github.com/users/natnael-solomon/projects/3)
-is configured and linked to the repository. The `main` protection ruleset is
-prepared but disabled until the initial import and first successful CI run.
+holds all task issues; its README is the team briefing. The `main` protection
+ruleset is prepared but still disabled; enabling it is tracked as `REPO-02`.
 This document does not enforce those rules.
 
 ## 1. Pick up work
