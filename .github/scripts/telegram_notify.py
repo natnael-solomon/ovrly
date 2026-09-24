@@ -188,12 +188,14 @@ def sample_event(kind, repository):
         "html_url": f"{url}/pulls", "user": {"login": "sample"},
         "base": {"ref": "main", "repo": {"html_url": url}},
     }
-    if kind == "failure":
+    if kind in ("failure", "pr_failure"):
+        on_pr = kind == "pr_failure"
         return "workflow_run", {"repository": repository, "workflow_run": {
-            "id": 0, "name": "Android CI", "conclusion": "failure", "event": "push",
+            "id": 0, "name": "Android CI", "conclusion": "failure",
+            "event": "pull_request" if on_pr else "push",
             "head_branch": "sample", "head_sha": "0" * 40, "html_url": f"{url}/actions",
             "head_commit": {"message": "fix(sample): preview failure post"},
-            "actor": {"login": "sample"}, "pull_requests": [],
+            "actor": {"login": "sample"}, "pull_requests": [{"number": 0}] if on_pr else [],
         }}
     if kind == "release":
         return "release", {"repository": repository, "release": {
@@ -205,12 +207,41 @@ def sample_event(kind, repository):
                             "action": "closed" if kind == "pr_merged" else "ready_for_review"}
 
 
-SAMPLES = ("failure", "pr_ready", "pr_merged", "release")
+SAMPLES = ("failure", "pr_failure", "pr_ready", "pr_merged", "release", "board_changes")
+
+
+def sample_board_changes(repository):
+    import telegram_board
+
+    def item(number, title, status, priority=None, labels=()):
+        return {
+            "id": f"sample-{number}",
+            "content": {
+                "__typename": "Issue", "number": number, "title": title,
+                "url": f"{repository['html_url']}/issues/{number}",
+                "labels": {"nodes": [{"name": name} for name in labels]},
+            },
+            "status": {"name": status}, "priority": {"name": priority} if priority else None,
+            "area": None,
+        }
+
+    before = telegram_board.snapshot([
+        item(1, "Sample task moving forward", "Ready", "Next"),
+        item(2, "Sample task leaving the board", "In progress"),
+    ])
+    after = telegram_board.snapshot([
+        item(1, "Sample task moving forward", "In progress", "Now"),
+        item(3, "Sample task just added", "Ready"),
+    ])
+    return telegram_board.render_changes(telegram_board.diff(before, after))
 
 
 def handle_dispatch(telegram, state, event):
     inputs = event.get("inputs") or {}
     sample = inputs.get("sample") or ""
+    if sample == "board_changes":
+        telegram.send(sample_board_changes(event["repository"]), silent=True)
+        return "Previewed board_changes."
     if sample in SAMPLES:
         # Preview against a throwaway state so real cards and failures are untouched.
         event_name, payload = sample_event(sample, event["repository"])

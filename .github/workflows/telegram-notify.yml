@@ -18,7 +18,7 @@ on:
         description: Preview a message layout with synthetic data instead
         required: false
         type: choice
-        options: ['', failure, pr_ready, pr_merged, release]
+        options: ['', failure, pr_failure, pr_ready, pr_merged, release, board_changes]
 
 permissions:
   contents: read
