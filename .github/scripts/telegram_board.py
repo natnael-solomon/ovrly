@@ -166,7 +166,7 @@ def plain_link(item):
 
 
 def render_changes(changes):
-    """Group changes by transition, one quoted line each, so a triage session reads compactly."""
+    """Group changes by transition; each group lists its items as quoted title/assignee rows."""
     groups = {}
     for item, kind, fields in changes:
         if kind == "added":
@@ -183,10 +183,17 @@ def render_changes(changes):
 
     count = len(changes)
     lines = [f"<b>Board</b> · {count} change{'' if count == 1 else 's'}", RULE]
-    lines.extend(
-        f"<blockquote>{key}  " + "  ".join(plain_link(i) for i in items) + "</blockquote>"
-        for key, items in groups.items()
-    )
+    for index, (key, items) in enumerate(groups.items()):
+        if index:
+            lines.append("")
+        lines.append(f"{key}  " + "  ".join(plain_link(i) for i in items))
+        for item in items:
+            title = escape(truncate(item["title"], TITLE_LIMIT))
+            if key == "<b>Removed</b>":
+                lines.append(f"<blockquote>{title}</blockquote>")
+            else:
+                who = ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
+                lines.append(f"<blockquote>{title} · <i>{who}</i></blockquote>")
     return "\n".join(lines)
 
 
