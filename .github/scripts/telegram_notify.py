@@ -31,6 +31,16 @@ def author(login):
     return f"<i>{escape(login)}</i>"
 
 
+def compose(headline, *body, meta=()):
+    """Shared skeleton: bold headline, blank line, body lines, then a quiet footer."""
+    lines = [f"<b>{headline}</b>", ""]
+    lines.extend(line for line in body if line)
+    footer = "  ·  ".join(part for part in meta if part)
+    if footer:
+        lines.append(footer)
+    return "\n".join(lines)
+
+
 def closing_issues(body):
     seen = []
     for number in CLOSING_KEYWORDS.findall(body or ""):
@@ -47,52 +57,67 @@ def render_failure(run, repository_url):
     if run.get("event") == "pull_request" and numbers:
         target = f"on PR #{numbers[0]}"
     verb = "timed out" if run["conclusion"] == "timed_out" else "failed"
-    header = f"<b>{escape(run['name'])} {verb} {target}</b> – {link(run['html_url'], 'link')}"
     sha = run["head_sha"]
     message = truncate(first_line((run.get("head_commit") or {}).get("message")), 120)
-    commit = link(f"{repository_url}/commit/{sha}", sha[:7])
-    return "\n".join([
-        header,
-        f"{escape(message)} · {commit}" if message else commit,
-        f"{author(run['actor']['login'])} · {relative_time()}",
-    ])
+    return compose(
+        f"{escape(run['name'])} {verb} {target}",
+        f"<blockquote>{escape(message)}</blockquote>" if message else "",
+        meta=(
+            link(run["html_url"], "link"),
+            link(f"{repository_url}/commit/{sha}", sha[:7]),
+            author(run["actor"]["login"]),
+            relative_time(),
+        ),
+    )
 
 
 def pr_status(pr):
     if pr.get("merged"):
-        text = f"merged into <code>{escape(pr['base']['ref'])}</code>"
+        text = f"Merged into <code>{escape(pr['base']['ref'])}</code>"
         closes = closing_issues(pr.get("body"))
         if closes:
             repository_url = pr["base"]["repo"]["html_url"]
             links = ", ".join(link(f"{repository_url}/issues/{n}", f"#{n}") for n in closes)
-            text += f" · Closes {links}"
+            text += f", closes {links}"
         return text
     if pr.get("state") == "closed":
-        return "closed without merge"
-    return "draft" if pr.get("draft") else "ready for review"
+        return "Closed without merge"
+    return "Draft" if pr.get("draft") else "Ready for review"
 
 
 def render_card(pr):
-    header = f"<b>PR #{pr['number']}</b> – {link(pr['html_url'], 'link')}"
-    title = escape(truncate(pr["title"], 100))
-    return f"{header}\n{title}\n{author(pr['user']['login'])} · {pr_status(pr)}"
+    return compose(
+        f"PR #{pr['number']}",
+        escape(truncate(pr["title"], 100)),
+        f"<i>{pr_status(pr)}</i>",
+        meta=(link(pr["html_url"], "link"), author(pr["user"]["login"])),
+    )
 
 
 def render_ready_ping(pr):
-    return f"<b>PR #{pr['number']}</b> ready for review – {link(pr['html_url'], 'link')} · {author(pr['user']['login'])}"
+    return compose(
+        f"PR #{pr['number']} is ready for review",
+        escape(truncate(pr["title"], 100)),
+        meta=(link(pr["html_url"], "link"), author(pr["user"]["login"])),
+    )
 
 
 def render_release(release, repository_name):
     title = release.get("name") or release["tag_name"]
-    kind = "pre-release published" if release.get("prerelease") else "published"
-    lines = [
-        f"<b>{escape(repository_name)} {escape(title)} {kind}</b> – {link(release['html_url'], 'link')}",
-        f"{author(release['author']['login'])} · {relative_time()}",
-    ]
+    kind = "Pre-release" if release.get("prerelease") else "Release"
     body = (release.get("body") or "").strip()
-    if body:
-        lines.append(f"<blockquote expandable>{escape(truncate(body, 1500))}</blockquote>")
-    return "\n".join(lines)
+    if len(body) > 1500:
+        body = body[:1499].rstrip() + "…"
+    return compose(
+        f"{kind} {escape(title)}",
+        f"<blockquote expandable>{escape(body)}</blockquote>" if body else "",
+        meta=(
+            link(release["html_url"], "link"),
+            escape(repository_name),
+            author(release["author"]["login"]),
+            relative_time(),
+        ),
+    )
 
 
 # --- Event handling ------------------------------------------------------------
@@ -160,8 +185,48 @@ def handle_release(telegram, state, event):
     return f"Posted release {event['release']['tag_name']}."
 
 
+def sample_event(kind, repository):
+    """Synthetic payloads so message layouts can be previewed from workflow_dispatch."""
+    url = repository["html_url"]
+    pr = {
+        "number": 0, "title": "feat(sample): preview pull request card", "draft": False,
+        "merged": kind == "pr_merged", "state": "closed" if kind == "pr_merged" else "open",
+        "body": "Closes #1" if kind == "pr_merged" else "",
+        "html_url": f"{url}/pulls", "user": {"login": "sample"},
+        "base": {"ref": "main", "repo": {"html_url": url}},
+    }
+    if kind == "failure":
+        return "workflow_run", {"repository": repository, "workflow_run": {
+            "id": 0, "name": "Android CI", "conclusion": "failure", "event": "push",
+            "head_branch": "sample", "head_sha": "0" * 40, "html_url": f"{url}/actions",
+            "head_commit": {"message": "fix(sample): preview failure post"},
+            "actor": {"login": "sample"}, "pull_requests": [],
+        }}
+    if kind == "release":
+        return "release", {"repository": repository, "release": {
+            "tag_name": "v0.0.0-sample", "name": None, "prerelease": True,
+            "body": "Preview of release notes.\n\n- one\n- two",
+            "html_url": f"{url}/releases", "author": {"login": "sample"},
+        }}
+    return "pull_request", {"repository": repository, "pull_request": pr,
+                            "action": "closed" if kind == "pr_merged" else "ready_for_review"}
+
+
+SAMPLES = ("failure", "pr_ready", "pr_merged", "release")
+
+
 def handle_dispatch(telegram, state, event):
-    message = (event.get("inputs") or {}).get("message") or "Telegram notifications test"
+    inputs = event.get("inputs") or {}
+    sample = inputs.get("sample") or ""
+    if sample in SAMPLES:
+        # Preview against a throwaway state so real cards and failures are untouched.
+        event_name, payload = sample_event(sample, event["repository"])
+        scratch = {}
+        if sample == "pr_merged":
+            upsert_card(telegram, scratch, dict(payload["pull_request"], merged=False, state="open"))
+        outcome = HANDLERS[event_name](telegram, scratch, payload)
+        return f"Previewed {sample}: {outcome}"
+    message = inputs.get("message") or "Telegram notifications test"
     telegram.send(f"{escape(message)} · {relative_time()}", silent=True)
     return "Posted test message."
 

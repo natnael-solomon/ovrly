@@ -14,6 +14,11 @@ on:
         description: Test message to post to the group
         required: false
         default: Telegram notifications test
+      sample:
+        description: Preview a message layout with synthetic data instead
+        required: false
+        type: choice
+        options: ['', failure, pr_ready, pr_merged, release]
 
 permissions:
   contents: read
