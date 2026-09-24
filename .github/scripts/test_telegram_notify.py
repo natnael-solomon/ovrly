@@ -37,8 +37,8 @@ def pr_event(action, number=42, draft=False, merged=False, state="open", user="d
 class RenderingTest(unittest.TestCase):
     def test_failure_on_pull_request(self):
         text = render_failure(run_event()["workflow_run"], REPO["html_url"])
-        self.assertIn('<a href="https://github.com/o/r/actions/runs/9">Android checks failed</a>', text)
-        self.assertIn('on PR <a href="https://github.com/o/r/pull/42">#42</a>', text)
+        self.assertTrue(text.startswith("<b>Android checks failed on PR #42</b> – "))
+        self.assertIn('<a href="https://github.com/o/r/actions/runs/9">link</a>', text)
         self.assertIn("fix(capture): release projection · <a", text)
         self.assertNotIn("Details", text)
         self.assertIn("<i>dev</i>", text)
@@ -46,17 +46,21 @@ class RenderingTest(unittest.TestCase):
     def test_failure_on_branch_and_timeout(self):
         run = run_event(conclusion="timed_out", event="push", numbers=(), branch="main")["workflow_run"]
         text = render_failure(run, REPO["html_url"])
-        self.assertIn("Android checks timed out</a> on <code>main</code>", text)
+        self.assertIn("Android checks timed out on <code>main</code></b>", text)
 
     def test_card_states(self):
         self.assertIn("· draft", render_card(pr_event("opened", draft=True)["pull_request"]))
         self.assertIn("· ready for review", render_card(pr_event("opened")["pull_request"]))
         merged = pr_event("closed", merged=True, state="closed", body="Closes #17, fixes #19")
         text = render_card(merged["pull_request"])
+        self.assertEqual(
+            text.split("\n")[:2],
+            ['<b>PR #42</b> – <a href="https://github.com/o/r/pull/42">link</a>',
+             "feat(android): share &lt;intake&gt;"],
+        )
         self.assertIn("merged into <code>main</code> · Closes", text)
         self.assertIn('<a href="https://github.com/o/r/issues/17">#17</a>', text)
         self.assertIn("issues/19", text)
-        self.assertIn("share &lt;intake&gt;", text)
         self.assertIn("closed without merge", render_card(pr_event("closed", state="closed")["pull_request"]))
 
     def test_closing_keywords(self):
@@ -69,7 +73,7 @@ class RenderingTest(unittest.TestCase):
             "html_url": "https://github.com/o/r/releases/tag/v0.3.0", "author": {"login": "owner"},
         }
         text = render_release(release, "ovrly")
-        self.assertIn("ovrly v0.3.0</a> pre-release published", text)
+        self.assertIn("ovrly v0.3.0 pre-release published</b> – <a", text)
         self.assertIn("<blockquote expandable>Notes &amp; more</blockquote>", text)
 
 

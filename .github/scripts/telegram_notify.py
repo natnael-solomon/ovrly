@@ -45,9 +45,9 @@ def render_failure(run, repository_url):
     target = f"on <code>{escape(run['head_branch'])}</code>"
     numbers = [pr["number"] for pr in run.get("pull_requests") or []]
     if run.get("event") == "pull_request" and numbers:
-        target = "on PR " + link(f"{repository_url}/pull/{numbers[0]}", f"#{numbers[0]}")
+        target = f"on PR #{numbers[0]}"
     verb = "timed out" if run["conclusion"] == "timed_out" else "failed"
-    header = f"<b>{link(run['html_url'], run['name'] + ' ' + verb)} {target}</b>"
+    header = f"<b>{escape(run['name'])} {verb} {target}</b> – {link(run['html_url'], 'link')}"
     sha = run["head_sha"]
     message = truncate(first_line((run.get("head_commit") or {}).get("message")), 120)
     commit = link(f"{repository_url}/commit/{sha}", sha[:7])
@@ -73,21 +73,20 @@ def pr_status(pr):
 
 
 def render_card(pr):
-    number = link(pr["html_url"], f"#{pr['number']}")
-    header = f"<b>PR {number} · {escape(truncate(pr['title'], 100))}</b>"
-    return f"{header}\n{author(pr['user']['login'])} · {pr_status(pr)}"
+    header = f"<b>PR #{pr['number']}</b> – {link(pr['html_url'], 'link')}"
+    title = escape(truncate(pr["title"], 100))
+    return f"{header}\n{title}\n{author(pr['user']['login'])} · {pr_status(pr)}"
 
 
 def render_ready_ping(pr):
-    number = link(pr["html_url"], f"#{pr['number']}")
-    return f"PR {number} ready for review · {author(pr['user']['login'])}"
+    return f"<b>PR #{pr['number']}</b> ready for review – {link(pr['html_url'], 'link')} · {author(pr['user']['login'])}"
 
 
 def render_release(release, repository_name):
     title = release.get("name") or release["tag_name"]
     kind = "pre-release published" if release.get("prerelease") else "published"
     lines = [
-        f"<b>{link(release['html_url'], repository_name + ' ' + title)} {kind}</b>",
+        f"<b>{escape(repository_name)} {escape(title)} {kind}</b> – {link(release['html_url'], 'link')}",
         f"{author(release['author']['login'])} · {relative_time()}",
     ]
     body = (release.get("body") or "").strip()
