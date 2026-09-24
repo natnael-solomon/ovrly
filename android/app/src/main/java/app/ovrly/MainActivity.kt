@@ -5,17 +5,25 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Resources
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.view.animation.PathInterpolator
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -23,9 +31,14 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.splashscreen.SplashScreenViewProvider
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -47,6 +60,7 @@ import app.ovrly.ui.AppShell
 import app.ovrly.overlay.DemoEntry
 import app.ovrly.overlay.demoEntry
 import app.ovrly.voice.VoiceController
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -55,6 +69,7 @@ class MainActivity : ComponentActivity() {
     private val model: CompanionViewModel by viewModels()
     private lateinit var voice: VoiceController
     private var gallery by mutableStateOf(false)
+    private var revealed by mutableStateOf(false)
     private var destination by mutableStateOf(AppDestination.SPACE)
     private var setup by mutableStateOf(false)
     private var overlayAllowed by mutableStateOf(false)
@@ -108,10 +123,13 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        installSplashScreen().setOnExitAnimationListener(::dismissSplash)
         AppearanceStore.load(this)
+        registerSplashTheme(AppearanceStore.dark.value)
         setTheme(if (AppearanceStore.dark.value) R.style.Theme_Ovrly_Dark else R.style.Theme_Ovrly)
         super.onCreate(savedInstanceState)
+        // A recreated Activity (rotation, process restore) has no splash to hand off from.
+        revealed = savedInstanceState != null
         gallery = savedInstanceState?.getBoolean("gallery") ?: false
         setup = savedInstanceState?.getBoolean("setup") ?: false
         destination = AppDestination.entries.firstOrNull { it.name == savedInstanceState?.getString("destination") }
@@ -136,6 +154,22 @@ class MainActivity : ComponentActivity() {
                 }
             }
             OvrlyTheme(dark) {
+                // Cold-start handoff: content rises and fades in on the same clock as the splash exit.
+                val reveal by animateFloatAsState(
+                    targetValue = if (revealed) 1f else 0f,
+                    animationSpec = tween(SPLASH_HANDOFF_MILLIS, easing = EmphasizedDecelerate),
+                    label = "splashHandoff",
+                )
+                LaunchedEffect(Unit) {
+                    // Safety net: if the platform never reports a splash exit, show content anyway.
+                    delay(SPLASH_HANDOFF_TIMEOUT_MILLIS)
+                    revealed = true
+                }
+                val rise = with(LocalDensity.current) { 24.dp.toPx() }
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    alpha = reveal
+                    translationY = (1f - reveal) * rise
+                }) {
                 BackHandler(enabled = gallery) { gallery = false }
                 if (gallery) {
                     GalleryScreen(onBack = { gallery = false }, onDemo = ::requestDemo)
@@ -159,7 +193,7 @@ class MainActivity : ComponentActivity() {
                         onDismissSetup = { setup = false },
                         onConfirmSetup = { setup = false; beginCaptureSetup() },
                         onStart = { setup = true },
-                        onStop = { startService(Intent(this, CaptureService::class.java).setAction(CaptureService.STOP)) },
+                        onStop = { startService(Intent(this@MainActivity, CaptureService::class.java).setAction(CaptureService.STOP)) },
                         onOverlayPermission = {
                             overlaySettings.launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, "package:$packageName".toUri()))
                         },
@@ -176,13 +210,13 @@ class MainActivity : ComponentActivity() {
                         onVoiceStart = {
                             if (!capture.busy) {
                                 closeDemoBeforeRealSession()
-                                if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) voice.start()
+                                if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) voice.start()
                                 else voicePermission.launch(Manifest.permission.RECORD_AUDIO)
                             }
                         },
                         onVoiceStop = { voice.stop("Voice stopped by you.") },
                         dark = dark,
-                        onDark = { AppearanceStore.setDark(this, it) },
+                        onDark = { AppearanceStore.setDark(this@MainActivity, it); registerSplashTheme(it) },
                         overlayStatus = (if (demo) "Demo / " else "") + blur.label,
                         demoActive = demo,
                         onDemo = ::requestDemo,
@@ -203,7 +237,35 @@ class MainActivity : ComponentActivity() {
                         dismissButton = { TextButton(onClick = { confirmDemo = false }) { Text("Keep my session") } },
                     )
                 }
+                }
             }
+        }
+    }
+
+    /**
+     * Runs once the first app frame exists, so it never delays content. The ring lifts and fades
+     * while the splash surface dissolves; [revealed] starts the matching content rise underneath
+     * on the same clock. Durations follow the system animator scale, so reduced-motion settings
+     * collapse the whole handoff to an instant swap.
+     */
+    private fun dismissSplash(splash: SplashScreenViewProvider) {
+        revealed = true
+        val ease = PathInterpolator(0.05f, 0.7f, 0.1f, 1f) // Material emphasized decelerate
+        splash.iconView.animate().scaleX(1.3f).scaleY(1.3f).alpha(0f)
+            .setDuration(SPLASH_HANDOFF_MILLIS.toLong()).setInterpolator(ease).start()
+        splash.view.animate().alpha(0f)
+            .setStartDelay(SPLASH_SURFACE_DELAY_MILLIS).setDuration(SPLASH_HANDOFF_MILLIS - SPLASH_SURFACE_DELAY_MILLIS)
+            .setInterpolator(ease).withEndAction(splash::remove).start()
+    }
+
+    /**
+     * Android 12+ stores a splash theme per app for future launches, which is the only way the
+     * system-drawn splash can follow the saved appearance. Dark is the manifest default, so it
+     * clears the override; Android 10/11 always show the Chrome-black compat splash.
+     */
+    private fun registerSplashTheme(dark: Boolean) {
+        if (Build.VERSION.SDK_INT >= 31) {
+            splashScreen.setSplashScreenTheme(if (dark) Resources.ID_NULL else R.style.Theme_Ovrly_Starting_Light)
         }
     }
 
@@ -352,5 +414,9 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_SETUP = "app.ovrly.OPEN_SETUP"
         const val ACTION_DETAILS = "app.ovrly.OPEN_DETAILS"
+        private const val SPLASH_HANDOFF_MILLIS = 900
+        private const val SPLASH_SURFACE_DELAY_MILLIS = 150L
+        private const val SPLASH_HANDOFF_TIMEOUT_MILLIS = 2500L
+        private val EmphasizedDecelerate = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
     }
 }
