@@ -144,6 +144,12 @@ removals. Draft items are ignored. The first run records a baseline and posts
 "Board tracking started" instead of listing everything. It can be run
 manually from Actions.
 
+**Telegram APK** (`telegram-apk.yml`) is manual only. It builds the unsigned
+release APK on the runner and uploads it to the group (Telegram's bot limit is
+50 MB) with a caption in the release-card style: linked version and commit,
+quoted commit subject, build type and author. It does not sign, publish or
+create a GitHub Release; WORKFLOW §7 still governs real releases.
+
 Both workflows only run from `main`: `workflow_run` and `schedule` triggers do
 not fire for other branches, so changes to them take effect after merging.
 Fork PRs cannot read secrets and produce no messages. GitHub disables scheduled

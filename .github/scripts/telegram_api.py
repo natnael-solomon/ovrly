@@ -6,6 +6,8 @@ import os
 import sys
 import urllib.error
 import urllib.request
+import uuid
+from pathlib import Path
 
 TELEGRAM_API = "https://api.telegram.org"
 GITHUB_API = "https://api.github.com"
@@ -117,6 +119,49 @@ class TelegramClient:
 
     def pin(self, message_id):
         self.call("pinChatMessage", message_id=message_id, disable_notification=True)
+
+    def send_document(self, path, caption, silent=True):
+        """Upload a file (multipart, up to 50 MB) with an HTML caption."""
+        path = Path(path)
+        fields = {
+            "chat_id": str(self.chat_id),
+            "caption": caption,
+            "parse_mode": "HTML",
+            "disable_notification": "true" if silent else "false",
+        }
+        body, content_type = encode_multipart(fields, "document", path.name, path.read_bytes())
+        url = f"{TELEGRAM_API}/bot{self._token}/sendDocument"
+        request = urllib.request.Request(url, data=body, method="POST")
+        request.add_header("Content-Type", content_type)
+        try:
+            with urllib.request.urlopen(request, timeout=300) as response:
+                payload = json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            try:
+                payload = json.loads(error.read())
+            except ValueError:
+                payload = {"description": f"HTTP {error.code}"}
+        except urllib.error.URLError as error:
+            raise TelegramError(f"sendDocument: network error: {error.reason}") from None
+        if not payload.get("ok"):
+            raise TelegramError(f"sendDocument: {payload.get('description', 'unknown error')}")
+        return payload["result"]["message_id"]
+
+
+def encode_multipart(fields, file_field, filename, data):
+    boundary = uuid.uuid4().hex
+    parts = []
+    for name, value in fields.items():
+        parts.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode()
+        )
+    parts.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+        f"filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n".encode()
+    )
+    parts.append(data)
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
 class VariableState:
