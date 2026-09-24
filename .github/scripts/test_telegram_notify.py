@@ -40,7 +40,7 @@ class RenderingTest(unittest.TestCase):
         lines = text.split("\n")
         self.assertEqual(lines[0], '<b><a href="https://github.com/o/r/actions/runs/9">Android checks failed on PR#42</a></b>')
         self.assertEqual(lines[1], RULE)
-        self.assertEqual(lines[2], "<blockquote>fix(capture): release pro…</blockquote>")
+        self.assertEqual(lines[2], "<blockquote>fix(capture): release pr…</blockquote>")
         self.assertEqual(lines[3], "")
         self.assertEqual(lines[4], '<b>Commit</b>  <a href="https://github.com/o/r/commit/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678">a1b2c3d</a>')
         self.assertEqual(lines[5], "<b>By</b>  <i>dev</i>")
