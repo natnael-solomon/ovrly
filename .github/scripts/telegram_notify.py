@@ -31,18 +31,13 @@ def author(login):
     return f"<i>{escape(login)}</i>"
 
 
-RULE = "─" * 18
-SEP = "  │  "
 GAP = object()
 
 
-def compose(headline, *body, meta=()):
-    """Shared skeleton: bold headline over a thin rule, body lines, then a quiet footer."""
-    lines = [f"<b>{headline}</b>", RULE]
+def compose(headline, *body):
+    """Shared skeleton: bold linked headline, then body lines; GAP inserts a blank line."""
+    lines = [f"<b>{headline}</b>"]
     lines.extend("" if line is GAP else line for line in body if line)
-    footer = SEP.join(part for part in meta if part)
-    if footer:
-        lines.extend(["", footer])
     return "\n".join(lines)
 
 

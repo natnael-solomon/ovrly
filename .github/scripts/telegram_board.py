@@ -123,11 +123,8 @@ def value(name):
     return f"<code>{escape(name)}</code>" if name else "—"
 
 
-RULE = "─" * 18
-
-
 def render_board(project, items, now, columns=DEFAULT_COLUMNS):
-    lines = [f'<b><a href="{escape(project["url"])}">Board</a></b>', RULE]
+    lines = [f'<b><a href="{escape(project["url"])}">Board</a></b>']
     ordered = sorted(items.values(), key=lambda item: item["number"])
     sections = [
         (column, [i for i in ordered if i["status"] == column and not i["blocked"]])
@@ -165,8 +162,8 @@ def render_changes(changes):
     header = f"<b>Board · {count} change{'' if count == 1 else 's'}</b>"
     if count > INLINE_LIMIT:
         # Blockquotes cannot nest, so a long list collapses into one expandable quote.
-        return f"{header}\n{RULE}\n<blockquote expandable>" + "\n\n".join(bullets) + "</blockquote>"
-    return "\n".join([header, RULE, *(f"<blockquote>{b}</blockquote>" for b in bullets)])
+        return f"{header}\n<blockquote expandable>" + "\n\n".join(bullets) + "</blockquote>"
+    return "\n".join([header, *(f"<blockquote>{b}</blockquote>" for b in bullets)])
 
 
 # --- Run -----------------------------------------------------------------------
