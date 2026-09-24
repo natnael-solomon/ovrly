@@ -1,6 +1,6 @@
 import unittest
 
-from telegram_notify import closing_issues, handle, render_card, render_failure, render_release
+from telegram_notify import RULE, closing_issues, handle, render_card, render_failure, render_release
 from test_telegram_api import FakeTelegram
 
 REPO = {"html_url": "https://github.com/o/r", "name": "r"}
@@ -38,28 +38,36 @@ class RenderingTest(unittest.TestCase):
     def test_failure_on_pull_request(self):
         text = render_failure(run_event()["workflow_run"], REPO["html_url"])
         lines = text.split("\n")
-        self.assertEqual(lines[0], "<b>Android checks failed on PR #42</b>")
-        self.assertEqual(lines[1], "")
+        self.assertEqual(lines[0], '<b><a href="https://github.com/o/r/actions/runs/9">Android checks failed on PR#42</a></b>')
+        self.assertEqual(lines[1], RULE)
         self.assertEqual(lines[2], "<blockquote>fix(capture): release projection</blockquote>")
-        self.assertIn('<a href="https://github.com/o/r/actions/runs/9">link</a>  ·  <a href="https://github.com/o/r/commit/a1b2', lines[3])
-        self.assertIn("<i>dev</i>  ·  <tg-time", lines[3])
+        self.assertEqual(lines[3], '<b>Commit</b>  <a href="https://github.com/o/r/commit/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678">a1b2c3d</a>')
+        self.assertEqual(lines[4], "<b>By</b>  <i>dev</i>")
+        self.assertEqual(lines[5], "")
+        self.assertTrue(lines[6].startswith("<tg-time"))
         self.assertNotIn("Details", text)
 
     def test_failure_on_branch_and_timeout(self):
         run = run_event(conclusion="timed_out", event="push", numbers=(), branch="main")["workflow_run"]
         text = render_failure(run, REPO["html_url"])
-        self.assertIn("<b>Android checks timed out on <code>main</code></b>", text)
+        self.assertIn(">Android checks timed out on main</a></b>", text)
 
     def test_card_states(self):
-        self.assertIn("<i>Draft</i>", render_card(pr_event("opened", draft=True)["pull_request"]))
-        self.assertIn("<i>Ready for review</i>", render_card(pr_event("opened")["pull_request"]))
+        self.assertIn("<b>Status</b>  Draft", render_card(pr_event("opened", draft=True)["pull_request"]))
+        self.assertIn("<b>Status</b>  Ready for review", render_card(pr_event("opened")["pull_request"]))
         merged = pr_event("closed", merged=True, state="closed", body="Closes #17, fixes #19")
         text = render_card(merged["pull_request"])
-        self.assertEqual(text.split("\n")[:3], ["<b>PR #42</b>", "", "feat(android): share &lt;intake&gt;"])
-        self.assertIn("<i>Merged into <code>main</code>, closes <a", text)
+        self.assertEqual(text.split("\n")[:4], [
+            '<b><a href="https://github.com/o/r/pull/42">PR#42</a></b>',
+            RULE,
+            "feat(android): share &lt;intake&gt;",
+            "",
+        ])
+        self.assertIn("<b>Status</b>  Merged into <code>main</code>, closes <a", text)
         self.assertIn('<a href="https://github.com/o/r/issues/17">#17</a>', text)
         self.assertIn("issues/19", text)
-        self.assertTrue(text.endswith('<a href="https://github.com/o/r/pull/42">link</a>  ·  <i>dev</i>'))
+        self.assertTrue(text.endswith("<b>By</b>  <i>dev</i>"))
+        self.assertNotIn(">link<", text)
         self.assertIn("Closed without merge", render_card(pr_event("closed", state="closed")["pull_request"]))
 
     def test_closing_keywords(self):
@@ -68,12 +76,14 @@ class RenderingTest(unittest.TestCase):
 
     def test_release_with_notes(self):
         release = {
-            "tag_name": "v0.3.0", "name": None, "prerelease": True, "body": "Notes & more",
+            "tag_name": "v0.3.0", "name": None, "prerelease": True, "body": "Notes & more\n- item",
             "html_url": "https://github.com/o/r/releases/tag/v0.3.0", "author": {"login": "owner"},
         }
         text = render_release(release, "ovrly")
-        self.assertTrue(text.startswith("<b>Pre-release v0.3.0</b>\n\n<blockquote expandable>Notes &amp; more</blockquote>\n"))
-        self.assertIn("ovrly  ·  <i>owner</i>", text)
+        self.assertTrue(text.startswith(
+            f'<b><a href="https://github.com/o/r/releases/tag/v0.3.0">ovrly v0.3.0</a></b>\n{RULE}\n<i>Pre-release</i>\n'
+            "<blockquote expandable>Notes &amp; more\n- item</blockquote>\n<b>By</b>  <i>owner</i>\n\n<tg-time"
+        ))
 
 
 class WorkflowRunTest(unittest.TestCase):
@@ -113,7 +123,7 @@ class PullRequestTest(unittest.TestCase):
 
         handle("pull_request", pr_event("ready_for_review"), telegram, state)
         self.assertEqual(telegram.methods(), ["sendMessage", "editMessageText", "sendMessage"])
-        self.assertIn("is ready for review</b>", telegram.sent()[-1])
+        self.assertIn("is ready for review</a></b>", telegram.sent()[-1])
         self.assertTrue(telegram.calls[-1][1]["disable_notification"])
 
         handle("workflow_run", run_event(), telegram, state)

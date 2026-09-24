@@ -1,6 +1,6 @@
 import unittest
 
-from telegram_board import diff, fetch_project, render_board, render_changes, run, snapshot
+from telegram_board import RULE, diff, fetch_project, render_board, render_changes, run, snapshot
 from test_telegram_api import FakeTelegram
 
 PROJECT = {"title": "ovrly development", "url": "https://github.com/users/o/projects/3"}
@@ -62,10 +62,9 @@ class RenderTest(unittest.TestCase):
             node("e", 61, "Backlog"),
         ])
         text = render_board(PROJECT, items, now=1700000000)
-        self.assertIn('<b>Board</b> · <a href="https://github.com/users/o/projects/3">ovrly development</a>', text)
-        self.assertIn("<b>Ready</b>\n• <a href=\"https://github.com/o/r/issues/17\">#17</a> Task 17", text)
-        self.assertIn("<b>In progress</b>\n• <a", text)
-        self.assertIn("<b>Blocked</b>\n• <a href=\"https://github.com/o/r/issues/33\">#33</a> old &lt;spike&gt;", text)
+        self.assertTrue(text.startswith(f'<b><a href="https://github.com/users/o/projects/3">Board</a></b>\n{RULE}\n<b>Ready</b>\n'))
+        self.assertIn("<b>Ready</b>\n• <a href=\"https://github.com/o/r/issues/17\">#17</a> Task 17\n\n<b>In progress</b>\n• <a", text)
+        self.assertIn("\n\n<b>Blocked</b>\n• <a href=\"https://github.com/o/r/issues/33\">#33</a> old &lt;spike&gt;\n\n<tg-time", text)
         self.assertNotIn("In review", text)
         self.assertNotIn("#60", text)
         self.assertNotIn("#61", text)
@@ -80,18 +79,18 @@ class RenderTest(unittest.TestCase):
         before = snapshot([node("a", 1, "Ready", "Next")])
         after = snapshot([node("a", 1, "In review", "Now", "Android"), node("b", 2, None)])
         text = render_changes(diff(before, after))
-        self.assertTrue(text.startswith("<b>Board</b> · 2 changes\n"))
-        self.assertIn("— <code>Ready</code> → <code>In review</code> · Priority <code>Next</code> → <code>Now</code> · Area — → <code>Android</code>", text)
-        self.assertIn("#2</a> Task 2 — added to —", text)
+        self.assertTrue(text.startswith(f"<b>Board · 2 changes</b>\n{RULE}\n• "))
+        self.assertIn("\n   ↳ <code>Ready</code> → <code>In review</code> │ Priority <code>Next</code> → <code>Now</code> │ Area — → <code>Android</code>", text)
+        self.assertIn("#2</a> Task 2\n   ↳ added to —", text)
         self.assertNotIn("blockquote", text)
 
         many = diff({}, snapshot([node(str(i), i, "Backlog") for i in range(9)]))
-        self.assertIn("<blockquote expandable>", render_changes(many))
+        self.assertIn(f"{RULE}\n<blockquote expandable>", render_changes(many))
 
     def test_single_change_grammar(self):
         text = render_changes(diff(snapshot([node("a", 1, "Ready")]), {}))
-        self.assertIn("1 change\n", text)
-        self.assertIn("— removed", text)
+        self.assertIn("1 change</b>\n", text)
+        self.assertIn("↳ removed", text)
 
 
 class RunTest(unittest.TestCase):

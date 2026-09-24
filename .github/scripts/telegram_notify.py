@@ -31,14 +31,23 @@ def author(login):
     return f"<i>{escape(login)}</i>"
 
 
+RULE = "─" * 18
+SEP = "  │  "
+GAP = object()
+
+
 def compose(headline, *body, meta=()):
-    """Shared skeleton: bold headline, blank line, body lines, then a quiet footer."""
-    lines = [f"<b>{headline}</b>", ""]
-    lines.extend(line for line in body if line)
-    footer = "  ·  ".join(part for part in meta if part)
+    """Shared skeleton: bold headline over a thin rule, body lines, then a quiet footer."""
+    lines = [f"<b>{headline}</b>", RULE]
+    lines.extend("" if line is GAP else line for line in body if line)
+    footer = SEP.join(part for part in meta if part)
     if footer:
-        lines.append(footer)
+        lines.extend(["", footer])
     return "\n".join(lines)
+
+
+def field(label, value):
+    return f"<b>{label}</b>  {value}"
 
 
 def closing_issues(body):
@@ -52,22 +61,19 @@ def closing_issues(body):
 # --- Rendering -----------------------------------------------------------------
 
 def render_failure(run, repository_url):
-    target = f"on <code>{escape(run['head_branch'])}</code>"
+    target = f"on {run['head_branch']}"
     numbers = [pr["number"] for pr in run.get("pull_requests") or []]
     if run.get("event") == "pull_request" and numbers:
-        target = f"on PR #{numbers[0]}"
+        target = f"on PR#{numbers[0]}"
     verb = "timed out" if run["conclusion"] == "timed_out" else "failed"
     sha = run["head_sha"]
     message = truncate(first_line((run.get("head_commit") or {}).get("message")), 120)
     return compose(
-        f"{escape(run['name'])} {verb} {target}",
+        link(run["html_url"], f"{run['name']} {verb} {target}"),
         f"<blockquote>{escape(message)}</blockquote>" if message else "",
-        meta=(
-            link(run["html_url"], "link"),
-            link(f"{repository_url}/commit/{sha}", sha[:7]),
-            author(run["actor"]["login"]),
-            relative_time(),
-        ),
+        field("Commit", link(f"{repository_url}/commit/{sha}", sha[:7])),
+        field("By", author(run["actor"]["login"])),
+        meta=(relative_time(),),
     )
 
 
@@ -87,18 +93,19 @@ def pr_status(pr):
 
 def render_card(pr):
     return compose(
-        f"PR #{pr['number']}",
+        link(pr["html_url"], f"PR#{pr['number']}"),
         escape(truncate(pr["title"], 100)),
-        f"<i>{pr_status(pr)}</i>",
-        meta=(link(pr["html_url"], "link"), author(pr["user"]["login"])),
+        GAP,
+        field("Status", pr_status(pr)),
+        field("By", author(pr["user"]["login"])),
     )
 
 
 def render_ready_ping(pr):
     return compose(
-        f"PR #{pr['number']} is ready for review",
+        link(pr["html_url"], f"PR#{pr['number']} is ready for review"),
         escape(truncate(pr["title"], 100)),
-        meta=(link(pr["html_url"], "link"), author(pr["user"]["login"])),
+        meta=(author(pr["user"]["login"]),),
     )
 
 
@@ -109,14 +116,11 @@ def render_release(release, repository_name):
     if len(body) > 1500:
         body = body[:1499].rstrip() + "…"
     return compose(
-        f"{kind} {escape(title)}",
+        link(release["html_url"], f"{repository_name} {title}"),
+        f"<i>{kind}</i>",
         f"<blockquote expandable>{escape(body)}</blockquote>" if body else "",
-        meta=(
-            link(release["html_url"], "link"),
-            escape(repository_name),
-            author(release["author"]["login"]),
-            relative_time(),
-        ),
+        field("By", author(release["author"]["login"])),
+        meta=(relative_time(),),
     )
 
 

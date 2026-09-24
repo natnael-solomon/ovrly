@@ -123,8 +123,11 @@ def value(name):
     return f"<code>{escape(name)}</code>" if name else "—"
 
 
+RULE = "─" * 18
+
+
 def render_board(project, items, now, columns=DEFAULT_COLUMNS):
-    lines = [f'<b>Board</b> · <a href="{escape(project["url"])}">{escape(project["title"])}</a>']
+    lines = [f'<b><a href="{escape(project["url"])}">Board</a></b>', RULE]
     ordered = sorted(items.values(), key=lambda item: item["number"])
     sections = [
         (column, [i for i in ordered if i["status"] == column and not i["blocked"]])
@@ -134,10 +137,13 @@ def render_board(project, items, now, columns=DEFAULT_COLUMNS):
     populated = [(name, rows) for name, rows in sections if rows]
     if not populated:
         lines.append("Nothing in progress.")
-    for name, rows in populated:
+    for index, (name, rows) in enumerate(populated):
+        if index:
+            lines.append("")
         lines.append(f"<b>{escape(name)}</b>")
         lines.extend(f"• {item_link(item)}" for item in rows)
-    lines.append(f'Updated <tg-time unix="{int(now)}" format="r">just now</tg-time>')
+    lines.append("")
+    lines.append(f'<tg-time unix="{int(now)}" format="r">just now</tg-time>')
     return "\n".join(lines)
 
 
@@ -153,13 +159,13 @@ def render_changes(changes):
             for field, old, new in fields:
                 label = "" if field == "status" else f"{FIELD_LABELS[field]} "
                 parts.append(f"{label}{value(old)} → {value(new)}")
-            detail = " · ".join(parts)
-        bullets.append(f"• {item_link(item)} — {detail}")
+            detail = " │ ".join(parts)
+        bullets.append(f"• {item_link(item)}\n   ↳ {detail}")
     count = len(bullets)
-    header = f"<b>Board</b> · {count} change{'' if count == 1 else 's'}"
+    header = f"<b>Board · {count} change{'' if count == 1 else 's'}</b>"
     if count > INLINE_LIMIT:
-        return f"{header}\n<blockquote expandable>" + "\n".join(bullets) + "</blockquote>"
-    return "\n".join([header, *bullets])
+        return f"{header}\n{RULE}\n<blockquote expandable>" + "\n".join(bullets) + "</blockquote>"
+    return "\n".join([header, RULE, *bullets])
 
 
 # --- Run -----------------------------------------------------------------------
