@@ -254,9 +254,12 @@ def validate_dataset(directory, *, frozen=False, media_root=None):
             groups[key] = clip["split"]
             if media_root is not None:
                 root = media_root.resolve()
-                path = root.joinpath(*relative.parts).resolve()
+                path = root.joinpath(*relative.parts)
                 require(path.is_relative_to(root), loc + ".media.path", "media escapes root")
-                require(digest(path) == media["sha256"], loc + ".media.sha256", "media SHA-256 mismatch")
+                resolved = path.resolve()
+                require(resolved.is_relative_to(root), loc + ".media.path", "media escapes root")
+                require(digest(resolved) == media["sha256"], loc + ".media.sha256",
+                        "media SHA-256 mismatch")
         coverage.update(clip["coverage"])
     if frozen:
         required = set(schemas["clip"]["properties"]["coverage"]["items"]["enum"])

@@ -330,6 +330,22 @@ class DatasetTest(unittest.TestCase):
         with self.assertRaisesRegex(Invalid, "escapes root"):
             validate_dataset(self.directory, frozen=True, media_root=self.directory / "media")
 
+    def test_media_symlink_within_root_is_allowed(self):
+        self.frozen_fixture()
+        path = self.directory / "media" / "clip-0.bin"
+        target = self.directory / "media" / "clip-0-target.bin"
+        content = path.read_bytes()
+        target.write_bytes(content)
+        path.unlink()
+        try:
+            path.symlink_to(target)
+        except OSError as error:
+            self.skipTest(f"Symlink creation unavailable: {error}")
+        self.assertEqual(
+            10,
+            validate_dataset(self.directory, frozen=True, media_root=self.directory / "media"),
+        )
+
     def test_cli_disclosures_and_failure_exit(self):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(0, main([str(self.directory)]))
