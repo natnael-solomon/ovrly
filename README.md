@@ -12,7 +12,7 @@ Deadlines and checkpoints (CP0–CP3) are the board milestones. Decisions are re
 
 ## Get started
 
-Requires JDK 21, Android SDK platform 37 and Build Tools 36.0.0. The project builds with Gradle 9.7.1 (wrapper) and Android Gradle plugin 9.4.1; lint runs with warnings as errors. Open `android` in Android Studio, or follow the [Windows, WSL and Linux build instructions](android/README.md#setup).
+Requires JDK 21, Android SDK platform 37 and Build Tools 36.0.0. The project builds with Gradle 9.8.0 (wrapper) and Android Gradle plugin 9.4.1; lint runs with warnings as errors. Open `android` in Android Studio, or follow the [Windows, WSL and Linux build instructions](android/README.md#setup).
 
 - [Android app](android/README.md)
 - [Backend status](backend/README.md)
