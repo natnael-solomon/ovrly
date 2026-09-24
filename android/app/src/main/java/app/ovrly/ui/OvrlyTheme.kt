@@ -1,6 +1,11 @@
 package app.ovrly.ui
 
 import android.content.Context
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,11 +21,21 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -165,6 +180,45 @@ internal fun ThemeChoice(dark: Boolean, onDark: (Boolean) -> Unit) {
     }
 }
 
+/**
+ * A soft diagonal highlight that sweeps across the content every few seconds, clipped to the
+ * content's own pixels so only the chrome lights up. The sweep offset is read inside the draw
+ * phase, so frames do not recompose; the animation pauses automatically when the composable is
+ * off screen and collapses to a single static frame under the reduced-motion animator setting.
+ */
+internal fun Modifier.chromeGlare(strength: Float = 0.34f): Modifier = composed {
+    val transition = rememberInfiniteTransition(label = "chromeGlare")
+    val sweep by transition.animateFloat(
+        initialValue = -0.6f, targetValue = 1.6f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 5200
+                -0.6f at 0
+                -0.6f at 3400 // rest between passes
+                1.6f at 5200 using CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+            },
+        ),
+        label = "sweep",
+    )
+    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithCache {
+            val band = size.width * 0.28f
+            val glare = Brush.linearGradient(
+                0f to Color.Transparent,
+                0.5f to Color.White.copy(alpha = strength),
+                1f to Color.Transparent,
+                start = Offset(0f, size.height), end = Offset(band, 0f),
+                tileMode = TileMode.Decal,
+            )
+            onDrawWithContent {
+                drawContent()
+                val x = sweep * size.width
+                translate(left = x) {
+                    drawRect(glare, topLeft = Offset(0f, 0f), size = Size(band, size.height), blendMode = BlendMode.SrcAtop)
+                }
+            }
+        }
+}
 @Composable
 internal fun Modifier.mockGlass(higherOpacity: Boolean = false): Modifier {
     val p = LocalOvrlyPalette.current

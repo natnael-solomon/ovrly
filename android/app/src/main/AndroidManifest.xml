@@ -13,7 +13,8 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:allowAudioPlaybackCapture="false"
         android:label="ovrly"
-        android:icon="@drawable/ic_ovrly"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.Ovrly.Dark"
         android:usesCleartextTraffic="false">
