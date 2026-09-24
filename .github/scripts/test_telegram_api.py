@@ -35,8 +35,8 @@ class EscapingTest(unittest.TestCase):
     def test_display_names(self):
         from telegram_api import display_name
         self.assertEqual(display_name("natnael-solomon"), "sol")
-        self.assertEqual(display_name("nattyy1"), "sancho")
-        self.assertEqual(display_name("neb-iyu"), "neba")
+        self.assertEqual(display_name("Nattyy-1"), "sancho")
+        self.assertEqual(display_name("Neb-iyu"), "neba")
         self.assertEqual(display_name("some<one>"), "some&lt;one&gt;")
 
     def test_truncate_collapses_whitespace(self):
