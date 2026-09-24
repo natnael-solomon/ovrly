@@ -183,12 +183,12 @@ def handle(event_name, event, telegram, state):
 
 
 def main():
-    bot_token, chat_id, github_token, repository = require_env(
-        "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN", "GITHUB_REPOSITORY"
+    bot_token, chat_id, state_token, repository = require_env(
+        "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "STATE_TOKEN", "GITHUB_REPOSITORY"
     )
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
     telegram = TelegramClient(bot_token, chat_id)
-    store = VariableState(repository, github_token, STATE_VARIABLE)
+    store = VariableState(repository, state_token, STATE_VARIABLE)
     state = store.load()
     before = json.dumps(state, sort_keys=True)
     outcome = handle(os.environ["GITHUB_EVENT_NAME"], event, telegram, state)
