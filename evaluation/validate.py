@@ -259,6 +259,7 @@ def validate_dataset(directory, *, frozen=False, media_root=None):
                 require(path.exists(), loc + ".media.path", "media path not found")
                 resolved = path.resolve()
                 require(resolved.is_relative_to(root), loc + ".media.path", "media escapes root")
+                require(resolved.is_file(), loc + ".media.path", "media path must reference a file")
                 require(digest(resolved) == media["sha256"], loc + ".media.sha256",
                         "media SHA-256 mismatch")
         coverage.update(clip["coverage"])

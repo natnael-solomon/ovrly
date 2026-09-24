@@ -352,6 +352,14 @@ class DatasetTest(unittest.TestCase):
         with self.assertRaisesRegex(Invalid, "media path not found"):
             validate_dataset(self.directory, frozen=True, media_root=self.directory / "media")
 
+    def test_directory_media_entry_is_rejected(self):
+        self.frozen_fixture()
+        path = self.directory / "media" / "clip-0.bin"
+        path.unlink()
+        path.mkdir()
+        with self.assertRaisesRegex(Invalid, "media path must reference a file"):
+            validate_dataset(self.directory, frozen=True, media_root=self.directory / "media")
+
     def test_cli_disclosures_and_failure_exit(self):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(0, main([str(self.directory)]))
