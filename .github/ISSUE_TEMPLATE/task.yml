@@ -35,7 +35,7 @@ body:
     id: depends
     attributes:
       label: Depends on
-      description: Blocking issues as `#n` links, or "—". Add the `blocked` label while any of them is open.
+      description: Blocking issues as `#n` links, or "none". Add the `blocked` label while any of them is open.
       placeholder: "Blocked by #12"
   - type: dropdown
     id: area
