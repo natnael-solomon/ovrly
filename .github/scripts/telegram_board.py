@@ -161,27 +161,33 @@ def details_block(items):
     return f"<blockquote expandable>{chr(10).join(rows)}</blockquote>" if rows else ""
 
 
+def plain_link(item):
+    return f'<a href="{escape(item["url"])}">#{item["number"]}</a>'
+
+
 def render_changes(changes):
-    """Group changes by transition so a triage session reads as a few lines, not a list."""
+    """Group changes by transition, one quoted line each, so a triage session reads compactly."""
     groups = {}
     for item, kind, fields in changes:
         if kind == "added":
-            keys = [f"Added to {value(item['status'])}"]
+            keys = [f"<b>Added</b> {value(item['status'])}"]
         elif kind == "removed":
-            keys = ["Removed"]
+            keys = ["<b>Removed</b>"]
         else:
             keys = []
             for field, old, new in fields:
-                prefix = "" if field == "status" else f"{FIELD_LABELS[field]} "
-                keys.append(f"{prefix}{value(old)} → {value(new)}")
+                prefix = "" if field == "status" else f"<b>{FIELD_LABELS[field]}</b> "
+                keys.append(f"{prefix}{value(old)} <b>→</b> {value(new)}")
         for key in keys:
             groups.setdefault(key, []).append(item)
 
     count = len(changes)
     lines = [f"<b>Board</b> · {count} change{'' if count == 1 else 's'}", RULE]
-    lines.extend(f"<b>{key}</b>  " + "  ".join(number_link(i) for i in items) for key, items in groups.items())
-    lines.append(details_block([item for item, _, _ in changes]))
-    return "\n".join(line for line in lines if line)
+    lines.extend(
+        f"<blockquote>{key}  " + "  ".join(plain_link(i) for i in items) + "</blockquote>"
+        for key, items in groups.items()
+    )
+    return "\n".join(lines)
 
 
 # --- Run -----------------------------------------------------------------------

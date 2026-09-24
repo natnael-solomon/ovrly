@@ -224,12 +224,12 @@ class OtherEventsTest(unittest.TestCase):
             for n in (4, 5, 6, 7)
         }
         text = sample_board_changes(REPO, items)
-        self.assertIn("<code>Ready</code> → <code>In progress</code></b>  <a href=\"u4\">#4</a>", text)
-        self.assertIn("<code>Ready</code> → <code>In review</code></b>  <a href=\"u5\">#5</a>", text)
+        self.assertIn("<code>Ready</code> <b>→</b> <code>In progress</code>  <a href=\"u4\">#4</a>", text)
+        self.assertIn("<code>Ready</code> <b>→</b> <code>In review</code>  <a href=\"u5\">#5</a>", text)
         self.assertIn("<b>Removed</b>  <a href=\"u6\">#6</a>", text)
         self.assertNotIn("#7", text)
         self.assertEqual(items["i4"]["status"], "Ready", "must not mutate the real snapshot")
-        self.assertIn("Sample task", sample_board_changes(REPO, None))
+        self.assertIn("issues/1\">#1</a>", sample_board_changes(REPO, None))
 
     def test_unknown_event(self):
         self.assertIn("No handler", handle("issues", {}, FakeTelegram(), {}))
