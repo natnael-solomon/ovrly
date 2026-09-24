@@ -1,19 +1,20 @@
 import unittest
 
 from telegram_api import TelegramError
-from telegram_board import diff, fetch_project, render_board, render_changes, run, snapshot
+from telegram_board import RULE, diff, fetch_project, render_board, render_changes, run, snapshot
 from test_telegram_api import FakeTelegram
 
 PROJECT = {"title": "ovrly development", "url": "https://github.com/users/o/projects/3"}
 
 
-def node(item_id, number, status, priority=None, area=None, labels=(), kind="Issue", title=None):
+def node(item_id, number, status, priority=None, area=None, labels=(), kind="Issue", title=None, assignees=("dev",)):
     return {
         "id": item_id,
         "content": {
             "__typename": kind, "number": number, "title": title or f"Task {number}",
             "url": f"https://github.com/o/r/issues/{number}",
             "labels": {"nodes": [{"name": name} for name in labels]},
+            "assignees": {"nodes": [{"login": login} for login in assignees]},
         },
         "status": {"name": status} if status else None,
         "priority": {"name": priority} if priority else None,
@@ -36,6 +37,8 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(item["priority"], "Now")
         self.assertEqual(item["area"], "Android")
         self.assertTrue(item["blocked"])
+        self.assertEqual(item["assignees"], ["dev"])
+        self.assertEqual(snapshot([node("b", 2, "Ready", assignees=())])["b"]["assignees"], [])
 
 
 class DiffTest(unittest.TestCase):
@@ -57,42 +60,59 @@ class RenderTest(unittest.TestCase):
     def test_board_sections_and_blocked(self):
         items = snapshot([
             node("a", 42, "In progress", title="share intake"),
-            node("b", 17, "Ready"),
+            node("b", 17, "Ready", assignees=()),
             node("c", 33, "In progress", labels=["blocked"], title="old <spike>"),
             node("d", 60, "Done"),
             node("e", 61, "Backlog"),
         ])
         text = render_board(PROJECT, items, now=1700000000)
-        self.assertIn('<b>Board</b> · <a href="https://github.com/users/o/projects/3">ovrly development</a>', text)
-        self.assertIn("<b>Ready</b>\n• <a href=\"https://github.com/o/r/issues/17\">#17</a> Task 17", text)
-        self.assertIn("<b>In progress</b>\n• <a", text)
-        self.assertIn("<b>Blocked</b>\n• <a href=\"https://github.com/o/r/issues/33\">#33</a> old &lt;spike&gt;", text)
+        lines = text.split("\n")
+        self.assertEqual(lines[0], '<b><a href="https://github.com/users/o/projects/3">Board</a></b>')
+        self.assertEqual(lines[1], RULE)
+        self.assertEqual(lines[2], "<b>Ready</b>")
+        self.assertEqual(lines[3], '<blockquote><a href="https://github.com/o/r/issues/17">#17 Task 17</a> · wef</blockquote>')
+        self.assertEqual(lines[4], "<b>In progress</b>")
+        self.assertEqual(lines[5], '<blockquote><a href="https://github.com/o/r/issues/42">#42 share intake</a> · dev</blockquote>')
+        self.assertEqual(lines[6], "<b>Blocked</b>")
+        self.assertEqual(lines[7], '<blockquote><a href="https://github.com/o/r/issues/33">#33 old &lt;spike&gt;</a> · dev</blockquote>')
+        self.assertEqual(lines[8], "")
+        self.assertTrue(lines[9].startswith('<tg-time unix="1700000000" format="r">'))
+        self.assertEqual(len(lines), 10)
         self.assertNotIn("In review", text)
         self.assertNotIn("#60", text)
         self.assertNotIn("#61", text)
-        self.assertIn('<tg-time unix="1700000000" format="r">', text)
-        # Blocked items appear once, not also under their status column.
+        self.assertNotIn("<s>", text)
+        # Blocked items appear only under Blocked, not also under their status column.
         self.assertEqual(text.count("#33"), 1)
 
     def test_empty_board(self):
-        self.assertIn("Nothing in progress.", render_board(PROJECT, {}, now=0))
-
-    def test_changes_inline_and_expandable(self):
-        before = snapshot([node("a", 1, "Ready", "Next")])
-        after = snapshot([node("a", 1, "In review", "Now", "Android"), node("b", 2, None)])
-        text = render_changes(diff(before, after))
-        self.assertTrue(text.startswith("<b>Board</b> · 2 changes\n"))
-        self.assertIn("— <code>Ready</code> → <code>In review</code> · Priority <code>Next</code> → <code>Now</code> · Area — → <code>Android</code>", text)
-        self.assertIn("#2</a> Task 2 — added to —", text)
+        text = render_board(PROJECT, {}, now=0)
+        self.assertIn("Nothing in progress.", text)
         self.assertNotIn("blockquote", text)
 
-        many = diff({}, snapshot([node(str(i), i, "Backlog") for i in range(9)]))
-        self.assertIn("<blockquote expandable>", render_changes(many))
+    def test_changes_group_by_transition(self):
+        before = snapshot([node("a", 1, "Ready", "Next"), node("c", 3, "Ready"), node("d", 4, "Backlog")])
+        after = snapshot([
+            node("a", 1, "In review", "Now", "Android"),
+            node("c", 3, "In review"),
+            node("b", 2, None, assignees=()),
+        ])
+        text = render_changes(diff(before, after))
+        lines = text.split("\n")
+        self.assertEqual(lines[:2], ["<b>Board</b> · 4 changes", RULE])
+        self.assertEqual(lines[2], '<code>Ready</code> <b>→</b> <code>In review</code><blockquote><a href="https://github.com/o/r/issues/1">#1 Task 1</a> · dev')
+        self.assertEqual(lines[3], '<a href="https://github.com/o/r/issues/3">#3 Task 3</a> · dev</blockquote>')
+        self.assertEqual(lines[4], '<b>Priority</b> <code>Next</code> <b>→</b> <code>Now</code><blockquote><a href="https://github.com/o/r/issues/1">#1 Task 1</a> · dev</blockquote>')
+        self.assertEqual(lines[5], '<b>Area</b> — <b>→</b> <code>Android</code><blockquote><a href="https://github.com/o/r/issues/1">#1 Task 1</a> · dev</blockquote>')
+        self.assertEqual(lines[6], '<b>Added</b> —<blockquote><a href="https://github.com/o/r/issues/2">#2 Task 2</a> · wef</blockquote>')
+        self.assertEqual(lines[7], '<b>Removed</b><blockquote><a href="https://github.com/o/r/issues/4">#4 Task 4</a></blockquote>')
+        self.assertEqual(len(lines), 8)
+        self.assertNotIn("<s>", text)
 
     def test_single_change_grammar(self):
         text = render_changes(diff(snapshot([node("a", 1, "Ready")]), {}))
-        self.assertIn("1 change\n", text)
-        self.assertIn("— removed", text)
+        self.assertIn("· 1 change\n", text)
+        self.assertIn("\n<b>Removed</b><blockquote><a", text)
 
 
 class RunTest(unittest.TestCase):
@@ -113,13 +133,23 @@ class RunTest(unittest.TestCase):
         self.assertEqual(run(telegram, state, PROJECT, nodes, now=1), "No board changes.")
         self.assertEqual(telegram.calls, [])
 
-    def test_manual_dispatch_refreshes_unchanged_board(self):
+    def test_manual_run_re_renders_without_delta(self):
         telegram, state = FakeTelegram(), {}
         nodes = [node("a", 1, "Ready")]
         run(telegram, state, PROJECT, nodes, now=0)
         telegram.calls.clear()
-        self.assertEqual(run(telegram, state, PROJECT, nodes, now=1, force_refresh=True), "Board refreshed.")
+        self.assertEqual(run(telegram, state, PROJECT, nodes, now=1, force=True), "Board re-rendered.")
         self.assertEqual(telegram.methods(), ["editMessageText"])
+
+    def test_layout_change_re_renders_on_next_tick(self):
+        telegram, state = FakeTelegram(), {}
+        nodes = [node("a", 1, "Ready")]
+        run(telegram, state, PROJECT, nodes, now=0)
+        state["layout"] = "rendered by an older version"
+        telegram.calls.clear()
+        self.assertEqual(run(telegram, state, PROJECT, nodes, now=1), "Board re-rendered.")
+        self.assertEqual(telegram.methods(), ["editMessageText"])
+        self.assertNotEqual(state["layout"], "rendered by an older version")
 
     def test_change_posts_delta_and_edits_board(self):
         telegram, state = FakeTelegram(), {}
@@ -151,6 +181,7 @@ class RunTest(unittest.TestCase):
         self.assertEqual(telegram.methods(), ["sendMessage", "pinChatMessage", "sendMessage"])
         self.assertEqual(state["message_id"], 101)
         self.assertIn("1 items", outcome)
+        self.assertIn("Baseline", outcome)
 
 
 class FetchTest(unittest.TestCase):

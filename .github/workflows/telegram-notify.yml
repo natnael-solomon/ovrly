@@ -8,12 +8,6 @@ on:
     types: [opened, ready_for_review, closed]
   release:
     types: [published]
-  workflow_dispatch:
-    inputs:
-      message:
-        description: Test message to post to the group
-        required: false
-        default: Telegram notifications test
 
 permissions:
   contents: read

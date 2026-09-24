@@ -29,6 +29,18 @@ def escape(text):
     return html.escape(str(text), quote=False)
 
 
+# Short team names shown in place of GitHub logins; unmapped logins appear as-is.
+DISPLAY_NAMES = {
+    "natnael-solomon": "sol",
+    "nattyy-1": "sancho",
+    "neb-iyu": "neba",
+}
+
+
+def display_name(login):
+    return escape(DISPLAY_NAMES.get(str(login).lower(), login))
+
+
 def truncate(text, limit):
     text = " ".join(str(text).split())
     if len(text) <= limit:
@@ -47,8 +59,7 @@ def http_json(url, method="GET", payload=None, headers=None):
         request.add_header("Content-Type", "application/json")
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            status = response.status
-            raw = response.read()
+            status, raw = response.status, response.read()
     except urllib.error.HTTPError as error:
         raw = error.read()
         try:

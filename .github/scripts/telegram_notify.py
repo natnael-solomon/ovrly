@@ -3,11 +3,10 @@
 import json
 import os
 import re
-import time
 from pathlib import Path
 
 from telegram_api import (
-    TelegramClient, VariableState, escape, first_line, require_env, truncate,
+    TelegramClient, VariableState, display_name, escape, first_line, require_env, truncate,
 )
 
 STATE_VARIABLE = "TELEGRAM_NOTIFY_STATE"
@@ -18,17 +17,32 @@ CLOSING_KEYWORDS = re.compile(
 )
 
 
-def relative_time(unix=None):
-    unix = int(unix or time.time())
-    return f'<tg-time unix="{unix}" format="r">just now</tg-time>'
-
-
 def link(url, text):
     return f'<a href="{escape(url)}">{escape(text)}</a>'
 
 
 def author(login):
-    return f"<i>{escape(login)}</i>"
+    return f"<i>{display_name(login)}</i>"
+
+
+RULE = "╌" * 12
+QUOTE_LIMIT = 20
+GAP = object()
+
+
+def compose(headline, *body):
+    """Shared skeleton: bold linked headline over a sleek rule, then body lines; GAP inserts a blank line."""
+    lines = [f"<b>{headline}</b>", RULE]
+    lines.extend("" if line is GAP else line for line in body if line)
+    return "\n".join(lines)
+
+
+def field(label, value):
+    return f"<b>{label}</b>  {value}"
+
+
+def quote(text):
+    return f"<blockquote>{escape(text)}</blockquote>"
 
 
 def closing_issues(body):
@@ -42,20 +56,20 @@ def closing_issues(body):
 # --- Rendering -----------------------------------------------------------------
 
 def render_failure(run, repository_url):
-    target = f"on <code>{escape(run['head_branch'])}</code>"
+    target = f"on {run['head_branch']}"
     numbers = [pr["number"] for pr in run.get("pull_requests") or []]
     if run.get("event") == "pull_request" and numbers:
-        target = "on PR " + link(f"{repository_url}/pull/{numbers[0]}", f"#{numbers[0]}")
+        target = f"on PR #{numbers[0]}"
     verb = "timed out" if run["conclusion"] == "timed_out" else "failed"
-    header = f"<b>{link(run['html_url'], run['name'] + ' ' + verb)} {target}</b>"
     sha = run["head_sha"]
-    message = truncate(first_line((run.get("head_commit") or {}).get("message")), 120)
-    commit = link(f"{repository_url}/commit/{sha}", sha[:7])
-    return "\n".join([
-        header,
-        f"{escape(message)} · {commit}" if message else commit,
-        f"{author(run['actor']['login'])} · {relative_time()}",
-    ])
+    message = truncate(first_line((run.get("head_commit") or {}).get("message")), QUOTE_LIMIT)
+    return compose(
+        link(run["html_url"], f"{run['name']} {verb} {target}"),
+        quote(message) if message else "",
+        GAP,
+        field("Commit", link(f"{repository_url}/commit/{sha}", sha[:7])),
+        field("By", author(run["actor"]["login"])),
+    )
 
 
 def pr_status(pr):
@@ -65,7 +79,7 @@ def pr_status(pr):
         if closes:
             repository_url = pr["base"]["repo"]["html_url"]
             links = ", ".join(link(f"{repository_url}/issues/{n}", f"#{n}") for n in closes)
-            text += f" · Closes {links}"
+            text += f", closes {links}"
         return text
     if pr.get("state") == "closed":
         return "closed without merge"
@@ -73,27 +87,26 @@ def pr_status(pr):
 
 
 def render_card(pr):
-    number = link(pr["html_url"], f"#{pr['number']}")
-    header = f"<b>PR {number} · {escape(truncate(pr['title'], 100))}</b>"
-    return f"{header}\n{author(pr['user']['login'])} · {pr_status(pr)}"
-
-
-def render_ready_ping(pr):
-    number = link(pr["html_url"], f"#{pr['number']}")
-    return f"PR {number} ready for review · {author(pr['user']['login'])}"
+    return compose(
+        link(pr["html_url"], f"PR #{pr['number']}"),
+        quote(truncate(pr["title"], QUOTE_LIMIT)),
+        GAP,
+        field("Status", pr_status(pr)),
+        field("By", author(pr["user"]["login"])),
+    )
 
 
 def render_release(release, repository_name):
     title = release.get("name") or release["tag_name"]
-    kind = "pre-release published" if release.get("prerelease") else "published"
-    lines = [
-        f"<b>{link(release['html_url'], repository_name + ' ' + title)} {kind}</b>",
-        f"{author(release['author']['login'])} · {relative_time()}",
-    ]
-    body = (release.get("body") or "").strip()
-    if body:
-        lines.append(f"<blockquote expandable>{escape(truncate(body, 1500))}</blockquote>")
-    return "\n".join(lines)
+    kind = "pre-release" if release.get("prerelease") else "release"
+    summary = truncate(first_line(release.get("body")), QUOTE_LIMIT)
+    return compose(
+        link(release["html_url"], f"{repository_name} {title}"),
+        quote(summary) if summary else "",
+        GAP,
+        field("Type", kind),
+        field("By", author(release["author"]["login"])),
+    )
 
 
 # --- Event handling ------------------------------------------------------------
@@ -139,13 +152,9 @@ def handle_pull_request(telegram, state, event):
     if pr["user"]["login"] in BOT_ACTORS:
         return "Skipped bot-authored pull request."
     action = event["action"]
-    if action == "opened":
+    if action in ("opened", "ready_for_review"):
         upsert_card(telegram, state, pr)
-        return f"Posted card for PR #{pr['number']}."
-    if action == "ready_for_review":
-        upsert_card(telegram, state, pr)
-        telegram.send(render_ready_ping(pr), silent=True)
-        return f"Updated card and pinged for PR #{pr['number']}."
+        return f"Updated card for PR #{pr['number']}."
     if action == "closed":
         key = str(pr["number"])
         if key in state.get("pr_cards", {}):
@@ -161,17 +170,10 @@ def handle_release(telegram, state, event):
     return f"Posted release {event['release']['tag_name']}."
 
 
-def handle_dispatch(telegram, state, event):
-    message = (event.get("inputs") or {}).get("message") or "Telegram notifications test"
-    telegram.send(f"{escape(message)} · {relative_time()}", silent=True)
-    return "Posted test message."
-
-
 HANDLERS = {
     "workflow_run": handle_workflow_run,
     "pull_request": handle_pull_request,
     "release": handle_release,
-    "workflow_dispatch": handle_dispatch,
 }
 
 
