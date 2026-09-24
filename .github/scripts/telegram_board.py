@@ -212,11 +212,18 @@ def publish_board(telegram, state, text):
         print(f"::warning::Could not pin the board message: {error}")
 
 
-def run(telegram, state, project, nodes, now, columns=DEFAULT_COLUMNS):
+def layout_key(board_text):
+    """Board text without its timestamp line, for detecting layout-only changes."""
+    return "\n".join(line for line in board_text.split("\n") if not line.startswith("<tg-time"))
+
+
+def run(telegram, state, project, nodes, now, columns=DEFAULT_COLUMNS, force=False):
     current = snapshot(nodes)
     board = render_board(project, current, now, columns)
+    key = layout_key(board)
     if "items" not in state:
         state["items"] = current
+        state["layout"] = key
         publish_board(telegram, state, board)
         telegram.send(
             f'Board tracking started · <a href="{escape(project["url"])}">'
@@ -225,12 +232,18 @@ def run(telegram, state, project, nodes, now, columns=DEFAULT_COLUMNS):
         )
         return f"Baseline recorded for {len(current)} items."
     if state["items"] == current:
+        if force or state.get("layout") != key:
+            # Code changed how the board renders; refresh the pinned message without a delta post.
+            publish_board(telegram, state, board)
+            state["layout"] = key
+            return "Board re-rendered."
         return "No board changes."
     changes = diff(state["items"], current)
     if changes:
         telegram.send(render_changes(changes), silent=True)
     publish_board(telegram, state, board)
     state["items"] = current
+    state["layout"] = key
     return f"Posted {len(changes)} board changes."
 
 
@@ -248,7 +261,8 @@ def main():
     telegram = TelegramClient(bot_token, chat_id)
     store = VariableState(repository, state_token, STATE_VARIABLE)
     state = store.load()
-    outcome = run(telegram, state, project, nodes, time.time(), columns)
+    force = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    outcome = run(telegram, state, project, nodes, time.time(), columns, force=force)
     store.save(state)
     print(outcome)
 

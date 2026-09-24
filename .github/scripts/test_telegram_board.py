@@ -132,6 +132,24 @@ class RunTest(unittest.TestCase):
         self.assertEqual(run(telegram, state, PROJECT, nodes, now=1), "No board changes.")
         self.assertEqual(telegram.calls, [])
 
+    def test_manual_run_re_renders_without_delta(self):
+        telegram, state = FakeTelegram(), {}
+        nodes = [node("a", 1, "Ready")]
+        run(telegram, state, PROJECT, nodes, now=0)
+        telegram.calls.clear()
+        self.assertEqual(run(telegram, state, PROJECT, nodes, now=1, force=True), "Board re-rendered.")
+        self.assertEqual(telegram.methods(), ["editMessageText"])
+
+    def test_layout_change_re_renders_on_next_tick(self):
+        telegram, state = FakeTelegram(), {}
+        nodes = [node("a", 1, "Ready")]
+        run(telegram, state, PROJECT, nodes, now=0)
+        state["layout"] = "rendered by an older version"
+        telegram.calls.clear()
+        self.assertEqual(run(telegram, state, PROJECT, nodes, now=1), "Board re-rendered.")
+        self.assertEqual(telegram.methods(), ["editMessageText"])
+        self.assertNotEqual(state["layout"], "rendered by an older version")
+
     def test_change_posts_delta_and_edits_board(self):
         telegram, state = FakeTelegram(), {}
         run(telegram, state, PROJECT, [node("a", 1, "Ready")], now=0)
