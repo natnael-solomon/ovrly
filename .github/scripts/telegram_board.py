@@ -119,16 +119,20 @@ def diff(before, after):
 RULE = "╌" * 12
 
 
-def plain_link(item):
-    return f'<a href="{escape(item["url"])}">#{item["number"]}</a>'
+def linked_title(item):
+    """'#N title…' as one hyperlink."""
+    text = f"#{item['number']} {escape(truncate(item['title'], TITLE_LIMIT))}"
+    return f'<a href="{escape(item["url"])}">{text}</a>'
+
+
+def assignee_text(item):
+    return ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
 
 
 def quoted_row(item, with_assignee=True):
-    title = escape(truncate(item["title"], TITLE_LIMIT))
     if not with_assignee:
-        return title
-    who = ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
-    return f"{title} · <i>{who}</i>"
+        return linked_title(item)
+    return f"{linked_title(item)} · {assignee_text(item)}"
 
 
 def value(name):
@@ -136,21 +140,17 @@ def value(name):
 
 
 def group_lines(groups, quote):
-    """Render (heading, items) groups: heading with linked numbers, then its rows in one quote."""
+    """Render (heading, items) groups: heading, then its rows in one attached quote."""
     lines = []
     for heading, items in groups:
-        numbers = "  ".join(plain_link(i) for i in items)
         rows = "\n".join(quote(i, heading) for i in items)
         # The quote opens on the heading line so Telegram does not insert a block gap.
-        lines.append(f"{heading}  {numbers}<blockquote>{rows}</blockquote>")
+        lines.append(f"{heading}<blockquote>{rows}</blockquote>")
     return lines
 
 
 def board_row(item):
-    """One quoted, fully linked line: #N title · assignee."""
-    who = ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
-    text = f"#{item['number']} {escape(truncate(item['title'], TITLE_LIMIT))} · {who}"
-    return f'<blockquote><a href="{escape(item["url"])}">{text}</a></blockquote>'
+    return f"<blockquote>{quoted_row(item)}</blockquote>"
 
 
 def render_board(project, items, now, columns=DEFAULT_COLUMNS):
