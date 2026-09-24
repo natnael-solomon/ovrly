@@ -4,7 +4,7 @@ import os
 import time
 
 from telegram_api import (
-    TelegramClient, TelegramError, VariableState, escape, http_json, require_env, truncate,
+    TelegramClient, TelegramError, VariableState, display_name, escape, http_json, require_env, truncate,
 )
 
 STATE_VARIABLE = "TELEGRAM_BOARD_STATE"
@@ -126,7 +126,7 @@ def linked_title(item):
 
 
 def assignee_text(item):
-    return ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
+    return ", ".join(display_name(a) for a in item["assignees"]) or "unassigned"
 
 
 def quoted_row(item, with_assignee=True):

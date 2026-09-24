@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from telegram_api import (
-    TelegramClient, VariableState, escape, first_line, http_json, require_env, truncate,
+    TelegramClient, VariableState, display_name, escape, first_line, http_json, require_env, truncate,
 )
 
 STATE_VARIABLE = "TELEGRAM_NOTIFY_STATE"
@@ -28,7 +28,7 @@ def link(url, text):
 
 
 def author(login):
-    return f"<i>{escape(login)}</i>"
+    return f"<i>{display_name(login)}</i>"
 
 
 RULE = "╌" * 12
@@ -65,7 +65,7 @@ def render_failure(run, repository_url):
     target = f"on {run['head_branch']}"
     numbers = [pr["number"] for pr in run.get("pull_requests") or []]
     if run.get("event") == "pull_request" and numbers:
-        target = f"on PR#{numbers[0]}"
+        target = f"on PR #{numbers[0]}"
     verb = "timed out" if run["conclusion"] == "timed_out" else "failed"
     sha = run["head_sha"]
     message = truncate(first_line((run.get("head_commit") or {}).get("message")), QUOTE_LIMIT)
@@ -94,7 +94,7 @@ def pr_status(pr):
 
 def render_card(pr):
     return compose(
-        link(pr["html_url"], f"PR#{pr['number']}"),
+        link(pr["html_url"], f"PR #{pr['number']}"),
         quote(truncate(pr["title"], QUOTE_LIMIT)),
         GAP,
         field("Status", pr_status(pr)),

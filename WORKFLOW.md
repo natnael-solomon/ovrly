@@ -156,6 +156,8 @@ The workflows create and maintain the variables `TELEGRAM_NOTIFY_STATE` and
 state variable resets that workflow: the board re-baselines and PR cards start
 fresh. Never edit them by hand. PR titles, commit subjects, release notes and
 board item titles are sent to Telegram, so keep them free of anything private.
+GitHub logins appear as the short team names in `DISPLAY_NAMES`
+(`.github/scripts/telegram_api.py`); add new team members there.
 
 ## 5. Open and review a PR
 

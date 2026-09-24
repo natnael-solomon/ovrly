@@ -32,6 +32,13 @@ class EscapingTest(unittest.TestCase):
     def test_escapes_markup_but_not_quotes(self):
         self.assertEqual(escape('<a & "b">'), '&lt;a &amp; "b"&gt;')
 
+    def test_display_names(self):
+        from telegram_api import display_name
+        self.assertEqual(display_name("natnael-solomon"), "sol")
+        self.assertEqual(display_name("nattyy1"), "sancho")
+        self.assertEqual(display_name("neb-iyu"), "neba")
+        self.assertEqual(display_name("some<one>"), "some&lt;one&gt;")
+
     def test_truncate_collapses_whitespace(self):
         self.assertEqual(truncate("a   b\n\nc", 10), "a b c")
         self.assertEqual(truncate("abcdefghij", 5), "abcd…")

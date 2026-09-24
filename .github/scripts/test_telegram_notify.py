@@ -38,7 +38,7 @@ class RenderingTest(unittest.TestCase):
     def test_failure_on_pull_request(self):
         text = render_failure(run_event()["workflow_run"], REPO["html_url"])
         lines = text.split("\n")
-        self.assertEqual(lines[0], '<b><a href="https://github.com/o/r/actions/runs/9">Android checks failed on PR#42</a></b>')
+        self.assertEqual(lines[0], '<b><a href="https://github.com/o/r/actions/runs/9">Android checks failed on PR #42</a></b>')
         self.assertEqual(lines[1], RULE)
         self.assertEqual(lines[2], "<blockquote>fix(capture): relea…</blockquote>")
         self.assertEqual(lines[3], "")
@@ -58,7 +58,7 @@ class RenderingTest(unittest.TestCase):
         merged = pr_event("closed", merged=True, state="closed", body="Closes #17, fixes #19")
         text = render_card(merged["pull_request"])
         self.assertEqual(text.split("\n")[:4], [
-            '<b><a href="https://github.com/o/r/pull/42">PR#42</a></b>',
+            '<b><a href="https://github.com/o/r/pull/42">PR #42</a></b>',
             RULE,
             "<blockquote>feat(android): shar…</blockquote>",
             "",

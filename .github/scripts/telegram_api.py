@@ -29,6 +29,18 @@ def escape(text):
     return html.escape(str(text), quote=False)
 
 
+# Short team names shown in place of GitHub logins; unmapped logins appear as-is.
+DISPLAY_NAMES = {
+    "natnael-solomon": "sol",
+    "nattyy1": "sancho",
+    "neb-iyu": "neba",
+}
+
+
+def display_name(login):
+    return escape(DISPLAY_NAMES.get(login, login))
+
+
 def truncate(text, limit):
     text = " ".join(str(text).split())
     if len(text) <= limit:
