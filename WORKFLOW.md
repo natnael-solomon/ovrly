@@ -13,6 +13,10 @@ This document does not enforce those rules.
 
 ## 1. Pick up work
 
+Read every `.md` file in the repository before modifying code, committing,
+pushing, or creating/updating a pull request. Follow the documented requirements
+and re-read any Markdown files added or changed while working.
+
 Use one GitHub Project, **ovrly development**, as the shared task board.
 
 - Features and bugs need a repository issue on the board with one owner,
@@ -54,6 +58,11 @@ optional scope:
 - `docs: clarify setup`
 
 Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`.
+
+AI assistants and coding agents must not be listed as commit authors or
+co-authors. AI `Co-authored-by` trailers are prohibited. Use the authorized
+human contributor's configured identity and inspect the complete message
+before committing; do not invent contributor identities.
 
 Never commit credentials, signing keys, personal media, machine-local
 configuration, generated build output or development-session artifacts.
@@ -204,6 +213,13 @@ review discussions are resolved.
 Squash merge into `main`, then delete the merged branch. Link completed
 issues with `Closes #123` where appropriate. Do not bypass the requirements
 for urgent changes.
+
+Before confirming a squash merge, inspect the final author and full message.
+Use a Conventional Commit title and remove any AI authorship/co-authorship
+attribution, including trailers GitHub may assemble from branch commits.
+Do not copy historical commit messages wholesale. Existing branch history must
+not be rewritten without explicit approval; the final squash commit must comply
+with the authorship rule above.
 
 `main` is protected by a ruleset (enabled once the **Device evidence**
 workflow exists on `main`): no direct pushes, no force pushes, linear

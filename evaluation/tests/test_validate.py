@@ -11,12 +11,34 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from validate import (
-    Invalid, ROOT, TABLES, check_schema, digest, main, parse, read_json,
+    Invalid, ROOT, TABLES, check_schema, digest, load_rows, main, parse, read_json,
     validate_dataset, validate_value,
 )
 
 
 class SchemaTest(unittest.TestCase):
+    def test_all_id_schemas_reject_trailing_whitespace(self):
+        def id_schemas(schema):
+            for name, child in schema.get("properties", {}).items():
+                if name.endswith("_id"):
+                    yield name, child
+                elif name.endswith("_ids"):
+                    yield name, child["items"]
+                yield from id_schemas(child)
+            if "items" in schema:
+                yield from id_schemas(schema["items"])
+
+        checked = 0
+        for path in (ROOT / "schemas").glob("*.json"):
+            for name, schema in id_schemas(read_json(path)):
+                checked += 1
+                validate_value("valid-id-1", schema, name)
+                for suffix in (" ", "\t", "\n", "\r", "\r\n", "\u0085", "\u2028", "\u2029", "\u00a0"):
+                    with self.subTest(path=path.name, field=name, suffix=repr(suffix)):
+                        with self.assertRaisesRegex(Invalid, "pattern mismatch"):
+                            validate_value("valid-id-1" + suffix, schema, name)
+        self.assertEqual(16, checked)
+
     def test_schema_contracts_are_supported(self):
         for path in (ROOT / "schemas").glob("*.json"):
             with self.subTest(path=path):
@@ -176,6 +198,38 @@ class DatasetTest(unittest.TestCase):
             self.assertEqual(1, main([str(self.directory)]))
         self.assertIn("annotations.jsonl", error.getvalue())
 
+    def test_unicode_separators_are_preserved_inside_json_strings(self):
+        text = "Before\u0085next\u2028line\u2029paragraph"
+        self.rows["clips"][0]["rights"]["reference"] = text
+        self.rows["adjudications"][0]["review_note"] = text
+        for table, rows in self.rows.items():
+            path = self.directory / f"{table}.jsonl"
+            path.write_bytes("".join(json.dumps(row, ensure_ascii=False) + "\n"
+                                    for row in rows).encode("utf-8"))
+        self.rehash()
+        self.assertEqual(2, validate_dataset(self.directory))
+        path = self.directory / "clips.jsonl"
+        schema = read_json(ROOT / "schemas" / "clip.schema.json")
+        rows, locations = load_rows(path, schema, "clip_id")
+        self.assertEqual(text, rows["example-a"]["rights"]["reference"])
+        self.assertEqual(f"{path}:2 [example-b]", locations["example-b"])
+
+    def test_jsonl_reports_physical_line_numbers(self):
+        schema = read_json(ROOT / "schemas" / "clip.schema.json")
+        row = copy.deepcopy(self.rows["clips"][0])
+        row["rights"]["reference"] = "First\u2028second\u2029third"
+        path = self.directory / "clips.jsonl"
+        first_line = json.dumps(row, ensure_ascii=False).encode("utf-8")
+        for ending in (b"\n", b"\r\n"):
+            for bad_row in (b"\n", b"{\n"):
+                with self.subTest(ending=ending, bad_row=bad_row):
+                    path.write_bytes(first_line + ending + bad_row)
+                    with self.assertRaisesRegex(Invalid, r"clips.jsonl:2:"):
+                        load_rows(path, schema, "clip_id")
+        path.write_bytes(first_line)
+        rows, _ = load_rows(path, schema, "clip_id")
+        self.assertEqual(row, rows["example-a"])
+
     def test_schema_fields_and_duplicate_ids(self):
         for change, message in [
             (lambda c: c.update(language="fr"), "language"),
@@ -228,6 +282,20 @@ class DatasetTest(unittest.TestCase):
         self.setUp()
         self.rows["annotations"][0]["clip_id"] = "unknown"
         self.check_invalid("unknown clip")
+
+    def test_trailing_newline_cannot_bypass_annotator_distinctness(self):
+        self.rows["annotations"][1]["annotator_id"] = (
+            self.rows["annotations"][0]["annotator_id"] + "\n")
+        self.check_invalid("annotator_id: pattern mismatch")
+
+    def test_trailing_newline_cannot_bypass_split_isolation(self):
+        for field in ("creator_ids", "topic_ids", "repost_group_id"):
+            with self.subTest(field=field):
+                self.setUp()
+                source = self.rows["clips"][0][field]
+                self.rows["clips"][1][field] = (
+                    source + "\n" if isinstance(source, str) else [source[0] + "\n"])
+                self.check_invalid("pattern mismatch")
 
     def test_occurrence_and_gold_boundaries(self):
         for table, field in (("annotations", "occurrences"), ("adjudications", "decisions")):

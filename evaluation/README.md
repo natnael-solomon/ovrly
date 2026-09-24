@@ -52,6 +52,12 @@ Use UTF-8, LF endings, one JSON object per line, no blank rows or duplicate
 keys, and no NaN/infinite values. Hashes cover exact file bytes, including the
 final newline; `.gitattributes` pins the fixture endings on Windows.
 Stable IDs are lowercase opaque slugs, not names, emails or device identifiers.
+Whitespace in IDs is rejected, never trimmed. Their patterns use
+`(?![\s\S])` for a strict end-of-input assertion rather than `$`, which also
+matches before a final newline. This keeps the schemas portable between Python
+and JSON Schema regular expressions without changing general pattern semantics.
+JSONL records are separated by physical LF line endings; Unicode separators
+inside JSON strings remain part of the field value, not extra records.
 Occurrence and gold/proposition IDs are scoped to their pass or clip;
 clip/pass/adjudication IDs are unique within their respective files.
 

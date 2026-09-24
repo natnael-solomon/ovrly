@@ -167,16 +167,17 @@ def digest(path):
 def load_rows(path, schema, id_key):
     rows = {}
     locations = {}
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        location = f"{path}:{line_number}"
-        require(bool(line.strip()), location, "blank JSONL row")
-        row = parse(line, location)
-        validate_value(row, schema, location)
-        record_id = row[id_key]
-        location += f" [{record_id}]"
-        require(record_id not in rows, location, "duplicate record ID")
-        rows[record_id] = row
-        locations[record_id] = location
+    with path.open(encoding="utf-8", newline="\n") as stream:
+        for line_number, line in enumerate(stream, 1):
+            location = f"{path}:{line_number}"
+            require(bool(line.strip()), location, "blank JSONL row")
+            row = parse(line, location)
+            validate_value(row, schema, location)
+            record_id = row[id_key]
+            location += f" [{record_id}]"
+            require(record_id not in rows, location, "duplicate record ID")
+            rows[record_id] = row
+            locations[record_id] = location
     return rows, locations
 
 

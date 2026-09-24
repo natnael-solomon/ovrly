@@ -5,11 +5,11 @@
   "required": ["schema_version", "adjudication_id", "clip_id", "synthetic", "adjudicator_id", "annotation_ids", "review_note", "decisions"],
   "properties": {
     "schema_version": {"const": 1},
-    "adjudication_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
-    "clip_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "adjudication_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
+    "clip_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
     "synthetic": {"type": "boolean"},
-    "adjudicator_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
-    "annotation_ids": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}},
+    "adjudicator_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
+    "annotation_ids": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"}},
     "review_note": {"type": "string", "minLength": 1},
     "decisions": {
       "type": "array",
@@ -17,16 +17,16 @@
         "type": "object", "additionalProperties": false,
         "required": ["gold_id", "proposition_id", "references", "start_ms", "end_ms", "modality", "eligible", "proposition", "reason", "resolution"],
         "properties": {
-          "gold_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
-          "proposition_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "gold_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
+          "proposition_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
           "references": {
             "type": "array", "uniqueItems": true,
             "items": {
               "type": "object", "additionalProperties": false,
               "required": ["annotation_id", "occurrence_id"],
               "properties": {
-                "annotation_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
-                "occurrence_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}
+                "annotation_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
+                "occurrence_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"}
               }
             }
           },

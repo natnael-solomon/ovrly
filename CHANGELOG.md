@@ -33,6 +33,10 @@
 - Moved working companion controls into Settings, shortened labels and moved technical explanations into disclosures without removing capture consent.
 - Sized the demo overlay below half the usable screen with 16 dp side/bottom margins, a draggable header and independently scrolling content.
 
+### Fixed
+
+- Reject whitespace-suffixed evaluation IDs and preserve Unicode separators within JSON strings when reading physical JSONL records.
+
 ### Known limitations
 
 - On Android 12 the splash icon is drawn only for home/system-originated launches; verified visible from Samsung One UI Home and on an Android 15 emulator, but not from Niagara Launcher or `adb shell am start` on Android 12. No supported per-app override exists below Android 13.
