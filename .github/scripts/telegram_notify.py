@@ -32,6 +32,7 @@ def author(login):
 
 
 RULE = "╌" * 12
+QUOTE_LIMIT = 20
 GAP = object()
 
 
@@ -67,7 +68,7 @@ def render_failure(run, repository_url):
         target = f"on PR#{numbers[0]}"
     verb = "timed out" if run["conclusion"] == "timed_out" else "failed"
     sha = run["head_sha"]
-    message = truncate(first_line((run.get("head_commit") or {}).get("message")), 120)
+    message = truncate(first_line((run.get("head_commit") or {}).get("message")), QUOTE_LIMIT)
     return compose(
         link(run["html_url"], f"{run['name']} {verb} {target}"),
         quote(message) if message else "",
@@ -95,7 +96,7 @@ def pr_status(pr):
 def render_card(pr):
     return compose(
         link(pr["html_url"], f"PR#{pr['number']}"),
-        quote(truncate(pr["title"], 100)),
+        quote(truncate(pr["title"], QUOTE_LIMIT)),
         GAP,
         field("Status", pr_status(pr)),
         field("By", author(pr["user"]["login"])),
@@ -105,7 +106,7 @@ def render_card(pr):
 def render_release(release, repository_name):
     title = release.get("name") or release["tag_name"]
     kind = "Pre-release" if release.get("prerelease") else "Release"
-    summary = truncate(first_line(release.get("body")), 120)
+    summary = truncate(first_line(release.get("body")), QUOTE_LIMIT)
     return compose(
         link(release["html_url"], f"{repository_name} {title}"),
         quote(summary) if summary else "",

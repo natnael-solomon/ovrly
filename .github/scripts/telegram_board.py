@@ -13,7 +13,7 @@ FIELDS = ("status", "priority", "area")
 FIELD_LABELS = {"status": "Status", "priority": "Priority", "area": "Area"}
 DEFAULT_COLUMNS = ("Ready", "In progress", "In review")
 BLOCKED_LABEL = "blocked"
-TITLE_LIMIT = 48
+TITLE_LIMIT = 20
 INLINE_LIMIT = 8
 
 QUERY = """
@@ -126,9 +126,9 @@ def plain_link(item):
 def quoted_row(item, with_assignee=True):
     title = escape(truncate(item["title"], TITLE_LIMIT))
     if not with_assignee:
-        return f"<blockquote>{title}</blockquote>"
+        return title
     who = ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
-    return f"<blockquote>{title} · <i>{who}</i></blockquote>"
+    return f"{title} · <i>{who}</i>"
 
 
 def value(name):
@@ -136,13 +136,13 @@ def value(name):
 
 
 def group_lines(groups, quote):
-    """Render (heading, items) groups: heading with linked numbers, then one quoted row per item."""
+    """Render (heading, items) groups: heading with linked numbers, then its rows in one quote."""
     lines = []
-    for index, (heading, items) in enumerate(groups):
-        if index:
-            lines.append("")
-        lines.append(f"{heading}  " + "  ".join(plain_link(i) for i in items))
-        lines.extend(quote(i, heading) for i in items)
+    for heading, items in groups:
+        numbers = "  ".join(plain_link(i) for i in items)
+        rows = "\n".join(quote(i, heading) for i in items)
+        # The quote opens on the heading line so Telegram does not insert a block gap.
+        lines.append(f"{heading}  {numbers}<blockquote>{rows}</blockquote>")
     return lines
 
 
