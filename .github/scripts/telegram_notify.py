@@ -32,7 +32,7 @@ def author(login):
 
 
 RULE = "╌" * 12
-QUOTE_LIMIT = 20
+QUOTE_LIMIT = 24
 GAP = object()
 
 

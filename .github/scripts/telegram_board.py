@@ -13,7 +13,7 @@ FIELDS = ("status", "priority", "area")
 FIELD_LABELS = {"status": "Status", "priority": "Priority", "area": "Area"}
 DEFAULT_COLUMNS = ("Ready", "In progress", "In review")
 BLOCKED_LABEL = "blocked"
-TITLE_LIMIT = 20
+TITLE_LIMIT = 24
 INLINE_LIMIT = 8
 
 QUERY = """
@@ -126,7 +126,7 @@ def linked_title(item):
 
 
 def assignee_text(item):
-    return ", ".join(display_name(a) for a in item["assignees"]) or "unassigned"
+    return ", ".join(display_name(a) for a in item["assignees"]) or "wef"
 
 
 def quoted_row(item, with_assignee=True):
