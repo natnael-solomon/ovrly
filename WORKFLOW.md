@@ -115,21 +115,22 @@ red under Actions.
   for review to merged or closed, with linked `Closes #N` issues. Dependabot
   PRs are skipped.
 - Published releases: a loud post with the first line of the notes.
-- Manual dispatch: a silent test message, or a preview of the failure, PR or
-  release layout with synthetic data via the `sample` input. This is the only
-  way to verify the setup before a real event.
 
 **Telegram board** (`telegram-board.yml`) polls the **ovrly development**
 Project every 15 minutes. It keeps one pinned message listing Ready, In
 progress, In review and `blocked`-labelled items, edited in place, and posts a
 silent summary of Status, Priority and Area changes plus additions and
 removals. Draft items are ignored. The first run records a baseline and posts
-"Board tracking started" instead of listing everything.
+"Board tracking started" instead of listing everything. It can be run
+manually from Actions.
 
 Both workflows only run from `main`: `workflow_run` and `schedule` triggers do
 not fire for other branches, so changes to them take effect after merging.
 Fork PRs cannot read secrets and produce no messages. GitHub disables scheduled
 workflows after 60 days without repository activity; re-enable it under Actions.
+To trial layout changes before merging, temporarily point `TELEGRAM_CHAT_ID`
+at a private chat and open a draft PR; its `pull_request` events run the
+branch's own workflow.
 
 Setup, performed once by the project owner:
 
@@ -148,8 +149,8 @@ Setup, performed once by the project owner:
    persists their state. It expires like the project token.
 5. Add repository secrets `TELEGRAM_BOT_TOKEN`, `PROJECTS_READ_TOKEN` and
    `STATE_TOKEN`, and the repository variable `TELEGRAM_CHAT_ID`.
-6. Run **Telegram notifications** manually to confirm a message arrives, then
-   **Telegram board** to create the pinned message.
+6. Run **Telegram board** manually to create the pinned message and confirm
+   the bot, chat ID and tokens work.
 
 The workflows create and maintain the variables `TELEGRAM_NOTIFY_STATE` and
 `TELEGRAM_BOARD_STATE` (message IDs and the last board snapshot). Deleting a

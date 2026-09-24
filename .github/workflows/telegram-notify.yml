@@ -8,17 +8,6 @@ on:
     types: [opened, ready_for_review, closed]
   release:
     types: [published]
-  workflow_dispatch:
-    inputs:
-      message:
-        description: Test message to post to the group
-        required: false
-        default: Telegram notifications test
-      sample:
-        description: Preview a message layout with synthetic data instead
-        required: false
-        type: choice
-        options: ['', failure, pr_failure, pr_ready, pr_merged, release, board_changes]
 
 permissions:
   contents: read
@@ -44,5 +33,3 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
           # GITHUB_TOKEN cannot manage repository variables; a PAT with Variables access is required.
           STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
-          # Read-only; lets manual previews use real PRs, runs and releases.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
