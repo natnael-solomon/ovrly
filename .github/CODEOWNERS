@@ -1,0 +1,10 @@
+# Review ownership. Code owner review is not required by the ruleset yet; these entries route
+# review requests and mark who should sign off on each area. Widen as the team grows.
+* @natnael-solomon
+
+/android/                       @natnael-solomon
+/backend/                       @natnael-solomon
+/packages/contracts/            @natnael-solomon
+/.github/                       @natnael-solomon
+/WORKFLOW.md                    @natnael-solomon
+/docs/decisions/                @natnael-solomon

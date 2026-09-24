@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Development board
+    url: https://github.com/users/natnael-solomon/projects/3
+    about: Task list, working rules and checkpoints. Read its README before opening an issue.
+  - name: Team workflow
+    url: https://github.com/natnael-solomon/ovrly/blob/main/WORKFLOW.md
+    about: Branches, commits, review, device evidence and merge rules.

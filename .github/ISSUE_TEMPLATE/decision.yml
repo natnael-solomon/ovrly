@@ -1,0 +1,54 @@
+name: Decision
+description: Record a choice that constrains later work (becomes an entry in docs/decisions/).
+title: "Decision: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A decision issue exists to be argued and then recorded. When it is settled, the outcome is written
+        to `docs/decisions/` (see REPO-01) and this issue is closed with a link to that file.
+  - type: input
+    id: id
+    attributes:
+      label: Decision ID
+      description: The contract or RFC decision this records, if any.
+      placeholder: "BC-D02 · RFC-D14"
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: One sentence. What must be decided and why now.
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options considered
+      description: Each option with its main consequence. Include "do nothing" if it is real.
+      value: |
+        1. 
+        2. 
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Measurements, sponsor answers, documentation links, device results. Distinguish verified facts from inference.
+    validations:
+      required: true
+  - type: textarea
+    id: choice
+    attributes:
+      label: Proposed choice and rationale
+  - type: textarea
+    id: reversal
+    attributes:
+      label: Reversal trigger
+      description: What observation would make us revisit this.
+  - type: input
+    id: deadline
+    attributes:
+      label: Decide by
+      placeholder: "2026-09-27 · before CP1 review"

@@ -100,17 +100,27 @@ without automatic merging.
 
 ## 5. Open and review a PR
 
-Open a draft for unfinished work or early feedback. Link the task issue when
-one exists. Explain what changed, why, how it was checked and any limitations.
-Include relevant screenshots for visible UI changes.
+Open a draft for unfinished work or early feedback. The pull request template
+(`.github/PULL_REQUEST_TEMPLATE.md`) is the required structure: what and why
+with the linked issue, how it was checked with the commands actually run, a
+device-evidence table, screenshots for visible UI changes, limitations, and
+the docs/changelog checklist. Fill every section or write why it does not
+apply; do not delete sections.
 
 Use a Conventional Commit PR title because it becomes the squash commit
 message.
 
-Every PR needs approval from another developer, including documentation PRs.
-Authors do not approve their own changes. If no reviewer is available, the
-PR waits. Resolve feedback before merging and request another review when
-material changes are made after approval.
+Changes under `android/app/src/main/java/app/ovrly/{capture,overlay,voice}`
+or to the Android manifest cannot be exercised by CI. The **Device evidence**
+workflow labels such PRs `needs-device-evidence` and fails until the device
+evidence table has at least one filled row (model, Android version, route,
+what was verified, result). Writing "Not applicable" there does not pass.
+
+Review requests route through `.github/CODEOWNERS`. Every PR needs approval
+from another developer, including documentation PRs. Authors do not approve
+their own changes. If no reviewer is available, the PR waits. Resolve feedback
+before merging and request another review when material changes are made
+after approval.
 
 ## 6. Merge
 
@@ -122,11 +132,14 @@ Squash merge into `main`, then delete the merged branch. Link completed
 issues with `Closes #123` where appropriate. Do not bypass the requirements
 for urgent changes.
 
-Before normal team merges begin, confirm the first GitHub CI run succeeds,
-then require **Android checks** in `main` branch rules alongside review and
-protection against force pushes. Do not add workflow-level path filters:
-docs-only PRs must still report the required check rather than leave it
-pending. Add backend checks when backend code exists.
+`main` is protected by a ruleset (enabled once the **Device evidence**
+workflow exists on `main`): no direct pushes, no force pushes, linear
+history, one approving review with stale approvals dismissed on push, all
+review threads resolved, and the **Android checks** and **Device evidence**
+status checks required and up to date with `main`. Do not add workflow-level
+path filters: docs-only PRs must still report the required checks rather than
+leave them pending. Add **Backend checks** (REPO-04) and **Contract checks**
+(BE-03) to the required list when those workflows exist.
 
 ## 7. Document and release
 
