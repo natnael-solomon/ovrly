@@ -1,5 +1,6 @@
 import unittest
 
+from telegram_api import TelegramError
 from telegram_board import diff, fetch_project, render_board, render_changes, run, snapshot
 from test_telegram_api import FakeTelegram
 
@@ -112,6 +113,14 @@ class RunTest(unittest.TestCase):
         self.assertEqual(run(telegram, state, PROJECT, nodes, now=1), "No board changes.")
         self.assertEqual(telegram.calls, [])
 
+    def test_manual_dispatch_refreshes_unchanged_board(self):
+        telegram, state = FakeTelegram(), {}
+        nodes = [node("a", 1, "Ready")]
+        run(telegram, state, PROJECT, nodes, now=0)
+        telegram.calls.clear()
+        self.assertEqual(run(telegram, state, PROJECT, nodes, now=1, force_refresh=True), "Board refreshed.")
+        self.assertEqual(telegram.methods(), ["editMessageText"])
+
     def test_change_posts_delta_and_edits_board(self):
         telegram, state = FakeTelegram(), {}
         run(telegram, state, PROJECT, [node("a", 1, "Ready")], now=0)
@@ -128,6 +137,20 @@ class RunTest(unittest.TestCase):
         run(telegram, state, PROJECT, [node("a", 1, "Ready", labels=["blocked"])], now=1)
         self.assertEqual(telegram.methods(), ["editMessageText", "sendMessage", "pinChatMessage"])
         self.assertEqual(state["message_id"], 103)
+
+    def test_pin_failure_does_not_abort_baseline(self):
+        class PinFailingTelegram(FakeTelegram):
+            def call(self, method, **params):
+                if method == "pinChatMessage":
+                    self.calls.append((method, params))
+                    raise TelegramError("pinChatMessage: Forbidden")
+                return super().call(method, **params)
+
+        telegram, state = PinFailingTelegram(), {}
+        outcome = run(telegram, state, PROJECT, [node("a", 1, "Ready")], now=0)
+        self.assertEqual(telegram.methods(), ["sendMessage", "pinChatMessage", "sendMessage"])
+        self.assertEqual(state["message_id"], 101)
+        self.assertIn("1 items", outcome)
 
 
 class FetchTest(unittest.TestCase):

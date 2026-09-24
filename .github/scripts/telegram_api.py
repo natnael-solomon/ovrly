@@ -143,7 +143,7 @@ class VariableState:
             )
         else:
             status, _ = self._transport(self._url, "POST", payload, self._headers)
-        if status not in (201, 204):
+        if not 200 <= status < 300:
             raise RuntimeError(f"Could not write variable {self._name}: HTTP {status}")
         self._exists = True
 

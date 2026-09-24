@@ -102,6 +102,11 @@ class VariableStateTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             store.save({"blob": "x" * 50_000})
 
+    def test_save_accepts_other_successful_2xx_statuses(self):
+        store = VariableState("o/r", "gh", "STATE", lambda *a, **k: (200, {"value": "{}"}))
+        store._exists = True
+        store.save({"a": 1})
+
 
 class HttpJsonTest(unittest.TestCase):
     def test_preserves_success_status(self):

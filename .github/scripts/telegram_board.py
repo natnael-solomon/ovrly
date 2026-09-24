@@ -4,7 +4,7 @@ import os
 import time
 
 from telegram_api import (
-    TelegramClient, VariableState, escape, http_json, require_env, truncate,
+    TelegramClient, TelegramError, VariableState, escape, http_json, require_env, truncate,
 )
 
 STATE_VARIABLE = "TELEGRAM_BOARD_STATE"
@@ -169,10 +169,13 @@ def publish_board(telegram, state, text):
     if message_id is not None and telegram.edit(message_id, text):
         return
     state["message_id"] = telegram.send(text, silent=True)
-    telegram.pin(state["message_id"])
+    try:
+        telegram.pin(state["message_id"])
+    except TelegramError as error:
+        print(f"::notice::Telegram pinChatMessage: {error}")
 
 
-def run(telegram, state, project, nodes, now, columns=DEFAULT_COLUMNS):
+def run(telegram, state, project, nodes, now, columns=DEFAULT_COLUMNS, force_refresh=False):
     current = snapshot(nodes)
     board = render_board(project, current, now, columns)
     if "items" not in state:
@@ -185,6 +188,9 @@ def run(telegram, state, project, nodes, now, columns=DEFAULT_COLUMNS):
         )
         return f"Baseline recorded for {len(current)} items."
     if state["items"] == current:
+        if force_refresh:
+            publish_board(telegram, state, board)
+            return "Board refreshed."
         return "No board changes."
     changes = diff(state["items"], current)
     if changes:
@@ -208,7 +214,15 @@ def main():
     telegram = TelegramClient(bot_token, chat_id)
     store = VariableState(repository, github_token, STATE_VARIABLE)
     state = store.load()
-    outcome = run(telegram, state, project, nodes, time.time(), columns)
+    outcome = run(
+        telegram,
+        state,
+        project,
+        nodes,
+        time.time(),
+        columns,
+        force_refresh=os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch",
+    )
     store.save(state)
     print(outcome)
 
