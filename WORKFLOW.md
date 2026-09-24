@@ -141,9 +141,13 @@ Setup, performed once by the project owner:
    on the project owner's account. Fine-grained tokens cannot read user-owned
    Projects. Set an expiration; rotating the token is the owner's
    responsibility, and the board job fails visibly when it lapses.
-4. Add repository secrets `TELEGRAM_BOT_TOKEN` and `PROJECTS_READ_TOKEN`, and
-   the repository variable `TELEGRAM_CHAT_ID`.
-5. Run **Telegram notifications** manually to confirm a message arrives, then
+4. Create a fine-grained personal access token restricted to this repository
+   with only the **Variables: read and write** permission. The workflows'
+   built-in `GITHUB_TOKEN` cannot manage repository variables, so this token
+   persists their state. It expires like the project token.
+5. Add repository secrets `TELEGRAM_BOT_TOKEN`, `PROJECTS_READ_TOKEN` and
+   `STATE_TOKEN`, and the repository variable `TELEGRAM_CHAT_ID`.
+6. Run **Telegram notifications** manually to confirm a message arrives, then
    **Telegram board** to create the pinned message.
 
 The workflows create and maintain the variables `TELEGRAM_NOTIFY_STATE` and

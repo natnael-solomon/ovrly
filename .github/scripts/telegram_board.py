@@ -195,8 +195,8 @@ def run(telegram, state, project, nodes, now, columns=DEFAULT_COLUMNS):
 
 
 def main():
-    bot_token, chat_id, github_token, repository, project_token, owner, number = require_env(
-        "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN", "GITHUB_REPOSITORY",
+    bot_token, chat_id, state_token, repository, project_token, owner, number = require_env(
+        "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "STATE_TOKEN", "GITHUB_REPOSITORY",
         "PROJECTS_READ_TOKEN", "PROJECT_OWNER", "PROJECT_NUMBER",
     )
     columns = tuple(
@@ -206,7 +206,7 @@ def main():
     )
     project, nodes = fetch_project(project_token, owner, int(number))
     telegram = TelegramClient(bot_token, chat_id)
-    store = VariableState(repository, github_token, STATE_VARIABLE)
+    store = VariableState(repository, state_token, STATE_VARIABLE)
     state = store.load()
     outcome = run(telegram, state, project, nodes, time.time(), columns)
     store.save(state)
