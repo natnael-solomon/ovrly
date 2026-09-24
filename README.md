@@ -16,6 +16,7 @@ Requires JDK 21, Android SDK platform 37 and Build Tools 36.0.0. The project bui
 
 - [Android app](android/README.md)
 - [Backend status](backend/README.md)
+- [Evaluation contract and review workflow](evaluation/README.md) (synthetic examples only; reviewed clips still pending)
 - [Architecture](docs/architecture.md)
 - [Team workflow](WORKFLOW.md)
 - [Changelog](CHANGELOG.md)

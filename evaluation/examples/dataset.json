@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "dataset_version": "examples-v1",
+  "kind": "examples",
+  "files": {
+    "clips.jsonl": "c749200dab0b45e59141bf8741cb578606db07ee931b439234349785df54ed40",
+    "annotations.jsonl": "8b96935b12316e1f966bb63c4bf36776e65531910dea5e5e3bb785ce69fce3b8",
+    "adjudications.jsonl": "61afe32f34f5a2bdc0b2caed1d03c1b7c75604d77a06e9363194ce9c49a35f9c"
+  }
+}

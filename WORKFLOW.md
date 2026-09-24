@@ -79,10 +79,21 @@ such as serial numbers.
 
 **Android checks** runs on PRs to `main`, pushes to `main` and manual dispatch.
 One Ubuntu 24.04 job uses JDK 21 and the project's Gradle wrapper to build,
-unit test and lint together. Known documentation-only changes skip Android
-setup and Gradle, but still return the same required check. Initial pushes,
+unit test and lint together. Known documentation and isolated `evaluation/`
+changes (including its dedicated workflow) skip Android setup and Gradle, but
+still return the same required check. Changes to Android change detection itself
+still require the full job. Initial pushes,
 manual runs and unknown paths run the full checks. Change-detection tests
 run on every invocation.
+
+**Evaluation contract checks** runs separately on every PR, push to `main` and
+manual dispatch, without workflow-level path filters. It tests the Python
+standard-library validator and synthetic examples; if a future
+`evaluation/corpus/` is present it also checks frozen metadata, not media bytes
+or pipeline performance. It uses no provider keys or downloads. This check is
+not the future RES-03 evaluation-regression gate and does not imply RES-01 is
+complete. See the [evaluation workflow](evaluation/README.md) for local commands
+and human-review requirements.
 
 `setup-gradle` validates wrapper JARs and owns the only Gradle cache:
 dependencies, wrapper distributions, compiled build scripts, transforms and

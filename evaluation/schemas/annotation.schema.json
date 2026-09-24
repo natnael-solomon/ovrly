@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Independent whole-clip annotation pass v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "annotation_id", "clip_id", "synthetic", "annotator_id", "blind_to_model_output", "independent", "occurrences"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "annotation_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "clip_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "synthetic": {"type": "boolean"},
+    "annotator_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "blind_to_model_output": {"const": true},
+    "independent": {"const": true},
+    "occurrences": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["occurrence_id", "start_ms", "end_ms", "modality", "eligible", "proposition", "reason"],
+        "properties": {
+          "occurrence_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "start_ms": {"type": "integer", "minimum": 0},
+          "end_ms": {"type": "integer", "minimum": 1},
+          "modality": {"enum": ["speech", "on-screen-text", "both"]},
+          "eligible": {"type": "boolean"},
+          "proposition": {"type": "string", "minLength": 1},
+          "reason": {"enum": ["factual-claim", "factual-premise", "opinion", "quoted-not-endorsed", "insufficient-context", "not-a-claim"]}
+        }
+      }
+    }
+  }
+}

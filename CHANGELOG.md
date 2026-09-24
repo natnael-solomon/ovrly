@@ -4,6 +4,7 @@
 
 ### Added
 
+- Versioned evaluation-data schemas, blind annotation/adjudication workflow, synthetic JSONL examples, and dependency-free validation with CI. The real reviewed clip corpus remains outstanding; these examples are not evaluation results.
 - Native Kotlin/Jetpack Compose Android companion and manually activated floating controls.
 - Explicit-consent playback-audio and sampled-screen capture, bounded to three minutes and 32 MiB of app-private media.
 - Temporary-capture retention and deletion controls.
