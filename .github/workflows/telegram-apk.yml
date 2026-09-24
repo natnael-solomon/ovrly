@@ -70,4 +70,4 @@ jobs:
           APP_VERSION: ${{ steps.meta.outputs.version }}
           COMMIT_SUBJECT: ${{ steps.meta.outputs.subject }}
           REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
-          BUILD_TYPE: unsigned release build
+          BUILD_TYPE: unsigned, minified release build
