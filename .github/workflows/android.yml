@@ -49,11 +49,11 @@ jobs:
         if: steps.changes.outputs.android == 'true'
         run: |
           missing=()
-          if [[ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" ]]; then
-            missing+=("platforms;android-35")
+          if [[ ! -f "$ANDROID_HOME/platforms/android-37.0/android.jar" ]]; then
+            missing+=("platforms;android-37.0")
           fi
-          if [[ ! -x "$ANDROID_HOME/build-tools/35.0.0/aapt2" ]]; then
-            missing+=("build-tools;35.0.0")
+          if [[ ! -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" ]]; then
+            missing+=("build-tools;36.0.0")
           fi
           if (( ${#missing[@]} )); then
             sdkmanager --install "${missing[@]}"

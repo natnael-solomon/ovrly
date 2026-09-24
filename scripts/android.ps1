@@ -8,8 +8,8 @@ $repository = Split-Path $PSScriptRoot -Parent
 $project = Join-Path $repository 'android'
 if (!(Test-Path (Join-Path $project 'settings.gradle.kts'))) { throw "Android project not found at $project" }
 if (!(Test-Path (Join-Path $JdkPath 'bin\java.exe'))) { throw "JDK not found at $JdkPath" }
-if (!(Test-Path (Join-Path $SdkPath 'platforms\android-35\android.jar'))) {
-    throw "Android SDK platform 35 is required at $SdkPath"
+if (!(Test-Path (Join-Path $SdkPath 'platforms\android-37.0\android.jar'))) {
+    throw "Android SDK platform 37 is required at $SdkPath"
 }
 $oldJava = $env:JAVA_HOME
 $oldSdk = $env:ANDROID_HOME
