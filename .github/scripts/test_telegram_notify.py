@@ -82,8 +82,9 @@ class RenderingTest(unittest.TestCase):
         text = render_release(release, "ovrly")
         self.assertTrue(text.startswith(
             '<b><a href="https://github.com/o/r/releases/tag/v0.3.0">ovrly v0.3.0</a></b>\n'
-            "<blockquote expandable>Notes &amp; more\n- item</blockquote>\n\n<b>Type</b>  Pre-release\n<b>By</b>  <i>owner</i>\n<b>When</b>  <tg-time"
+            "<blockquote>Notes &amp; more</blockquote>\n\n<b>Type</b>  Pre-release\n<b>By</b>  <i>owner</i>\n<b>When</b>  <tg-time"
         ))
+        self.assertNotIn("- item", text)
 
 
 class WorkflowRunTest(unittest.TestCase):

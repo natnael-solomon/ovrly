@@ -104,12 +104,10 @@ def render_card(pr):
 def render_release(release, repository_name):
     title = release.get("name") or release["tag_name"]
     kind = "Pre-release" if release.get("prerelease") else "Release"
-    body = (release.get("body") or "").strip()
-    if len(body) > 1500:
-        body = body[:1499].rstrip() + "…"
+    summary = truncate(first_line(release.get("body")), 120)
     return compose(
         link(release["html_url"], f"{repository_name} {title}"),
-        f"<blockquote expandable>{escape(body)}</blockquote>" if body else "",
+        quote(summary) if summary else "",
         GAP,
         field("Type", kind),
         field("By", author(release["author"]["login"])),
@@ -200,7 +198,7 @@ def sample_event(kind, repository):
     if kind == "release":
         return "release", {"repository": repository, "release": {
             "tag_name": "v0.0.0-sample", "name": None, "prerelease": True,
-            "body": "Preview of release notes.\n\n- one\n- two",
+            "body": "Preview of a release summary line.\n\n- one\n- two",
             "html_url": f"{url}/releases", "author": {"login": "sample"},
         }}
     return "pull_request", {"repository": repository, "pull_request": pr,

@@ -114,7 +114,7 @@ red under Actions.
 - Pull requests: one silent card per PR, edited in place from draft to ready
   for review to merged or closed, with linked `Closes #N` issues. Dependabot
   PRs are skipped.
-- Published releases: a loud post with the notes in an expandable quote.
+- Published releases: a loud post with the first line of the notes.
 - Manual dispatch: a silent test message, or a preview of the failure, PR or
   release layout with synthetic data via the `sample` input. This is the only
   way to verify the setup before a real event.
