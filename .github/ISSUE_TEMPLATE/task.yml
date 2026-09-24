@@ -1,0 +1,58 @@
+name: Task
+description: A unit of work for the development board (feature, tooling, research).
+title: "AREA-NN · Short outcome"
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use the board code as the title prefix (`AN-`, `BE-`, `RES-`, `REPO-`). The issue is the spec:
+        a reviewer should be able to check every box in the completion checklist.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What is true when this is done. One or two sentences, observable.
+    validations:
+      required: true
+  - type: textarea
+    id: checklist
+    attributes:
+      label: Completion checklist
+      description: Concrete, verifiable items. Include at least one negative test for new endpoints or state transitions.
+      value: |
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
+  - type: input
+    id: links
+    attributes:
+      label: Contract and decision references
+      description: AC.., BC-D.., RFC-D.., RFC §.. that this issue serves or records.
+      placeholder: "AC03 · BC-D02 · RFC-D14"
+  - type: textarea
+    id: depends
+    attributes:
+      label: Depends on
+      description: Blocking issues as `#n` links, or "none". Add the `blocked` label while any of them is open.
+      placeholder: "Blocked by #12"
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Android, Backend, Research, Repo/tooling]
+    validations:
+      required: true
+  - type: dropdown
+    id: checkpoint
+    attributes:
+      label: Checkpoint
+      options: ["CP0 · Repo readiness", "CP1 · Prove access", "CP2 · Connect both paths", "CP3 · Finish and freeze"]
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Risks, open questions, things a reviewer should know.

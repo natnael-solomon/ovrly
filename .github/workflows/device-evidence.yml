@@ -1,0 +1,63 @@
+name: Device evidence
+
+# Capture, overlay, voice and manifest changes cannot be exercised by CI. This check fails until the
+# PR body's "Device evidence" table has at least one filled row, and keeps the
+# needs-device-evidence label in sync so reviewers can see it at a glance.
+#
+# Runs on `pull_request` (not `pull_request_target`) so it never executes with write access against
+# untrusted code. For same-repository branches the token can label; on forks labelling is skipped
+# and only the check result remains.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: device-evidence-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: Device evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Test the evidence check
+        run: python3 -m unittest discover -s .github/scripts -p 'test_device_evidence.py' -v
+
+      - name: Evaluate changed paths against the PR body
+        id: evidence
+        # Keep going so the label step can still run when the check fails.
+        continue-on-error: true
+        run: python3 .github/scripts/device_evidence.py
+
+      - name: Sync the needs-device-evidence label
+        if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          NEEDS: ${{ steps.evidence.outputs.needs_label }}
+          LABEL: ${{ steps.evidence.outputs.label }}
+        run: |
+          if [[ "$NEEDS" == "true" ]]; then
+            gh pr edit "$NUMBER" --add-label "$LABEL"
+          else
+            gh pr edit "$NUMBER" --remove-label "$LABEL" 2>/dev/null || true
+          fi
+
+      - name: Report
+        if: steps.evidence.outcome == 'failure'
+        run: |
+          echo "::error::Device evidence is missing; see the step summary."
+          exit 1
