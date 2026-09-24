@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from telegram_api import TelegramClient, TelegramError, VariableState, escape, truncate
+from telegram_api import TelegramClient, TelegramError, VariableState, escape, http_json, truncate
 
 
 class FakeTelegram(TelegramClient):
@@ -100,6 +101,24 @@ class VariableStateTest(unittest.TestCase):
         store = VariableState("o/r", "gh", "STATE", lambda *a, **k: (204, {}))
         with self.assertRaises(RuntimeError):
             store.save({"blob": "x" * 50_000})
+
+
+class HttpJsonTest(unittest.TestCase):
+    def test_preserves_success_status(self):
+        class Response:
+            status = 204
+
+            def read(self):
+                return b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with patch("urllib.request.urlopen", return_value=Response()):
+            self.assertEqual(http_json("https://example.com"), (204, {}))
 
 
 if __name__ == "__main__":

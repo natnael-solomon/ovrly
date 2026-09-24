@@ -47,6 +47,7 @@ def http_json(url, method="GET", payload=None, headers=None):
         request.add_header("Content-Type", "application/json")
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
+            status = response.status
             raw = response.read()
     except urllib.error.HTTPError as error:
         raw = error.read()
@@ -54,7 +55,7 @@ def http_json(url, method="GET", payload=None, headers=None):
             return error.code, json.loads(raw)
         except ValueError:
             return error.code, {"description": raw.decode("utf-8", "replace")}
-    return 200, (json.loads(raw) if raw else {})
+    return status, (json.loads(raw) if raw else {})
 
 
 class TelegramClient:
