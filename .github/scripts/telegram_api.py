@@ -29,6 +29,18 @@ def escape(text):
     return html.escape(str(text), quote=False)
 
 
+# Short team names shown in place of GitHub logins; unmapped logins appear as-is.
+DISPLAY_NAMES = {
+    "natnael-solomon": "sol",
+    "nattyy-1": "sancho",
+    "neb-iyu": "neba",
+}
+
+
+def display_name(login):
+    return escape(DISPLAY_NAMES.get(str(login).lower(), login))
+
+
 def truncate(text, limit):
     text = " ".join(str(text).split())
     if len(text) <= limit:
@@ -47,14 +59,14 @@ def http_json(url, method="GET", payload=None, headers=None):
         request.add_header("Content-Type", "application/json")
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            raw = response.read()
+            status, raw = response.status, response.read()
     except urllib.error.HTTPError as error:
         raw = error.read()
         try:
             return error.code, json.loads(raw)
         except ValueError:
             return error.code, {"description": raw.decode("utf-8", "replace")}
-    return 200, (json.loads(raw) if raw else {})
+    return status, (json.loads(raw) if raw else {})
 
 
 class TelegramClient:
@@ -142,7 +154,7 @@ class VariableState:
             )
         else:
             status, _ = self._transport(self._url, "POST", payload, self._headers)
-        if status not in (201, 204):
+        if not 200 <= status < 300:
             raise RuntimeError(f"Could not write variable {self._name}: HTTP {status}")
         self._exists = True
 

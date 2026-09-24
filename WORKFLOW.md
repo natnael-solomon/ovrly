@@ -112,23 +112,25 @@ red under Actions.
   and author. Posts for PR runs are deleted once a later run on that PR passes;
   posts for `main` stay. Cancelled (superseded) runs are ignored.
 - Pull requests: one silent card per PR, edited in place from draft to ready
-  for review to merged or closed, with linked `Closes #N` issues. Becoming
-  ready for review also posts a short silent ping. Dependabot PRs are skipped.
-- Published releases: a loud post with the notes in an expandable quote.
-- Manual dispatch: a silent test message, the only way to verify the setup
-  before a real event.
+  for review to merged or closed, with linked `Closes #N` issues. Dependabot
+  PRs are skipped.
+- Published releases: a loud post with the first line of the notes.
 
 **Telegram board** (`telegram-board.yml`) polls the **ovrly development**
 Project every 15 minutes. It keeps one pinned message listing Ready, In
 progress, In review and `blocked`-labelled items, edited in place, and posts a
 silent summary of Status, Priority and Area changes plus additions and
 removals. Draft items are ignored. The first run records a baseline and posts
-"Board tracking started" instead of listing everything.
+"Board tracking started" instead of listing everything. It can be run
+manually from Actions.
 
 Both workflows only run from `main`: `workflow_run` and `schedule` triggers do
 not fire for other branches, so changes to them take effect after merging.
 Fork PRs cannot read secrets and produce no messages. GitHub disables scheduled
 workflows after 60 days without repository activity; re-enable it under Actions.
+To trial layout changes before merging, temporarily point `TELEGRAM_CHAT_ID`
+at a private chat and open a draft PR; its `pull_request` events run the
+branch's own workflow.
 
 Setup, performed once by the project owner:
 
@@ -141,16 +143,22 @@ Setup, performed once by the project owner:
    on the project owner's account. Fine-grained tokens cannot read user-owned
    Projects. Set an expiration; rotating the token is the owner's
    responsibility, and the board job fails visibly when it lapses.
-4. Add repository secrets `TELEGRAM_BOT_TOKEN` and `PROJECTS_READ_TOKEN`, and
-   the repository variable `TELEGRAM_CHAT_ID`.
-5. Run **Telegram notifications** manually to confirm a message arrives, then
-   **Telegram board** to create the pinned message.
+4. Create a fine-grained personal access token restricted to this repository
+   with only the **Variables: read and write** permission. The workflows'
+   built-in `GITHUB_TOKEN` cannot manage repository variables, so this token
+   persists their state. It expires like the project token.
+5. Add repository secrets `TELEGRAM_BOT_TOKEN`, `PROJECTS_READ_TOKEN` and
+   `STATE_TOKEN`, and the repository variable `TELEGRAM_CHAT_ID`.
+6. Run **Telegram board** manually to create the pinned message and confirm
+   the bot, chat ID and tokens work.
 
 The workflows create and maintain the variables `TELEGRAM_NOTIFY_STATE` and
 `TELEGRAM_BOARD_STATE` (message IDs and the last board snapshot). Deleting a
 state variable resets that workflow: the board re-baselines and PR cards start
 fresh. Never edit them by hand. PR titles, commit subjects, release notes and
 board item titles are sent to Telegram, so keep them free of anything private.
+GitHub logins appear as the short team names in `DISPLAY_NAMES`
+(`.github/scripts/telegram_api.py`); add new team members there.
 
 ## 5. Open and review a PR
 

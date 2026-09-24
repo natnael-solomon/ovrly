@@ -4,7 +4,7 @@ import os
 import time
 
 from telegram_api import (
-    TelegramClient, VariableState, escape, http_json, require_env, truncate,
+    TelegramClient, TelegramError, VariableState, display_name, escape, http_json, require_env, truncate,
 )
 
 STATE_VARIABLE = "TELEGRAM_BOARD_STATE"
@@ -13,7 +13,7 @@ FIELDS = ("status", "priority", "area")
 FIELD_LABELS = {"status": "Status", "priority": "Priority", "area": "Area"}
 DEFAULT_COLUMNS = ("Ready", "In progress", "In review")
 BLOCKED_LABEL = "blocked"
-TITLE_LIMIT = 48
+TITLE_LIMIT = 24
 INLINE_LIMIT = 8
 
 QUERY = """
@@ -28,8 +28,8 @@ query($owner: String!, $number: Int!, $after: String) {
           id
           content {
             __typename
-            ... on Issue { number title url labels(first: 30) { nodes { name } } }
-            ... on PullRequest { number title url labels(first: 30) { nodes { name } } }
+            ... on Issue { number title url labels(first: 30) { nodes { name } } assignees(first: 10) { nodes { login } } }
+            ... on PullRequest { number title url labels(first: 30) { nodes { name } } assignees(first: 10) { nodes { login } } }
           }
           status: fieldValueByName(name: "Status") {
             ... on ProjectV2ItemFieldSingleSelectValue { name }
@@ -79,11 +79,13 @@ def snapshot(nodes):
         if content.get("__typename") not in ("Issue", "PullRequest"):
             continue
         labels = [label["name"] for label in (content.get("labels") or {}).get("nodes") or []]
+        assignees = [a["login"] for a in (content.get("assignees") or {}).get("nodes") or []]
         item = {
             "number": content["number"],
             "title": content["title"],
             "url": content["url"],
             "blocked": BLOCKED_LABEL in labels,
+            "assignees": sorted(assignees),
         }
         for field in FIELDS:
             item[field] = (node.get(field) or {}).get("name")
@@ -114,17 +116,44 @@ def diff(before, after):
 
 # --- Rendering -----------------------------------------------------------------
 
-def item_link(item):
-    title = escape(truncate(item["title"], TITLE_LIMIT))
-    return f'<a href="{escape(item["url"])}">#{item["number"]}</a> {title}'
+RULE = "╌" * 12
+
+
+def linked_title(item):
+    """'#N title…' as one hyperlink."""
+    text = f"#{item['number']} {escape(truncate(item['title'], TITLE_LIMIT))}"
+    return f'<a href="{escape(item["url"])}">{text}</a>'
+
+
+def assignee_text(item):
+    return ", ".join(display_name(a) for a in item["assignees"]) or "wef"
+
+
+def quoted_row(item, with_assignee=True):
+    if not with_assignee:
+        return linked_title(item)
+    return f"{linked_title(item)} · {assignee_text(item)}"
 
 
 def value(name):
     return f"<code>{escape(name)}</code>" if name else "—"
 
 
+def group_lines(groups, quote):
+    """Render (heading, items) groups: heading, then its rows in one attached quote."""
+    lines = []
+    for heading, items in groups:
+        rows = "\n".join(quote(i, heading) for i in items)
+        # The quote opens on the heading line so Telegram does not insert a block gap.
+        lines.append(f"{heading}<blockquote>{rows}</blockquote>")
+    return lines
+
+
+def board_row(item):
+    return f"<blockquote>{quoted_row(item)}</blockquote>"
+
+
 def render_board(project, items, now, columns=DEFAULT_COLUMNS):
-    lines = [f'<b>Board</b> · <a href="{escape(project["url"])}">{escape(project["title"])}</a>']
     ordered = sorted(items.values(), key=lambda item: item["number"])
     sections = [
         (column, [i for i in ordered if i["status"] == column and not i["blocked"]])
@@ -132,34 +161,41 @@ def render_board(project, items, now, columns=DEFAULT_COLUMNS):
     ]
     sections.append(("Blocked", [i for i in ordered if i["blocked"]]))
     populated = [(name, rows) for name, rows in sections if rows]
+
+    lines = [f'<b><a href="{escape(project["url"])}">Board</a></b>', RULE]
     if not populated:
         lines.append("Nothing in progress.")
     for name, rows in populated:
         lines.append(f"<b>{escape(name)}</b>")
-        lines.extend(f"• {item_link(item)}" for item in rows)
-    lines.append(f'Updated <tg-time unix="{int(now)}" format="r">just now</tg-time>')
+        lines.extend(board_row(item) for item in rows)
+    lines.append("")
+    lines.append(f'<tg-time unix="{int(now)}" format="r">just now</tg-time>')
     return "\n".join(lines)
 
 
 def render_changes(changes):
-    bullets = []
+    """Group changes by transition; each group lists its items as quoted title/assignee rows."""
+    groups = {}
     for item, kind, fields in changes:
         if kind == "added":
-            detail = f"added to {value(item['status'])}"
+            keys = [f"<b>Added</b> {value(item['status'])}"]
         elif kind == "removed":
-            detail = "removed"
+            keys = ["<b>Removed</b>"]
         else:
-            parts = []
+            keys = []
             for field, old, new in fields:
-                label = "" if field == "status" else f"{FIELD_LABELS[field]} "
-                parts.append(f"{label}{value(old)} → {value(new)}")
-            detail = " · ".join(parts)
-        bullets.append(f"• {item_link(item)} — {detail}")
-    count = len(bullets)
-    header = f"<b>Board</b> · {count} change{'' if count == 1 else 's'}"
-    if count > INLINE_LIMIT:
-        return f"{header}\n<blockquote expandable>" + "\n".join(bullets) + "</blockquote>"
-    return "\n".join([header, *bullets])
+                prefix = "" if field == "status" else f"<b>{FIELD_LABELS[field]}</b> "
+                keys.append(f"{prefix}{value(old)} <b>→</b> {value(new)}")
+        for key in keys:
+            groups.setdefault(key, []).append(item)
+
+    count = len(changes)
+    lines = [f"<b>Board</b> · {count} change{'' if count == 1 else 's'}", RULE]
+    lines.extend(group_lines(
+        list(groups.items()),
+        lambda item, heading: quoted_row(item, with_assignee=heading != "<b>Removed</b>"),
+    ))
+    return "\n".join(lines)
 
 
 # --- Run -----------------------------------------------------------------------
@@ -169,7 +205,11 @@ def publish_board(telegram, state, text):
     if message_id is not None and telegram.edit(message_id, text):
         return
     state["message_id"] = telegram.send(text, silent=True)
-    telegram.pin(state["message_id"])
+    try:
+        telegram.pin(state["message_id"])
+    except TelegramError as error:
+        # The board is still useful unpinned; the bot just needs the pin right.
+        print(f"::warning::Could not pin the board message: {error}")
 
 
 def run(telegram, state, project, nodes, now, columns=DEFAULT_COLUMNS):
@@ -195,8 +235,8 @@ def run(telegram, state, project, nodes, now, columns=DEFAULT_COLUMNS):
 
 
 def main():
-    bot_token, chat_id, github_token, repository, project_token, owner, number = require_env(
-        "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN", "GITHUB_REPOSITORY",
+    bot_token, chat_id, state_token, repository, project_token, owner, number = require_env(
+        "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "STATE_TOKEN", "GITHUB_REPOSITORY",
         "PROJECTS_READ_TOKEN", "PROJECT_OWNER", "PROJECT_NUMBER",
     )
     columns = tuple(
@@ -206,7 +246,7 @@ def main():
     )
     project, nodes = fetch_project(project_token, owner, int(number))
     telegram = TelegramClient(bot_token, chat_id)
-    store = VariableState(repository, github_token, STATE_VARIABLE)
+    store = VariableState(repository, state_token, STATE_VARIABLE)
     state = store.load()
     outcome = run(telegram, state, project, nodes, time.time(), columns)
     store.save(state)

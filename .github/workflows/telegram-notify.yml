@@ -8,17 +8,9 @@ on:
     types: [opened, ready_for_review, closed]
   release:
     types: [published]
-  workflow_dispatch:
-    inputs:
-      message:
-        description: Test message to post to the group
-        required: false
-        default: Telegram notifications test
 
-# actions: write lets the script persist message IDs in a repository variable.
 permissions:
   contents: read
-  actions: write
 
 jobs:
   notify:
@@ -39,4 +31,5 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN cannot manage repository variables; a PAT with Variables access is required.
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
