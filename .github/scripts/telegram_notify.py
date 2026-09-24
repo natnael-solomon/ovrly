@@ -32,7 +32,7 @@ def author(login):
 
 
 RULE = "╌" * 12
-QUOTE_LIMIT = 23
+QUOTE_LIMIT = 20
 GAP = object()
 
 
@@ -80,7 +80,7 @@ def render_failure(run, repository_url):
 
 def pr_status(pr):
     if pr.get("merged"):
-        text = f"Merged into <code>{escape(pr['base']['ref'])}</code>"
+        text = f"merged into <code>{escape(pr['base']['ref'])}</code>"
         closes = closing_issues(pr.get("body"))
         if closes:
             repository_url = pr["base"]["repo"]["html_url"]
@@ -88,8 +88,8 @@ def pr_status(pr):
             text += f", closes {links}"
         return text
     if pr.get("state") == "closed":
-        return "Closed without merge"
-    return "Draft" if pr.get("draft") else "Ready for review"
+        return "closed without merge"
+    return "draft" if pr.get("draft") else "ready for review"
 
 
 def render_card(pr):
