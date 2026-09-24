@@ -87,24 +87,29 @@ class RenderTest(unittest.TestCase):
         self.assertIn("Nothing in progress.", text)
         self.assertNotIn("blockquote", text)
 
-    def test_changes_inline_and_expandable(self):
-        before = snapshot([node("a", 1, "Ready", "Next")])
-        after = snapshot([node("a", 1, "In review", "Now", "Android"), node("b", 2, None, assignees=())])
+    def test_changes_group_by_transition(self):
+        before = snapshot([node("a", 1, "Ready", "Next"), node("c", 3, "Ready"), node("d", 4, "Backlog")])
+        after = snapshot([
+            node("a", 1, "In review", "Now", "Android"),
+            node("c", 3, "In review"),
+            node("b", 2, None, assignees=()),
+        ])
         text = render_changes(diff(before, after))
         lines = text.split("\n")
-        self.assertEqual(lines[:2], ["<b>Board</b> · 2 changes", RULE])
-        self.assertEqual(lines[2], '<a href="https://github.com/o/r/issues/1">#1</a>  <code>Ready</code> → <code>In review</code> · P: <code>Next</code> → <code>Now</code> · A: — → <code>Android</code>')
-        self.assertEqual(lines[3], '<s><a href="https://github.com/o/r/issues/2">#2</a></s>  → —')
-        self.assertNotIn("blockquote", text)
-
-        many = render_changes(diff({}, snapshot([node(str(i), i, "Backlog") for i in range(9)])))
-        self.assertIn(f"{RULE}\n<blockquote expandable>", many)
-        self.assertEqual(many.count("<blockquote"), 1)
+        self.assertEqual(lines[:2], ["<b>Board</b> · 4 changes", RULE])
+        self.assertEqual(lines[2], '<b><code>Ready</code> → <code>In review</code></b>  <a href="https://github.com/o/r/issues/1">#1</a>  <a href="https://github.com/o/r/issues/3">#3</a>')
+        self.assertEqual(lines[3], "<b>Priority <code>Next</code> → <code>Now</code></b>  <a href=\"https://github.com/o/r/issues/1\">#1</a>")
+        self.assertEqual(lines[4], "<b>Area — → <code>Android</code></b>  <a href=\"https://github.com/o/r/issues/1\">#1</a>")
+        self.assertEqual(lines[5], '<b>Added to —</b>  <s><a href="https://github.com/o/r/issues/2">#2</a></s>')
+        self.assertEqual(lines[6], '<b>Removed</b>  <a href="https://github.com/o/r/issues/4">#4</a>')
+        self.assertTrue(lines[7].startswith("<blockquote expandable>"))
+        self.assertIn("#2</a> Task 2 · <i>unassigned</i>", text)
+        self.assertIn("#4</a> Task 4 · <i>dev</i></blockquote>", text)
 
     def test_single_change_grammar(self):
         text = render_changes(diff(snapshot([node("a", 1, "Ready")]), {}))
         self.assertIn("· 1 change\n", text)
-        self.assertTrue(text.endswith("#1</a>  removed"))
+        self.assertIn("<b>Removed</b>  <a", text)
 
 
 class RunTest(unittest.TestCase):

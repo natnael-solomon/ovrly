@@ -148,37 +148,40 @@ def render_board(project, items, now, columns=DEFAULT_COLUMNS):
         lines.append("Nothing in progress.")
     for name, rows in populated:
         lines.append(f"<b>{escape(name)}</b>  " + "  ".join(number_link(i) for i in rows))
-
-    details = []
-    for name, rows in populated:
-        for item in rows:
-            who = ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
-            details.append(f"{item_link(item)} · <i>{who}</i>")
-    if details:
-        lines.append(f"<blockquote expandable>{chr(10).join(details)}</blockquote>")
+    lines.append(details_block([item for _, rows in populated for item in rows]))
     lines.append(f'<tg-time unix="{int(now)}" format="r">just now</tg-time>')
-    return "\n".join(lines)
+    return "\n".join(line for line in lines if line)
+
+
+def details_block(items):
+    rows = []
+    for item in items:
+        who = ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
+        rows.append(f"{item_link(item)} · <i>{who}</i>")
+    return f"<blockquote expandable>{chr(10).join(rows)}</blockquote>" if rows else ""
 
 
 def render_changes(changes):
-    rows = []
+    """Group changes by transition so a triage session reads as a few lines, not a list."""
+    groups = {}
     for item, kind, fields in changes:
         if kind == "added":
-            detail = f"→ {value(item['status'])}"
+            keys = [f"Added to {value(item['status'])}"]
         elif kind == "removed":
-            detail = "removed"
+            keys = ["Removed"]
         else:
-            parts = []
+            keys = []
             for field, old, new in fields:
-                label = "" if field == "status" else f"{FIELD_LABELS[field][0]}: "
-                parts.append(f"{label}{value(old)} → {value(new)}")
-            detail = " · ".join(parts)
-        rows.append(f"{number_link(item)}  {detail}")
-    count = len(rows)
-    header = f"<b>Board</b> · {count} change{'' if count == 1 else 's'}"
-    if count > INLINE_LIMIT:
-        return "\n".join([header, RULE, f"<blockquote expandable>{chr(10).join(rows)}</blockquote>"])
-    return "\n".join([header, RULE, *rows])
+                prefix = "" if field == "status" else f"{FIELD_LABELS[field]} "
+                keys.append(f"{prefix}{value(old)} → {value(new)}")
+        for key in keys:
+            groups.setdefault(key, []).append(item)
+
+    count = len(changes)
+    lines = [f"<b>Board</b> · {count} change{'' if count == 1 else 's'}", RULE]
+    lines.extend(f"<b>{key}</b>  " + "  ".join(number_link(i) for i in items) for key, items in groups.items())
+    lines.append(details_block([item for item, _, _ in changes]))
+    return "\n".join(line for line in lines if line)
 
 
 # --- Run -----------------------------------------------------------------------
