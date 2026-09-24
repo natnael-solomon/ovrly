@@ -1,0 +1,39 @@
+name: Telegram board
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+# actions: write lets the script persist the board snapshot in a repository variable.
+permissions:
+  contents: read
+  actions: write
+
+# Runs share one state variable, so they must not overlap.
+concurrency:
+  group: telegram-board
+  cancel-in-progress: false
+
+jobs:
+  board:
+    name: Telegram board
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out notifier scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Sync board to Telegram
+        run: python3 .github/scripts/telegram_board.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROJECTS_READ_TOKEN: ${{ secrets.PROJECTS_READ_TOKEN }}
+          PROJECT_OWNER: natnael-solomon
+          PROJECT_NUMBER: '3'
+          BOARD_COLUMNS: Ready,In progress,In review

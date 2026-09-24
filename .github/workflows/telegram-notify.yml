@@ -1,0 +1,42 @@
+name: Telegram notifications
+
+on:
+  workflow_run:
+    workflows: [Android CI]
+    types: [completed]
+  pull_request:
+    types: [opened, ready_for_review, closed]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      message:
+        description: Test message to post to the group
+        required: false
+        default: Telegram notifications test
+
+# actions: write lets the script persist message IDs in a repository variable.
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  notify:
+    name: Telegram notify
+    # Dependabot-triggered runs have no access to secrets; the script also skips its PRs.
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out notifier scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Post to Telegram
+        run: python3 .github/scripts/telegram_notify.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -98,6 +98,60 @@ from failed builds. Superseded PR runs are canceled. Actions are commit-pinned;
 Dependabot proposes weekly action and Android dependency updates for review,
 without automatic merging.
 
+### Telegram notifications
+
+Two workflows mirror repository activity into the team Telegram group. Their
+logic lives in tested Python under `.github/scripts/` (`telegram_*.py`); the
+YAML only supplies configuration. Failures never affect **Android checks**, but
+a rejected Telegram or GitHub API call fails the notification job so it shows
+red under Actions.
+
+**Telegram notifications** (`telegram-notify.yml`) reacts to events:
+
+- **Android CI** `failure` or `timed_out`: a loud post linking the run, commit
+  and author. Posts for PR runs are deleted once a later run on that PR passes;
+  posts for `main` stay. Cancelled (superseded) runs are ignored.
+- Pull requests: one silent card per PR, edited in place from draft to ready
+  for review to merged or closed, with linked `Closes #N` issues. Becoming
+  ready for review also posts a short silent ping. Dependabot PRs are skipped.
+- Published releases: a loud post with the notes in an expandable quote.
+- Manual dispatch: a silent test message, the only way to verify the setup
+  before a real event.
+
+**Telegram board** (`telegram-board.yml`) polls the **ovrly development**
+Project every 15 minutes. It keeps one pinned message listing Ready, In
+progress, In review and `blocked`-labelled items, edited in place, and posts a
+silent summary of Status, Priority and Area changes plus additions and
+removals. Draft items are ignored. The first run records a baseline and posts
+"Board tracking started" instead of listing everything.
+
+Both workflows only run from `main`: `workflow_run` and `schedule` triggers do
+not fire for other branches, so changes to them take effect after merging.
+Fork PRs cannot read secrets and produce no messages. GitHub disables scheduled
+workflows after 60 days without repository activity; re-enable it under Actions.
+
+Setup, performed once by the project owner:
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and add it to the
+   group as an administrator with pin, edit and delete rights. Editing older
+   messages and pinning require admin status.
+2. Read the group's chat ID from `https://api.telegram.org/bot<token>/getUpdates`
+   after posting in the group; supergroup IDs start with `-100`.
+3. Create a classic personal access token with only the `read:project` scope
+   on the project owner's account. Fine-grained tokens cannot read user-owned
+   Projects. Set an expiration; rotating the token is the owner's
+   responsibility, and the board job fails visibly when it lapses.
+4. Add repository secrets `TELEGRAM_BOT_TOKEN` and `PROJECTS_READ_TOKEN`, and
+   the repository variable `TELEGRAM_CHAT_ID`.
+5. Run **Telegram notifications** manually to confirm a message arrives, then
+   **Telegram board** to create the pinned message.
+
+The workflows create and maintain the variables `TELEGRAM_NOTIFY_STATE` and
+`TELEGRAM_BOARD_STATE` (message IDs and the last board snapshot). Deleting a
+state variable resets that workflow: the board re-baselines and PR cards start
+fresh. Never edit them by hand. PR titles, commit subjects, release notes and
+board item titles are sent to Telegram, so keep them free of anything private.
+
 ## 5. Open and review a PR
 
 Open a draft for unfinished work or early feedback. Link the task issue when
