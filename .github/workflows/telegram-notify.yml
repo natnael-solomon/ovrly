@@ -44,3 +44,5 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
           # GITHUB_TOKEN cannot manage repository variables; a PAT with Variables access is required.
           STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+          # Read-only; lets manual previews use real PRs, runs and releases.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

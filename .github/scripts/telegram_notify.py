@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from telegram_api import (
-    TelegramClient, VariableState, escape, first_line, require_env, truncate,
+    TelegramClient, VariableState, escape, first_line, http_json, require_env, truncate,
 )
 
 STATE_VARIABLE = "TELEGRAM_NOTIFY_STATE"
@@ -177,10 +177,36 @@ def handle_release(telegram, state, event):
     return f"Posted release {event['release']['tag_name']}."
 
 
-def sample_event(kind, repository):
-    """Synthetic payloads so message layouts can be previewed from workflow_dispatch."""
+def fetch_samples(repository_api, token, transport=http_json):
+    """Pull real objects so previews link to actual PRs, runs and releases."""
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+
+    def get(path, default):
+        try:
+            status, body = transport(f"{repository_api}/{path}", headers=headers)
+        except Exception:  # noqa: BLE001 - previews must never fail on a lookup
+            return default
+        return body if status == 200 else default
+
+    def first(items, predicate=lambda _: True):
+        return next((i for i in items if predicate(i)), None) if isinstance(items, list) else None
+
+    closed = get("pulls?state=closed&sort=updated&direction=desc&per_page=20", [])
+    runs = get("actions/runs?status=failure&per_page=20", {}).get("workflow_runs", [])
+    return {
+        "open_pr": first(get("pulls?state=open&per_page=5", []), lambda p: not p["draft"]),
+        "merged_pr": first(closed, lambda p: p.get("merged_at")),
+        "branch_run": first(runs, lambda r: r["event"] != "pull_request"),
+        "pr_run": first(runs, lambda r: r["event"] == "pull_request" and r.get("pull_requests")),
+        "release": get("releases/latest", None),
+    }
+
+
+def sample_event(kind, repository, real=None):
+    """Payloads for workflow_dispatch previews: real objects when available, synthetic otherwise."""
+    real = real or {}
     url = repository["html_url"]
-    pr = {
+    synthetic_pr = {
         "number": 0, "title": "feat(sample): preview pull request card", "draft": False,
         "merged": kind == "pr_merged", "state": "closed" if kind == "pr_merged" else "open",
         "body": "Closes #1" if kind == "pr_merged" else "",
@@ -189,19 +215,24 @@ def sample_event(kind, repository):
     }
     if kind in ("failure", "pr_failure"):
         on_pr = kind == "pr_failure"
-        return "workflow_run", {"repository": repository, "workflow_run": {
+        run = real.get("pr_run" if on_pr else "branch_run") or {
             "id": 0, "name": "Android CI", "conclusion": "failure",
             "event": "pull_request" if on_pr else "push",
             "head_branch": "sample", "head_sha": "0" * 40, "html_url": f"{url}/actions",
             "head_commit": {"message": "fix(sample): preview failure post"},
             "actor": {"login": "sample"}, "pull_requests": [{"number": 0}] if on_pr else [],
-        }}
+        }
+        return "workflow_run", {"repository": repository, "workflow_run": run}
     if kind == "release":
-        return "release", {"repository": repository, "release": {
+        release = real.get("release") or {
             "tag_name": "v0.0.0-sample", "name": None, "prerelease": True,
             "body": "Preview of a release summary line.\n\n- one\n- two",
             "html_url": f"{url}/releases", "author": {"login": "sample"},
-        }}
+        }
+        return "release", {"repository": repository, "release": release}
+    pr = real.get("merged_pr" if kind == "pr_merged" else "open_pr") or synthetic_pr
+    if kind == "pr_merged":
+        pr = dict(pr, merged=True, state="closed")
     return "pull_request", {"repository": repository, "pull_request": pr,
                             "action": "closed" if kind == "pr_merged" else "ready_for_review"}
 
@@ -209,42 +240,65 @@ def sample_event(kind, repository):
 SAMPLES = ("failure", "pr_failure", "pr_ready", "pr_merged", "release", "board_changes")
 
 
-def sample_board_changes(repository):
+def sample_board_changes(repository, board_items=None):
+    """Simulate a triage pass over real board items, or synthetic ones when none are available."""
     import telegram_board
 
-    def item(number, title, status, priority=None, labels=(), assignees=("sample",)):
+    def synthetic(number, title, status, priority=None, assignees=("sample",)):
         return {
             "id": f"sample-{number}",
             "content": {
                 "__typename": "Issue", "number": number, "title": title,
                 "url": f"{repository['html_url']}/issues/{number}",
-                "labels": {"nodes": [{"name": name} for name in labels]},
+                "labels": {"nodes": []},
                 "assignees": {"nodes": [{"login": login} for login in assignees]},
             },
             "status": {"name": status}, "priority": {"name": priority} if priority else None,
             "area": None,
         }
 
+    if board_items and len(board_items) >= 3:
+        before = dict(board_items)
+        ids = sorted(before, key=lambda i: before[i]["number"])[:3]
+        after = {k: dict(v) for k, v in before.items() if k != ids[2]}
+        after[ids[0]].update(status="In progress", priority="Now")
+        after[ids[1]].update(status="In review")
+        return telegram_board.render_changes(telegram_board.diff(before, after))
+
     before = telegram_board.snapshot([
-        item(1, "Sample task moving forward", "Ready", "Next"),
-        item(2, "Sample task leaving the board", "In progress"),
+        synthetic(1, "Sample task moving forward", "Ready", "Next"),
+        synthetic(2, "Sample task leaving the board", "In progress"),
     ])
     after = telegram_board.snapshot([
-        item(1, "Sample task moving forward", "In progress", "Now"),
-        item(3, "Sample task just added", "Ready", assignees=()),
+        synthetic(1, "Sample task moving forward", "In progress", "Now"),
+        synthetic(3, "Sample task just added", "Ready", assignees=()),
     ])
     return telegram_board.render_changes(telegram_board.diff(before, after))
+
+
+def load_board_items():
+    """Read the current board snapshot from the board workflow's state, if it exists."""
+    try:
+        state = VariableState(
+            os.environ["GITHUB_REPOSITORY"], os.environ["STATE_TOKEN"], "TELEGRAM_BOARD_STATE"
+        ).load()
+    except Exception:  # noqa: BLE001 - previews must never fail on a lookup
+        return None
+    return state.get("items")
 
 
 def handle_dispatch(telegram, state, event):
     inputs = event.get("inputs") or {}
     sample = inputs.get("sample") or ""
     if sample == "board_changes":
-        telegram.send(sample_board_changes(event["repository"]), silent=True)
+        telegram.send(sample_board_changes(event["repository"], load_board_items()), silent=True)
         return "Previewed board_changes."
     if sample in SAMPLES:
         # Preview against a throwaway state so real cards and failures are untouched.
-        event_name, payload = sample_event(sample, event["repository"])
+        real = {}
+        if os.environ.get("GITHUB_TOKEN"):
+            real = fetch_samples(event["repository"]["url"], os.environ["GITHUB_TOKEN"])
+        event_name, payload = sample_event(sample, event["repository"], real)
         scratch = {}
         if sample == "pr_merged":
             upsert_card(telegram, scratch, dict(payload["pull_request"], merged=False, state="open"))
