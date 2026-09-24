@@ -70,10 +70,11 @@ def render_failure(run, repository_url):
     message = truncate(first_line((run.get("head_commit") or {}).get("message")), 120)
     return compose(
         link(run["html_url"], f"{run['name']} {verb} {target}"),
-        f"<blockquote>{escape(message)}</blockquote>" if message else "",
+        escape(message) if message else "",
+        GAP,
         field("Commit", link(f"{repository_url}/commit/{sha}", sha[:7])),
         field("By", author(run["actor"]["login"])),
-        meta=(relative_time(),),
+        field("When", relative_time()),
     )
 
 
@@ -109,10 +110,11 @@ def render_release(release, repository_name):
         body = body[:1499].rstrip() + "…"
     return compose(
         link(release["html_url"], f"{repository_name} {title}"),
-        f"<i>{kind}</i>",
         f"<blockquote expandable>{escape(body)}</blockquote>" if body else "",
+        GAP,
+        field("Type", kind),
         field("By", author(release["author"]["login"])),
-        meta=(relative_time(),),
+        field("When", relative_time()),
     )
 
 

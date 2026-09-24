@@ -128,6 +128,20 @@ class RunTest(unittest.TestCase):
         self.assertEqual(telegram.methods(), ["editMessageText", "sendMessage", "pinChatMessage"])
         self.assertEqual(state["message_id"], 103)
 
+    def test_pin_failure_is_tolerated(self):
+        from telegram_api import TelegramError
+
+        class NoPin(FakeTelegram):
+            def call(self, method, **params):
+                if method == "pinChatMessage":
+                    raise TelegramError("pinChatMessage: not enough rights")
+                return super().call(method, **params)
+
+        telegram, state = NoPin(), {}
+        outcome = run(telegram, state, PROJECT, [node("a", 1, "Ready")], now=0)
+        self.assertEqual(state["message_id"], 101)
+        self.assertIn("Baseline", outcome)
+
 
 class FetchTest(unittest.TestCase):
     def test_paginates_and_reports_errors(self):

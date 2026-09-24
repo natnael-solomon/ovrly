@@ -40,11 +40,12 @@ class RenderingTest(unittest.TestCase):
         lines = text.split("\n")
         self.assertEqual(lines[0], '<b><a href="https://github.com/o/r/actions/runs/9">Android checks failed on PR#42</a></b>')
         self.assertEqual(lines[1], RULE)
-        self.assertEqual(lines[2], "<blockquote>fix(capture): release projection</blockquote>")
-        self.assertEqual(lines[3], '<b>Commit</b>  <a href="https://github.com/o/r/commit/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678">a1b2c3d</a>')
-        self.assertEqual(lines[4], "<b>By</b>  <i>dev</i>")
-        self.assertEqual(lines[5], "")
-        self.assertTrue(lines[6].startswith("<tg-time"))
+        self.assertEqual(lines[2], "fix(capture): release projection")
+        self.assertEqual(lines[3], "")
+        self.assertEqual(lines[4], '<b>Commit</b>  <a href="https://github.com/o/r/commit/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678">a1b2c3d</a>')
+        self.assertEqual(lines[5], "<b>By</b>  <i>dev</i>")
+        self.assertTrue(lines[6].startswith("<b>When</b>  <tg-time"))
+        self.assertEqual(len(lines), 7)
         self.assertNotIn("Details", text)
 
     def test_failure_on_branch_and_timeout(self):
@@ -81,8 +82,8 @@ class RenderingTest(unittest.TestCase):
         }
         text = render_release(release, "ovrly")
         self.assertTrue(text.startswith(
-            f'<b><a href="https://github.com/o/r/releases/tag/v0.3.0">ovrly v0.3.0</a></b>\n{RULE}\n<i>Pre-release</i>\n'
-            "<blockquote expandable>Notes &amp; more\n- item</blockquote>\n<b>By</b>  <i>owner</i>\n\n<tg-time"
+            f'<b><a href="https://github.com/o/r/releases/tag/v0.3.0">ovrly v0.3.0</a></b>\n{RULE}\n'
+            "<blockquote expandable>Notes &amp; more\n- item</blockquote>\n\n<b>Type</b>  Pre-release\n<b>By</b>  <i>owner</i>\n<b>When</b>  <tg-time"
         ))
 
 

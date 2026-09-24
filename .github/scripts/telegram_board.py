@@ -4,7 +4,7 @@ import os
 import time
 
 from telegram_api import (
-    TelegramClient, VariableState, escape, http_json, require_env, truncate,
+    TelegramClient, TelegramError, VariableState, escape, http_json, require_env, truncate,
 )
 
 STATE_VARIABLE = "TELEGRAM_BOARD_STATE"
@@ -175,7 +175,11 @@ def publish_board(telegram, state, text):
     if message_id is not None and telegram.edit(message_id, text):
         return
     state["message_id"] = telegram.send(text, silent=True)
-    telegram.pin(state["message_id"])
+    try:
+        telegram.pin(state["message_id"])
+    except TelegramError as error:
+        # The board is still useful unpinned; the bot just needs the pin right.
+        print(f"::warning::Could not pin the board message: {error}")
 
 
 def run(telegram, state, project, nodes, now, columns=DEFAULT_COLUMNS):
