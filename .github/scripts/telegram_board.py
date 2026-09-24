@@ -146,6 +146,13 @@ def group_lines(groups, quote):
     return lines
 
 
+def board_row(item):
+    """One quoted, fully linked line: #N title · assignee."""
+    who = ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
+    text = f"#{item['number']} {escape(truncate(item['title'], TITLE_LIMIT))} · {who}"
+    return f'<blockquote><a href="{escape(item["url"])}">{text}</a></blockquote>'
+
+
 def render_board(project, items, now, columns=DEFAULT_COLUMNS):
     ordered = sorted(items.values(), key=lambda item: item["number"])
     sections = [
@@ -153,13 +160,14 @@ def render_board(project, items, now, columns=DEFAULT_COLUMNS):
         for column in columns
     ]
     sections.append(("Blocked", [i for i in ordered if i["blocked"]]))
-    groups = [(f"<b>{escape(name)}</b>", rows) for name, rows in sections if rows]
+    populated = [(name, rows) for name, rows in sections if rows]
 
     lines = [f'<b><a href="{escape(project["url"])}">Board</a></b>', RULE]
-    if groups:
-        lines.extend(group_lines(groups, lambda item, _: quoted_row(item)))
-    else:
+    if not populated:
         lines.append("Nothing in progress.")
+    for name, rows in populated:
+        lines.append(f"<b>{escape(name)}</b>")
+        lines.extend(board_row(item) for item in rows)
     lines.append("")
     lines.append(f'<tg-time unix="{int(now)}" format="r">just now</tg-time>')
     return "\n".join(lines)

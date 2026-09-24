@@ -75,7 +75,6 @@ def render_failure(run, repository_url):
         GAP,
         field("Commit", link(f"{repository_url}/commit/{sha}", sha[:7])),
         field("By", author(run["actor"]["login"])),
-        field("When", relative_time()),
     )
 
 
@@ -113,7 +112,6 @@ def render_release(release, repository_name):
         GAP,
         field("Type", kind),
         field("By", author(release["author"]["login"])),
-        field("When", relative_time()),
     )
 
 

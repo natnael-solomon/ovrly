@@ -44,8 +44,7 @@ class RenderingTest(unittest.TestCase):
         self.assertEqual(lines[3], "")
         self.assertEqual(lines[4], '<b>Commit</b>  <a href="https://github.com/o/r/commit/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678">a1b2c3d</a>')
         self.assertEqual(lines[5], "<b>By</b>  <i>dev</i>")
-        self.assertTrue(lines[6].startswith("<b>When</b>  <tg-time"))
-        self.assertEqual(len(lines), 7)
+        self.assertEqual(len(lines), 6)
         self.assertNotIn("Details", text)
 
     def test_failure_on_branch_and_timeout(self):
@@ -81,10 +80,10 @@ class RenderingTest(unittest.TestCase):
             "html_url": "https://github.com/o/r/releases/tag/v0.3.0", "author": {"login": "owner"},
         }
         text = render_release(release, "ovrly")
-        self.assertTrue(text.startswith(
-            f'<b><a href="https://github.com/o/r/releases/tag/v0.3.0">ovrly v0.3.0</a></b>\n{RULE}\n'
-            "<blockquote>Notes &amp; more</blockquote>\n\n<b>Type</b>  Pre-release\n<b>By</b>  <i>owner</i>\n<b>When</b>  <tg-time"
+        self.assertTrue(text.endswith(
+            "<blockquote>Notes &amp; more</blockquote>\n\n<b>Type</b>  Pre-release\n<b>By</b>  <i>owner</i>"
         ))
+        self.assertNotIn("When", text)
         self.assertNotIn("- item", text)
 
 
