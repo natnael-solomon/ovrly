@@ -226,7 +226,7 @@ fun GalleryScreen(onBack: () -> Unit, onDemo: (() -> Unit)? = null) {
                         }
                     }
                     Text(
-                        text = "Manually matched mock palettes — not automatic app sampling. " +
+                        text = "Manually matched mock palettes, not automatic app sampling. " +
                             "Optical rim and Milk glass stay light; Smoked glass stays dark.",
                         color = GalleryInk,
                         fontSize = 13.sp,
