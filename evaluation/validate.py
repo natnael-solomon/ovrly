@@ -256,6 +256,7 @@ def validate_dataset(directory, *, frozen=False, media_root=None):
                 root = media_root.resolve()
                 path = root.joinpath(*relative.parts)
                 require(path.is_relative_to(root), loc + ".media.path", "media escapes root")
+                require(path.exists(), loc + ".media.path", "media path not found")
                 resolved = path.resolve()
                 require(resolved.is_relative_to(root), loc + ".media.path", "media escapes root")
                 require(digest(resolved) == media["sha256"], loc + ".media.sha256",

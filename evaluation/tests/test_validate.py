@@ -346,6 +346,12 @@ class DatasetTest(unittest.TestCase):
             validate_dataset(self.directory, frozen=True, media_root=self.directory / "media"),
         )
 
+    def test_missing_media_entry_is_rejected(self):
+        self.frozen_fixture()
+        (self.directory / "media" / "clip-0.bin").unlink()
+        with self.assertRaisesRegex(Invalid, "media path not found"):
+            validate_dataset(self.directory, frozen=True, media_root=self.directory / "media")
+
     def test_cli_disclosures_and_failure_exit(self):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(0, main([str(self.directory)]))
