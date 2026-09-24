@@ -119,19 +119,31 @@ def diff(before, after):
 RULE = "╌" * 12
 
 
-def number_link(item):
-    """Linked issue number; unassigned items are struck through in the compact view."""
-    text = f'<a href="{escape(item["url"])}">#{item["number"]}</a>'
-    return text if item["assignees"] else f"<s>{text}</s>"
+def plain_link(item):
+    return f'<a href="{escape(item["url"])}">#{item["number"]}</a>'
 
 
-def item_link(item):
+def quoted_row(item, with_assignee=True):
     title = escape(truncate(item["title"], TITLE_LIMIT))
-    return f'<a href="{escape(item["url"])}">#{item["number"]}</a> {title}'
+    if not with_assignee:
+        return f"<blockquote>{title}</blockquote>"
+    who = ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
+    return f"<blockquote>{title} · <i>{who}</i></blockquote>"
 
 
 def value(name):
     return f"<code>{escape(name)}</code>" if name else "—"
+
+
+def group_lines(groups, quote):
+    """Render (heading, items) groups: heading with linked numbers, then one quoted row per item."""
+    lines = []
+    for index, (heading, items) in enumerate(groups):
+        if index:
+            lines.append("")
+        lines.append(f"{heading}  " + "  ".join(plain_link(i) for i in items))
+        lines.extend(quote(i, heading) for i in items)
+    return lines
 
 
 def render_board(project, items, now, columns=DEFAULT_COLUMNS):
@@ -141,28 +153,16 @@ def render_board(project, items, now, columns=DEFAULT_COLUMNS):
         for column in columns
     ]
     sections.append(("Blocked", [i for i in ordered if i["blocked"]]))
-    populated = [(name, rows) for name, rows in sections if rows]
+    groups = [(f"<b>{escape(name)}</b>", rows) for name, rows in sections if rows]
 
     lines = [f'<b><a href="{escape(project["url"])}">Board</a></b>', RULE]
-    if not populated:
+    if groups:
+        lines.extend(group_lines(groups, lambda item, _: quoted_row(item)))
+    else:
         lines.append("Nothing in progress.")
-    for name, rows in populated:
-        lines.append(f"<b>{escape(name)}</b>  " + "  ".join(number_link(i) for i in rows))
-    lines.append(details_block([item for _, rows in populated for item in rows]))
+    lines.append("")
     lines.append(f'<tg-time unix="{int(now)}" format="r">just now</tg-time>')
-    return "\n".join(line for line in lines if line)
-
-
-def details_block(items):
-    rows = []
-    for item in items:
-        who = ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
-        rows.append(f"{item_link(item)} · <i>{who}</i>")
-    return f"<blockquote expandable>{chr(10).join(rows)}</blockquote>" if rows else ""
-
-
-def plain_link(item):
-    return f'<a href="{escape(item["url"])}">#{item["number"]}</a>'
+    return "\n".join(lines)
 
 
 def render_changes(changes):
@@ -183,17 +183,10 @@ def render_changes(changes):
 
     count = len(changes)
     lines = [f"<b>Board</b> · {count} change{'' if count == 1 else 's'}", RULE]
-    for index, (key, items) in enumerate(groups.items()):
-        if index:
-            lines.append("")
-        lines.append(f"{key}  " + "  ".join(plain_link(i) for i in items))
-        for item in items:
-            title = escape(truncate(item["title"], TITLE_LIMIT))
-            if key == "<b>Removed</b>":
-                lines.append(f"<blockquote>{title}</blockquote>")
-            else:
-                who = ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
-                lines.append(f"<blockquote>{title} · <i>{who}</i></blockquote>")
+    lines.extend(group_lines(
+        list(groups.items()),
+        lambda item, heading: quoted_row(item, with_assignee=heading != "<b>Removed</b>"),
+    ))
     return "\n".join(lines)
 
 
