@@ -50,6 +50,10 @@ def field(label, value):
     return f"<b>{label}</b>  {value}"
 
 
+def quote(text):
+    return f"<blockquote>{escape(text)}</blockquote>"
+
+
 def closing_issues(body):
     seen = []
     for number in CLOSING_KEYWORDS.findall(body or ""):
@@ -70,7 +74,7 @@ def render_failure(run, repository_url):
     message = truncate(first_line((run.get("head_commit") or {}).get("message")), 120)
     return compose(
         link(run["html_url"], f"{run['name']} {verb} {target}"),
-        escape(message) if message else "",
+        quote(message) if message else "",
         GAP,
         field("Commit", link(f"{repository_url}/commit/{sha}", sha[:7])),
         field("By", author(run["actor"]["login"])),
@@ -95,7 +99,7 @@ def pr_status(pr):
 def render_card(pr):
     return compose(
         link(pr["html_url"], f"PR#{pr['number']}"),
-        escape(truncate(pr["title"], 100)),
+        quote(truncate(pr["title"], 100)),
         GAP,
         field("Status", pr_status(pr)),
         field("By", author(pr["user"]["login"])),

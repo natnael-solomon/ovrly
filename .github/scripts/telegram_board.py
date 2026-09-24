@@ -141,7 +141,7 @@ def render_board(project, items, now, columns=DEFAULT_COLUMNS):
         if index:
             lines.append("")
         lines.append(f"<b>{escape(name)}</b>")
-        lines.extend(f"• {item_link(item)}" for item in rows)
+        lines.extend(f"<blockquote>{item_link(item)}</blockquote>" for item in rows)
     lines.append("")
     lines.append(f'<tg-time unix="{int(now)}" format="r">just now</tg-time>')
     return "\n".join(lines)
@@ -160,12 +160,13 @@ def render_changes(changes):
                 label = "" if field == "status" else f"{FIELD_LABELS[field]} "
                 parts.append(f"{label}{value(old)} → {value(new)}")
             detail = " │ ".join(parts)
-        bullets.append(f"• {item_link(item)}\n   ↳ {detail}")
+        bullets.append(f"{item_link(item)}\n↳ {detail}")
     count = len(bullets)
     header = f"<b>Board · {count} change{'' if count == 1 else 's'}</b>"
     if count > INLINE_LIMIT:
-        return f"{header}\n{RULE}\n<blockquote expandable>" + "\n".join(bullets) + "</blockquote>"
-    return "\n".join([header, RULE, *bullets])
+        # Blockquotes cannot nest, so a long list collapses into one expandable quote.
+        return f"{header}\n{RULE}\n<blockquote expandable>" + "\n\n".join(bullets) + "</blockquote>"
+    return "\n".join([header, RULE, *(f"<blockquote>{b}</blockquote>" for b in bullets)])
 
 
 # --- Run -----------------------------------------------------------------------
