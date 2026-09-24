@@ -28,8 +28,8 @@ query($owner: String!, $number: Int!, $after: String) {
           id
           content {
             __typename
-            ... on Issue { number title url labels(first: 30) { nodes { name } } }
-            ... on PullRequest { number title url labels(first: 30) { nodes { name } } }
+            ... on Issue { number title url labels(first: 30) { nodes { name } } assignees(first: 10) { nodes { login } } }
+            ... on PullRequest { number title url labels(first: 30) { nodes { name } } assignees(first: 10) { nodes { login } } }
           }
           status: fieldValueByName(name: "Status") {
             ... on ProjectV2ItemFieldSingleSelectValue { name }
@@ -79,11 +79,13 @@ def snapshot(nodes):
         if content.get("__typename") not in ("Issue", "PullRequest"):
             continue
         labels = [label["name"] for label in (content.get("labels") or {}).get("nodes") or []]
+        assignees = [a["login"] for a in (content.get("assignees") or {}).get("nodes") or []]
         item = {
             "number": content["number"],
             "title": content["title"],
             "url": content["url"],
             "blocked": BLOCKED_LABEL in labels,
+            "assignees": sorted(assignees),
         }
         for field in FIELDS:
             item[field] = (node.get(field) or {}).get("name")
@@ -114,6 +116,15 @@ def diff(before, after):
 
 # --- Rendering -----------------------------------------------------------------
 
+RULE = "╌" * 12
+
+
+def number_link(item):
+    """Linked issue number; unassigned items are struck through in the compact view."""
+    text = f'<a href="{escape(item["url"])}">#{item["number"]}</a>'
+    return text if item["assignees"] else f"<s>{text}</s>"
+
+
 def item_link(item):
     title = escape(truncate(item["title"], TITLE_LIMIT))
     return f'<a href="{escape(item["url"])}">#{item["number"]}</a> {title}'
@@ -124,7 +135,6 @@ def value(name):
 
 
 def render_board(project, items, now, columns=DEFAULT_COLUMNS):
-    lines = [f'<b><a href="{escape(project["url"])}">Board</a></b>']
     ordered = sorted(items.values(), key=lambda item: item["number"])
     sections = [
         (column, [i for i in ordered if i["status"] == column and not i["blocked"]])
@@ -132,38 +142,43 @@ def render_board(project, items, now, columns=DEFAULT_COLUMNS):
     ]
     sections.append(("Blocked", [i for i in ordered if i["blocked"]]))
     populated = [(name, rows) for name, rows in sections if rows]
+
+    lines = [f'<b><a href="{escape(project["url"])}">Board</a></b>', RULE]
     if not populated:
         lines.append("Nothing in progress.")
-    for index, (name, rows) in enumerate(populated):
-        if index:
-            lines.append("")
-        lines.append(f"<b>{escape(name)}</b>")
-        lines.extend(f"<blockquote>{item_link(item)}</blockquote>" for item in rows)
-    lines.append("")
+    for name, rows in populated:
+        lines.append(f"<b>{escape(name)}</b>  " + "  ".join(number_link(i) for i in rows))
+
+    details = []
+    for name, rows in populated:
+        for item in rows:
+            who = ", ".join(escape(a) for a in item["assignees"]) or "unassigned"
+            details.append(f"{item_link(item)} · <i>{who}</i>")
+    if details:
+        lines.append(f"<blockquote expandable>{chr(10).join(details)}</blockquote>")
     lines.append(f'<tg-time unix="{int(now)}" format="r">just now</tg-time>')
     return "\n".join(lines)
 
 
 def render_changes(changes):
-    bullets = []
+    rows = []
     for item, kind, fields in changes:
         if kind == "added":
-            detail = f"added to {value(item['status'])}"
+            detail = f"→ {value(item['status'])}"
         elif kind == "removed":
             detail = "removed"
         else:
             parts = []
             for field, old, new in fields:
-                label = "" if field == "status" else f"{FIELD_LABELS[field]} "
+                label = "" if field == "status" else f"{FIELD_LABELS[field][0]}: "
                 parts.append(f"{label}{value(old)} → {value(new)}")
-            detail = " │ ".join(parts)
-        bullets.append(f"{item_link(item)}\n↳ {detail}")
-    count = len(bullets)
-    header = f"<b>Board · {count} change{'' if count == 1 else 's'}</b>"
+            detail = " · ".join(parts)
+        rows.append(f"{number_link(item)}  {detail}")
+    count = len(rows)
+    header = f"<b>Board</b> · {count} change{'' if count == 1 else 's'}"
     if count > INLINE_LIMIT:
-        # Blockquotes cannot nest, so a long list collapses into one expandable quote.
-        return f"{header}\n<blockquote expandable>" + "\n\n".join(bullets) + "</blockquote>"
-    return "\n".join([header, *(f"<blockquote>{b}</blockquote>" for b in bullets)])
+        return "\n".join([header, RULE, f"<blockquote expandable>{chr(10).join(rows)}</blockquote>"])
+    return "\n".join([header, RULE, *rows])
 
 
 # --- Run -----------------------------------------------------------------------

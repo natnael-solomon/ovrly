@@ -1,18 +1,19 @@
 import unittest
 
-from telegram_board import diff, fetch_project, render_board, render_changes, run, snapshot
+from telegram_board import RULE, diff, fetch_project, render_board, render_changes, run, snapshot
 from test_telegram_api import FakeTelegram
 
 PROJECT = {"title": "ovrly development", "url": "https://github.com/users/o/projects/3"}
 
 
-def node(item_id, number, status, priority=None, area=None, labels=(), kind="Issue", title=None):
+def node(item_id, number, status, priority=None, area=None, labels=(), kind="Issue", title=None, assignees=("dev",)):
     return {
         "id": item_id,
         "content": {
             "__typename": kind, "number": number, "title": title or f"Task {number}",
             "url": f"https://github.com/o/r/issues/{number}",
             "labels": {"nodes": [{"name": name} for name in labels]},
+            "assignees": {"nodes": [{"login": login} for login in assignees]},
         },
         "status": {"name": status} if status else None,
         "priority": {"name": priority} if priority else None,
@@ -35,6 +36,8 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(item["priority"], "Now")
         self.assertEqual(item["area"], "Android")
         self.assertTrue(item["blocked"])
+        self.assertEqual(item["assignees"], ["dev"])
+        self.assertEqual(snapshot([node("b", 2, "Ready", assignees=())])["b"]["assignees"], [])
 
 
 class DiffTest(unittest.TestCase):
@@ -56,42 +59,52 @@ class RenderTest(unittest.TestCase):
     def test_board_sections_and_blocked(self):
         items = snapshot([
             node("a", 42, "In progress", title="share intake"),
-            node("b", 17, "Ready"),
+            node("b", 17, "Ready", assignees=()),
             node("c", 33, "In progress", labels=["blocked"], title="old <spike>"),
             node("d", 60, "Done"),
             node("e", 61, "Backlog"),
         ])
         text = render_board(PROJECT, items, now=1700000000)
-        self.assertTrue(text.startswith('<b><a href="https://github.com/users/o/projects/3">Board</a></b>\n<b>Ready</b>\n'))
-        self.assertIn("<b>Ready</b>\n<blockquote><a href=\"https://github.com/o/r/issues/17\">#17</a> Task 17</blockquote>\n\n<b>In progress</b>\n<blockquote><a", text)
-        self.assertIn("\n\n<b>Blocked</b>\n<blockquote><a href=\"https://github.com/o/r/issues/33\">#33</a> old &lt;spike&gt;</blockquote>\n\n<tg-time", text)
+        lines = text.split("\n")
+        self.assertEqual(lines[0], '<b><a href="https://github.com/users/o/projects/3">Board</a></b>')
+        self.assertEqual(lines[1], RULE)
+        self.assertEqual(lines[2], '<b>Ready</b>  <s><a href="https://github.com/o/r/issues/17">#17</a></s>')
+        self.assertEqual(lines[3], '<b>In progress</b>  <a href="https://github.com/o/r/issues/42">#42</a>')
+        self.assertEqual(lines[4], '<b>Blocked</b>  <a href="https://github.com/o/r/issues/33">#33</a>')
+        self.assertTrue(lines[5].startswith("<blockquote expandable>"))
+        self.assertIn('#17</a> Task 17 · <i>unassigned</i>', text)
+        self.assertIn('#42</a> share intake · <i>dev</i>', text)
+        self.assertIn('#33</a> old &lt;spike&gt; · <i>dev</i></blockquote>', text)
+        self.assertTrue(lines[-1].startswith('<tg-time unix="1700000000" format="r">'))
         self.assertNotIn("In review", text)
         self.assertNotIn("#60", text)
         self.assertNotIn("#61", text)
-        self.assertIn('<tg-time unix="1700000000" format="r">', text)
-        # Blocked items appear once, not also under their status column.
-        self.assertEqual(text.count("#33"), 1)
+        # Blocked items appear once in the compact view and once in the details.
+        self.assertEqual(text.count("#33"), 2)
 
     def test_empty_board(self):
-        self.assertIn("Nothing in progress.", render_board(PROJECT, {}, now=0))
+        text = render_board(PROJECT, {}, now=0)
+        self.assertIn("Nothing in progress.", text)
+        self.assertNotIn("blockquote", text)
 
     def test_changes_inline_and_expandable(self):
         before = snapshot([node("a", 1, "Ready", "Next")])
-        after = snapshot([node("a", 1, "In review", "Now", "Android"), node("b", 2, None)])
+        after = snapshot([node("a", 1, "In review", "Now", "Android"), node("b", 2, None, assignees=())])
         text = render_changes(diff(before, after))
-        self.assertTrue(text.startswith("<b>Board · 2 changes</b>\n<blockquote><a "))
-        self.assertIn("\n↳ <code>Ready</code> → <code>In review</code> │ Priority <code>Next</code> → <code>Now</code> │ Area — → <code>Android</code></blockquote>", text)
-        self.assertIn("#2</a> Task 2\n↳ added to —</blockquote>", text)
-        self.assertNotIn("expandable", text)
+        lines = text.split("\n")
+        self.assertEqual(lines[:2], ["<b>Board</b> · 2 changes", RULE])
+        self.assertEqual(lines[2], '<a href="https://github.com/o/r/issues/1">#1</a>  <code>Ready</code> → <code>In review</code> · P: <code>Next</code> → <code>Now</code> · A: — → <code>Android</code>')
+        self.assertEqual(lines[3], '<s><a href="https://github.com/o/r/issues/2">#2</a></s>  → —')
+        self.assertNotIn("blockquote", text)
 
         many = render_changes(diff({}, snapshot([node(str(i), i, "Backlog") for i in range(9)])))
-        self.assertIn("</b>\n<blockquote expandable>", many)
+        self.assertIn(f"{RULE}\n<blockquote expandable>", many)
         self.assertEqual(many.count("<blockquote"), 1)
 
     def test_single_change_grammar(self):
         text = render_changes(diff(snapshot([node("a", 1, "Ready")]), {}))
-        self.assertIn("1 change</b>\n", text)
-        self.assertIn("↳ removed", text)
+        self.assertIn("· 1 change\n", text)
+        self.assertTrue(text.endswith("#1</a>  removed"))
 
 
 class RunTest(unittest.TestCase):

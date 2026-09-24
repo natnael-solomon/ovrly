@@ -31,12 +31,13 @@ def author(login):
     return f"<i>{escape(login)}</i>"
 
 
+RULE = "╌" * 12
 GAP = object()
 
 
 def compose(headline, *body):
-    """Shared skeleton: bold linked headline, then body lines; GAP inserts a blank line."""
-    lines = [f"<b>{headline}</b>"]
+    """Shared skeleton: bold linked headline over a sleek rule, then body lines; GAP inserts a blank line."""
+    lines = [f"<b>{headline}</b>", RULE]
     lines.extend("" if line is GAP else line for line in body if line)
     return "\n".join(lines)
 
@@ -211,13 +212,14 @@ SAMPLES = ("failure", "pr_failure", "pr_ready", "pr_merged", "release", "board_c
 def sample_board_changes(repository):
     import telegram_board
 
-    def item(number, title, status, priority=None, labels=()):
+    def item(number, title, status, priority=None, labels=(), assignees=("sample",)):
         return {
             "id": f"sample-{number}",
             "content": {
                 "__typename": "Issue", "number": number, "title": title,
                 "url": f"{repository['html_url']}/issues/{number}",
                 "labels": {"nodes": [{"name": name} for name in labels]},
+                "assignees": {"nodes": [{"login": login} for login in assignees]},
             },
             "status": {"name": status}, "priority": {"name": priority} if priority else None,
             "area": None,
@@ -229,7 +231,7 @@ def sample_board_changes(repository):
     ])
     after = telegram_board.snapshot([
         item(1, "Sample task moving forward", "In progress", "Now"),
-        item(3, "Sample task just added", "Ready"),
+        item(3, "Sample task just added", "Ready", assignees=()),
     ])
     return telegram_board.render_changes(telegram_board.diff(before, after))
 
