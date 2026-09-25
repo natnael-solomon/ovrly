@@ -35,7 +35,7 @@
 
 ### Fixed
 
-- Reject whitespace-suffixed evaluation IDs and preserve Unicode separators within JSON strings when reading physical JSONL records.
+- Reject whitespace-suffixed evaluation IDs and SHA-256 values, including hashes used for cross-split media isolation, and preserve Unicode separators within JSON strings when reading physical JSONL records.
 
 ### Known limitations
 

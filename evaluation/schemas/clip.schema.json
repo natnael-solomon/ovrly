@@ -34,7 +34,7 @@
       "required": ["path", "sha256"],
       "properties": {
         "path": {"type": ["string", "null"], "minLength": 1},
-        "sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
+        "sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}(?![\\s\\S])"}
       }
     },
     "coverage": {
