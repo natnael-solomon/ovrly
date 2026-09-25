@@ -8,9 +8,9 @@ The CI workflow is in [`.github/workflows/android.yml`](.github/workflows/androi
 and runs on every pull request and push to `main`. The public
 [ovrly development Project](https://github.com/users/natnael-solomon/projects/3)
 holds all task issues; its README is the team briefing. The `main` protection
-ruleset is active (see §6); the production-signing environment, ledger and
-key described in §4 are separate owner setup steps that are not yet done.
-This document does not enforce those rules.
+ruleset is active (see §6), and the production-signing environment, ledger
+and key described in §4 are provisioned; the first production build has not
+yet been dispatched. This document does not enforce those rules.
 
 ## 1. Pick up work
 
