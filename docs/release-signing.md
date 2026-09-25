@@ -127,10 +127,12 @@ Create a **tag** ruleset (Settings → Rules → New ruleset → tag) named `rel
 Preflight reads the repository's rulesets (`GET /repos/{repo}/rulesets`, then each tag ruleset's
 detail) and requires an active tag ruleset whose include list contains exactly
 `refs/tags/release-ledger/bootstrap`, `refs/tags/release-ledger/reserve/*` and
-`refs/tags/release-ledger/issue/*`, with no excludes, a present and empty bypass list, and
-`deletion`, `update` and `non_fast_forward` rules. It does not use `rules/branches/{ref}`, which
-GitHub documents as branch-only, and it does not attempt to evaluate glob semantics itself; the three
-explicit patterns are the contract.
+`refs/tags/release-ledger/issue/*`, with no excludes, `current_user_can_bypass: never` for the
+workflow's own token, an empty bypass list whenever the API returns one (the workflow's
+installation token does not receive `bypass_actors`; a user token does), and `deletion`, `update`
+and `non_fast_forward` rules. It does not use `rules/branches/{ref}`, which GitHub documents as
+branch-only, and it does not attempt to evaluate glob semantics itself; the three explicit patterns
+are the contract.
 
 ## 6. Initialise the ledger (once)
 

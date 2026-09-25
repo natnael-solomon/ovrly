@@ -33,7 +33,7 @@ def escape(text):
 
 # Short team names shown in place of GitHub logins; unmapped logins appear as-is.
 DISPLAY_NAMES = {
-    "natnael-solomon": "sol",
+    "natnael-solomon": "nati",
     "nattyy-1": "sancho",
     "neb-iyu": "neba",
 }

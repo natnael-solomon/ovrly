@@ -102,10 +102,21 @@ def check_ledger_protection(github):
             continue
         if ref_name.get("exclude"):
             fail(f"Tag ruleset {ruleset['id']} protecting the ledger must have no exclusions")
-        if "bypass_actors" not in ruleset:
-            fail(f"Cannot verify bypass actors on tag ruleset {ruleset['id']}: field missing from the API response")
-        if ruleset["bypass_actors"] != []:
+        # GitHub omits `bypass_actors` from this response for the workflow's installation token
+        # (a user token sees it). `current_user_can_bypass` is returned to both and must be "never"
+        # for the identity that will write the ledger. When the list is present it must be empty.
+        bypass_actors = ruleset.get("bypass_actors")
+        can_bypass = ruleset.get("current_user_can_bypass")
+        if bypass_actors is not None and bypass_actors != []:
             fail(f"Tag ruleset {ruleset['id']} protecting the ledger must have no bypass actors")
+        if can_bypass != "never":
+            fail(
+                f"Cannot confirm tag ruleset {ruleset['id']} binds this workflow: current_user_can_bypass is "
+                f"{can_bypass!r}, expected 'never'"
+            )
+        if bypass_actors is None:
+            print(f"::notice::Tag ruleset {ruleset['id']}: bypass_actors not visible to the workflow token; "
+                  "verified via current_user_can_bypass=never")
         present = {rule.get("type") for rule in ruleset.get("rules") or []}
         missing = REQUIRED_TAG_RULES - present
         if missing:

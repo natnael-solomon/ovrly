@@ -14,6 +14,7 @@ printf 'Requesting build of origin/main:\n  %s\n  %s\n' "$sha" "$subject"
 if [ "${1:-}" != "--yes" ]; then
   printf 'Dispatch Telegram APK for this commit? [y/N] '
   read -r answer
+  answer=$(printf '%s' "$answer" | tr -d '\r')
   case "$answer" in y|Y) ;; *) echo 'Cancelled.'; exit 1;; esac
 fi
 gh workflow run telegram-apk.yml --ref main -f "source_sha=$sha"

@@ -12,7 +12,7 @@ SHA = "a" * 40
 OWNER = "natnael-solomon"
 GOOD_CTX = {"ref": "refs/heads/main", "workflow_ref": "o/r/.github/workflows/telegram-apk.yml@refs/heads/main", "run_attempt": "1"}
 LEDGER_RULESET = {
-    "id": 7, "target": "tag", "enforcement": "active", "bypass_actors": [],
+    "id": 7, "target": "tag", "enforcement": "active", "bypass_actors": [], "current_user_can_bypass": "never",
     "conditions": {"ref_name": {"include": ["refs/tags/release-ledger/bootstrap", "refs/tags/release-ledger/reserve/*", "refs/tags/release-ledger/issue/*"], "exclude": []}},
     "rules": [{"type": "deletion"}, {"type": "update"}, {"type": "non_fast_forward"}],
 }
@@ -108,7 +108,9 @@ class ProtectionTest(unittest.TestCase):
             "double-star only": lambda r, p: r["rulesets/7"]["conditions"]["ref_name"].__setitem__("include", ["refs/tags/release-ledger/**"]),
             "has exclude": lambda r, p: r["rulesets/7"]["conditions"]["ref_name"].__setitem__("exclude", ["refs/tags/release-ledger/issue/9"]),
             "bypass actor": lambda r, p: r["rulesets/7"].__setitem__("bypass_actors", [{"actor_id": 1}]),
-            "bypass missing": lambda r, p: r["rulesets/7"].pop("bypass_actors"),
+            "can bypass always": lambda r, p: r["rulesets/7"].__setitem__("current_user_can_bypass", "always"),
+            "can bypass pull_request": lambda r, p: r["rulesets/7"].__setitem__("current_user_can_bypass", "pull_requests_only"),
+            "can bypass missing": lambda r, p: r["rulesets/7"].pop("current_user_can_bypass"),
             "missing update rule": lambda r, p: r["rulesets/7"].__setitem__("rules", [{"type": "deletion"}, {"type": "non_fast_forward"}]),
         }
         for name, mutate in cases.items():
@@ -117,8 +119,13 @@ class ProtectionTest(unittest.TestCase):
             mutate(r, gh.pages)
             with self.subTest(name=name), self.assertRaises(PreflightError) as raised:
                 check_ledger_protection(gh)
-            if name == "bypass missing":
-                self.assertIn("Cannot verify", str(raised.exception))
+            if name.startswith("can bypass"):
+                self.assertIn("current_user_can_bypass", str(raised.exception))
+
+    def test_ledger_protection_accepts_installation_token_view(self):
+        # The workflow token does not receive bypass_actors; current_user_can_bypass=never suffices.
+        r = good_responses(); r["rulesets/7"].pop("bypass_actors")
+        check_ledger_protection(FakeGitHub(r))
 
     def test_environment_variants(self):
         check_environment(FakeGitHub(good_responses()), OWNER)
