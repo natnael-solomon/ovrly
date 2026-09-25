@@ -9,8 +9,9 @@ and runs on every pull request and push to `main`. The public
 [ovrly development Project](https://github.com/users/natnael-solomon/projects/3)
 holds all task issues; its README is the team briefing. The `main` protection
 ruleset is active (see §6), and the production-signing environment, ledger
-and key described in §4 are provisioned; the first production build has not
-yet been dispatched. This document does not enforce those rules.
+and key described in §4 are provisioned; the key's offline backup and restore
+test (runbook §2) are still outstanding and block the first production build,
+which has not been dispatched. This document does not enforce those rules.
 
 ## 1. Pick up work
 
