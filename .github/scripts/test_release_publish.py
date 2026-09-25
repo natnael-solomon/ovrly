@@ -288,7 +288,7 @@ class CaptionTest(unittest.TestCase):
         lines = text.split("\n")
         self.assertEqual(lines[0], f'<b><a href="https://github.com/o/r/commit/{SHA}">ovrly 0.1.0 · build 7</a></b>')
         self.assertIn("<b>SHA-256</b>  <code>ffffffffffffffff…</code>", text)
-        self.assertIn("<b>By</b>  <i>sol</i>", text)
+        self.assertIn("<b>By</b>  <i>nati</i>", text)
         self.assertNotIn("Note", text)
         self.assertIn("redelivery", render_caption(7, "0.1.0", SHA, "", "dev", "u", "f" * 64, redelivery=True))
 
