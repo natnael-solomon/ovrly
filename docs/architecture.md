@@ -34,7 +34,22 @@ Before merging overlay changes, verify on authorized devices: Android 10/11 fall
 
 The Android/backend integration will use a single versioned API contract with validated schemas and compatibility tests. No OpenAPI document or endpoint is currently claimed to exist. First agree on captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors.
 
-Hosted model weights stay with the provider. Credentials stay on the server; research prompts, adapters and evaluation fixtures will live in the backend. Voxide remains a separate companion-navigation path. No capture upload is enabled by this directory layout.
+Hosted model weights stay with the provider. Credentials stay on the server; research prompts and adapters will live in the backend. Versioned research evaluation fixtures live in the root `evaluation/` directory, independently of backend implementation. Voxide remains a separate companion-navigation path. No capture upload is enabled by this directory layout.
+
+## Evaluation-data boundary
+
+[`evaluation/`](../evaluation/README.md) defines JSON Schema/JSONL contracts for
+clip provenance, two independent whole-clip annotation passes and adjudicated
+claim occurrences. Its standard-library validator checks snapshot integrity,
+references, intervals and declared creator/topic/repost isolation across dev/test.
+Synthetic examples exercise the contract but are not benchmark data or human
+review evidence. RES-01 still requires the real 10-20-clip reviewed corpus.
+
+Media stays outside version control by default. Metadata-only CI validation
+never fetches media or calls providers; local media verification additionally
+checks byte hashes. Legal rights, independent review, actual scenario coverage
+and undeclared leakage need human sign-off. Neither validation mode scores a
+pipeline, and normalized claims are not ASR transcripts or OCR-box ground truth.
 
 ## Development ownership
 

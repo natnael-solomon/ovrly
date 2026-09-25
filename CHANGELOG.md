@@ -4,6 +4,7 @@
 
 ### Added
 
+- Versioned evaluation-data schemas, blind annotation/adjudication workflow, synthetic JSONL examples, and dependency-free validation with CI. The real reviewed clip corpus remains outstanding; these examples are not evaluation results.
 - Native Kotlin/Jetpack Compose Android companion and manually activated floating controls.
 - Explicit-consent playback-audio and sampled-screen capture, bounded to three minutes and 32 MiB of app-private media.
 - Temporary-capture retention and deletion controls.
@@ -21,7 +22,7 @@
 - Replaced the monochrome launcher icon with an adaptive icon: the rendered chrome ring on a navy gradient with a lavender bloom, plus a monochrome layer for themed icons. Notifications keep the thin ring.
 - Replaced the text wordmark in the Your space and Explore headers with a rendered chrome `ovrly` bitmap with a subtle sweeping glare; Light mode adds a drop-shadow, sheen halo and ink edge for contrast.
 - Drew the "A moment outside" artwork rings as true circles instead of ellipses.
-- Moved the toolchain to Gradle 9.7.1, Android Gradle plugin 9.4.1 (built-in Kotlin 2.2.10), compileSdk/targetSdk 37 and current AndroidX (core 1.19.1, splashscreen 1.2.0, activity 1.13.0, lifecycle 2.11.0, savedstate 1.5.0, Compose BOM 2026.09.00), coroutines 1.11.0 and OkHttp 5.5.0; lint now treats warnings as errors and reports zero issues.
+- Moved the toolchain to Gradle 9.8.0, Android Gradle plugin 9.4.1 (built-in Kotlin 2.2.10), compileSdk/targetSdk 37 and current AndroidX (core 1.19.1, splashscreen 1.2.0, activity 1.13.0, lifecycle 2.11.0, savedstate 1.5.0, Compose BOM 2026.09.00), coroutines 1.11.0 and OkHttp 5.5.0; lint now treats warnings as errors and reports zero issues.
 - Copied the Android foundation into a standalone `android` project within the new `ovrly` monorepo.
 - Updated the Windows build helper for the new paths and separated root documentation from Android instructions.
 - Reserved a documented `backend` boundary without starting backend services or adding unused dependencies.
@@ -31,6 +32,10 @@
 - Made Liquid Chrome the fresh-install default while preserving saved appearance choices.
 - Moved working companion controls into Settings, shortened labels and moved technical explanations into disclosures without removing capture consent.
 - Sized the demo overlay below half the usable screen with 16 dp side/bottom margins, a draggable header and independently scrolling content.
+
+### Fixed
+
+- Reject whitespace-suffixed evaluation IDs and SHA-256 values, including hashes used for cross-split media isolation, and preserve Unicode separators within JSON strings when reading physical JSONL records.
 
 ### Known limitations
 

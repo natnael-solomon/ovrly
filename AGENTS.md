@@ -1,7 +1,9 @@
 # Agent instructions
 
 ## Before making changes
-- Read WORKFLOW.md and the relevant README.
+- Read every `.md` file in the repository before modifying code, committing,
+  pushing, or creating/updating a pull request. Re-read any Markdown files
+  added or changed while working.
 - Inspect existing code and follow established patterns.
 - Check for local changes; never overwrite unrelated work.
 - Ask before making significant scope or behavior changes.
@@ -21,5 +23,7 @@
 
 ## Git and external actions
 - Follow WORKFLOW.md for branches, commits and pull requests.
+- Do not list AI assistants or coding agents as commit authors or co-authors;
+  AI `Co-authored-by` trailers are prohibited, including in the final squash message.
 - Do not commit, push, merge, publish or deploy without authorization.
 - Do not discard changes or rewrite history without explicit approval.

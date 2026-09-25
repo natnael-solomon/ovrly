@@ -13,6 +13,10 @@ This document does not enforce those rules.
 
 ## 1. Pick up work
 
+Read every `.md` file in the repository before modifying code, committing,
+pushing, or creating/updating a pull request. Follow the documented requirements
+and re-read any Markdown files added or changed while working.
+
 Use one GitHub Project, **ovrly development**, as the shared task board.
 
 - Features and bugs need a repository issue on the board with one owner,
@@ -55,6 +59,11 @@ optional scope:
 
 Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`.
 
+AI assistants and coding agents must not be listed as commit authors or
+co-authors. AI `Co-authored-by` trailers are prohibited. Use the authorized
+human contributor's configured identity and inspect the complete message
+before committing; do not invent contributor identities.
+
 Never commit credentials, signing keys, personal media, machine-local
 configuration, generated build output or development-session artifacts.
 Preserve applicable attribution.
@@ -79,10 +88,21 @@ such as serial numbers.
 
 **Android checks** runs on PRs to `main`, pushes to `main` and manual dispatch.
 One Ubuntu 24.04 job uses JDK 21 and the project's Gradle wrapper to build,
-unit test and lint together. Known documentation-only changes skip Android
-setup and Gradle, but still return the same required check. Initial pushes,
+unit test and lint together. Known documentation and isolated `evaluation/`
+changes (including its dedicated workflow) skip Android setup and Gradle, but
+still return the same required check. Changes to Android change detection itself
+still require the full job. Initial pushes,
 manual runs and unknown paths run the full checks. Change-detection tests
 run on every invocation.
+
+**Evaluation contract checks** runs separately on every PR, push to `main` and
+manual dispatch, without workflow-level path filters. It tests the Python
+standard-library validator and synthetic examples; if a future
+`evaluation/corpus/` is present it also checks frozen metadata, not media bytes
+or pipeline performance. It uses no provider keys or downloads. This check is
+not the future RES-03 evaluation-regression gate and does not imply RES-01 is
+complete. See the [evaluation workflow](evaluation/README.md) for local commands
+and human-review requirements.
 
 `setup-gradle` validates wrapper JARs and owns the only Gradle cache:
 dependencies, wrapper distributions, compiled build scripts, transforms and
@@ -193,6 +213,13 @@ review discussions are resolved.
 Squash merge into `main`, then delete the merged branch. Link completed
 issues with `Closes #123` where appropriate. Do not bypass the requirements
 for urgent changes.
+
+Before confirming a squash merge, inspect the final author and full message.
+Use a Conventional Commit title and remove any AI authorship/co-authorship
+attribution, including trailers GitHub may assemble from branch commits.
+Do not copy historical commit messages wholesale. Existing branch history must
+not be rewritten without explicit approval; the final squash commit must comply
+with the authorship rule above.
 
 `main` is protected by a ruleset (enabled once the **Device evidence**
 workflow exists on `main`): no direct pushes, no force pushes, linear

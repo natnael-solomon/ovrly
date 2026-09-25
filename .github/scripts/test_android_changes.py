@@ -7,10 +7,20 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from android_changes import is_documentation, main, needs_android
+from android_changes import is_documentation, is_evaluation, main, needs_android
 
 
 class DocumentationPathsTest(unittest.TestCase):
+    def test_evaluation_boundary(self):
+        for name in ["evaluation/validate.py", "evaluation/examples/clips.jsonl",
+                     ".github/workflows/evaluation.yml"]:
+            with self.subTest(name=name):
+                self.assertTrue(is_evaluation(name))
+        for name in ["evaluation-other/tool.py", "backend/evaluation/tool.py",
+                     ".github/workflows/android.yml", ".github/scripts/android_changes.py"]:
+            with self.subTest(name=name):
+                self.assertFalse(is_evaluation(name))
+
     def test_known_documentation(self):
         for name in ["README.md", "WORKFLOW.md", "LICENSE.md", "docs/architecture.md",
                      "docs/nested/a guide.md", "android/README.md", "backend/README.md"]:
@@ -63,6 +73,25 @@ class ChangeDetectionTest(unittest.TestCase):
         self.commit()
         self.assertFalse(self.required())
         self.assertFalse(self.required("pull_request"))
+
+    def test_evaluation_only_can_skip_android(self):
+        self.write("evaluation/validate.py")
+        self.write(".github/workflows/evaluation.yml")
+        self.commit()
+        self.assertFalse(self.required())
+        self.assertFalse(self.required("pull_request"))
+
+    def test_mixed_evaluation_and_android_still_requires_checks(self):
+        self.write("evaluation/validate.py")
+        self.write("android/app/source.kt", "changed\n")
+        self.commit()
+        self.assertTrue(self.required())
+
+    def test_source_renamed_into_evaluation_requires_checks(self):
+        (self.repo / "evaluation").mkdir()
+        self.git("mv", "android/app/source.kt", "evaluation/source.kt")
+        self.commit()
+        self.assertTrue(self.required())
 
     def test_initial_push_and_manual_dispatch(self):
         self.assertTrue(self.required(base="0" * 40))
