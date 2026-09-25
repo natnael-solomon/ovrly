@@ -151,11 +151,19 @@ removals. Draft items are ignored. The first run records a baseline and posts
 manually from Actions.
 
 **Telegram APK** (`telegram-apk.yml`) is the gated pre-launch build. Any
-developer may dispatch it from `main` with the full 40-character SHA of a
-commit already merged into `main`. It refuses branch names, unmerged commits,
-commits without a successful **Android checks** run from the real Android
-workflow, reruns of an earlier attempt, and any repository whose protections
-are not in place (see the prerequisites below). Three jobs with distinct trust:
+developer may request one after fetching by running
+`scripts/request-build.ps1` (Windows) or `sh scripts/request-build.sh`
+(Linux, WSL, Git Bash): it resolves `origin/main` to its exact commit, shows
+the SHA and subject, asks once, and dispatches the workflow. The Actions UI
+works too if you paste the full 40-character SHA yourself; a personal shortcut
+is `gh alias set ovrly-build '!sh scripts/request-build.sh --yes'`. There is
+deliberately no automatic trigger (push, label, comment or schedule): a
+request must be a person choosing a commit, because every dispatch reserves a
+version code and queues an owner approval. The workflow refuses branch names,
+unmerged commits, commits without a successful **Android checks** run from the
+real Android workflow, reruns of an earlier attempt, and any repository whose
+protections are not in place (see the prerequisites below). Three jobs with
+distinct trust:
 
 1. **Preflight** runs helper code from the workflow's own revision, checks
    every protection, and reserves the next version code in the immutable
