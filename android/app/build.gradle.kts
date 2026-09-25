@@ -12,6 +12,14 @@ val voiceConfig = Properties().apply {
 fun quoted(value: String): String = "\"" + value.replace("\\", "\\\\")
     .replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r") + "\""
 
+// CI passes -Povrly.versionCode=<code> from the release ledger; local builds keep 1.
+// Google Play accepts 1..2100000000 inclusive, so anything else is a configuration error.
+fun releaseVersionCode(): Int {
+    val requested = findProperty("ovrly.versionCode")?.toString() ?: return 1
+    return requested.toIntOrNull()?.takeIf { it in 1..2_100_000_000 }
+        ?: error("ovrly.versionCode must be an integer in 1..2100000000, got '$requested'")
+}
+
 android {
     namespace = "app.ovrly"
     compileSdk = 37
@@ -19,7 +27,7 @@ android {
         applicationId = "app.ovrly"
         minSdk = 29
         targetSdk = 37
-        versionCode = 1
+        versionCode = releaseVersionCode()
         versionName = "0.1.0"
         buildConfigField("boolean", "VOXIDE_ENABLED", (voiceConfig.getProperty("enabled") == "true").toString())
         buildConfigField("String", "VOXIDE_BASE_URL", quoted(voiceConfig.getProperty("baseUrl", "https://voxide.onrender.com")))
@@ -28,6 +36,13 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

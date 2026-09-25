@@ -56,6 +56,9 @@ Whitespace in IDs is rejected, never trimmed. Their patterns use
 `(?![\s\S])` for a strict end-of-input assertion rather than `$`, which also
 matches before a final newline. This keeps the schemas portable between Python
 and JSON Schema regular expressions without changing general pattern semantics.
+Media and snapshot SHA-256 values use the same strict boundary: exactly 64
+lowercase hexadecimal characters, with no whitespace. This also prevents
+malformed hashes from bypassing identical-media isolation in metadata-only checks.
 JSONL records are separated by physical LF line endings; Unicode separators
 inside JSON strings remain part of the field value, not extra records.
 Occurrence and gold/proposition IDs are scoped to their pass or clip;

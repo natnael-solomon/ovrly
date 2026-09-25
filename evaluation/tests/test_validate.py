@@ -39,6 +39,21 @@ class SchemaTest(unittest.TestCase):
                             validate_value("valid-id-1" + suffix, schema, name)
         self.assertEqual(16, checked)
 
+    def test_sha256_schemas_reject_trailing_whitespace(self):
+        clip = read_json(ROOT / "schemas" / "clip.schema.json")
+        dataset = read_json(ROOT / "schemas" / "dataset.schema.json")
+        schemas = {
+            "media.sha256": clip["properties"]["media"]["properties"]["sha256"],
+            **dataset["properties"]["files"]["properties"],
+        }
+        self.assertEqual(4, len(schemas))
+        for name, schema in schemas.items():
+            validate_value("a" * 64, schema, name)
+            for suffix in (" ", "\t", "\n", "\r", "\r\n", "\u0085", "\u2028", "\u2029", "\u00a0"):
+                with self.subTest(field=name, suffix=repr(suffix)):
+                    with self.assertRaisesRegex(Invalid, "pattern mismatch"):
+                        validate_value("a" * 64 + suffix, schema, name)
+
     def test_schema_contracts_are_supported(self):
         for path in (ROOT / "schemas").glob("*.json"):
             with self.subTest(path=path):
@@ -386,6 +401,16 @@ class DatasetTest(unittest.TestCase):
         (self.directory / "media" / "clip-0.bin").write_bytes(b"changed")
         with self.assertRaisesRegex(Invalid, "media SHA-256"):
             validate_dataset(self.directory, frozen=True, media_root=self.directory / "media")
+
+    def test_trailing_newline_cannot_bypass_media_split_isolation(self):
+        self.frozen_fixture()
+        dev, test = self.rows["clips"][:2]
+        self.assertEqual(("dev", "test"), (dev["split"], test["split"]))
+        media_root = self.directory / "media"
+        (media_root / test["media"]["path"]).write_bytes(
+            (media_root / dev["media"]["path"]).read_bytes())
+        test["media"]["sha256"] = dev["media"]["sha256"] + "\n"
+        self.check_invalid(r"media\.sha256: pattern mismatch", frozen=True)
 
     def test_media_symlink_escape(self):
         self.frozen_fixture()
