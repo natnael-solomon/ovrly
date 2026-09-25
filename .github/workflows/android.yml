@@ -76,6 +76,34 @@ jobs:
           sh gradlew --no-daemon --console=plain --build-cache --continue
           :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 
+      - name: Build unsigned release fixture
+        if: steps.changes.outputs.android == 'true'
+        working-directory: android
+        run: >-
+          sh gradlew --no-daemon --console=plain --build-cache
+          -Povrly.versionCode=2 :app:assembleRelease
+
+      - name: Verify release signing with ephemeral key
+        if: steps.changes.outputs.android == 'true'
+        env:
+          OVRLY_UNSIGNED_APK: ${{ github.workspace }}/android/app/build/outputs/apk/release/app-release-unsigned.apk
+        run: |
+          if [[ ! -f android/app/build/outputs/mapping/release/mapping.txt ]]; then
+            echo "::error::R8 mapping is missing from the release fixture"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import os, sys, unittest
+          sys.path.insert(0, ".github/scripts")
+          from release_publish import badging, tools_from_env, verify_badging
+
+          verify_badging(badging(tools_from_env()["aapt2"], os.environ["OVRLY_UNSIGNED_APK"]), 2)
+          suite = unittest.defaultTestLoader.loadTestsFromName("test_release_publish.RealToolSigningTest")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if not result.wasSuccessful() or result.skipped or result.testsRun != 1:
+              sys.exit("::error::Real APK signing fixture must run and pass without skips")
+          PY
+
       - name: Upload test and lint reports
         if: ${{ !cancelled() && steps.build.outcome != 'skipped' && steps.build.outcome != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

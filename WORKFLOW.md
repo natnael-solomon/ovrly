@@ -8,7 +8,8 @@ The CI workflow is in [`.github/workflows/android.yml`](.github/workflows/androi
 and runs on every pull request and push to `main`. The public
 [ovrly development Project](https://github.com/users/natnael-solomon/projects/3)
 holds all task issues; its README is the team briefing. The `main` protection
-ruleset is prepared but still disabled; enabling it is tracked as `REPO-02`.
+ruleset is active (see §6); the production-signing environment, ledger and
+key described in §4 are separate owner setup steps that are not yet done.
 This document does not enforce those rules.
 
 ## 1. Pick up work
@@ -88,12 +89,16 @@ such as serial numbers.
 
 **Android checks** runs on PRs to `main`, pushes to `main` and manual dispatch.
 One Ubuntu 24.04 job uses JDK 21 and the project's Gradle wrapper to build,
-unit test and lint together. Known documentation and isolated `evaluation/`
-changes (including its dedicated workflow) skip Android setup and Gradle, but
-still return the same required check. Changes to Android change detection itself
-still require the full job. Initial pushes,
-manual runs and unknown paths run the full checks. Change-detection tests
-run on every invocation.
+unit test and lint together. When Android work runs it also assembles the
+unsigned release APK with a ledger-style version code and exercises the
+release helpers' real `apksigner`/`aapt2` path against it using an ephemeral
+fixture key generated in a temporary directory and deleted afterwards; no
+production key is involved and no APK is uploaded. Known documentation and
+isolated `evaluation/` changes (including its dedicated workflow) skip Android
+setup and Gradle, but still return the same required check. Changes to Android
+change detection itself still require the full job. Initial pushes, manual runs
+and unknown paths run the full checks. Change-detection tests run on every
+invocation.
 
 **Evaluation contract checks** runs separately on every PR, push to `main` and
 manual dispatch, without workflow-level path filters. It tests the Python
@@ -192,10 +197,10 @@ leave gaps, which is fine. The first CI code is 2, above the app's local
 default of 1. Google Play accepts 1..2100000000 inclusive; both the helper and
 the Gradle build reject anything else, and local builds without the property
 stay at 1. When the app moves to Google Play, its first upload must carry a
-version code above the highest issued code, enrol this same signing key as
-the app-signing key, and the ledger remains the only counter; never start a
-second one. Builds sent to Telegram before this ledger existed are unverified
-historical artifacts with no recoverable provenance.
+version code above the highest code in the ledger, reserved or issued, enrol
+this same signing key as the app-signing key, and the ledger remains the only
+counter; never start a second one. Builds sent to Telegram before this ledger
+existed are unverified historical artifacts with no recoverable provenance.
 
 **Evidence.** Each run keeps the unsigned and signed artifacts for 90 days,
 the ledger tags permanently, and both provenance files (source SHA, version
@@ -205,19 +210,23 @@ next build simply takes the following code.
 
 **Prerequisites** (owner setup, verified by preflight on every run and
 described step by step in [docs/release-signing.md](docs/release-signing.md)):
-an active `main` ruleset requiring pull request review and `Android checks`;
-an active tag ruleset that blocks update, deletion and non-fast-forward on
-`release-ledger/bootstrap`, `release-ledger/reserve/**` and
-`release-ledger/issue/**` with no bypass actors; the `production-signing`
-environment with the owner as its sole required reviewer, self-review allowed,
-a custom branch policy of exactly `main`, and administrator bypass off (the
-API reports this as `can_admins_bypass`, which is outside the published
-schema, so it is observed and must be exactly `false`; confirm it in the UI
-too); the four signing secrets in that environment; the
-`EXPECTED_SIGNING_CERT_SHA256` repository variable; and the owner-created
-ledger bootstrap tag. Until every one is present the workflow stops at
-preflight with a message naming what is missing. It does not create a GitHub
-Release; §7 still governs releases.
+the active `main` ruleset requiring pull request review and `Android checks`
+(already in place); an active tag ruleset whose include list is exactly
+`refs/tags/release-ledger/bootstrap`, `refs/tags/release-ledger/reserve/*` and
+`refs/tags/release-ledger/issue/*`, blocking update, deletion and
+non-fast-forward, with no exclusions and no bypass actors; the
+`production-signing` environment with the owner as its sole required reviewer,
+self-review allowed, a custom branch policy of exactly `main`, and
+administrator bypass off (the API reports this as `can_admins_bypass`, which is
+outside the published schema, so it is observed and must be exactly `false`;
+confirm it in the UI too); the four signing secrets in that environment; the
+`EXPECTED_SIGNING_CERT_SHA256` and `LEDGER_BOOTSTRAP_TAG_SHA` repository
+variables; and the owner-created ledger bootstrap tag those variables pin.
+Until every one is present the workflow stops at preflight with a message
+naming what is missing. Ledger tags anchor to the `main` HEAD current when CI
+wrote them (the only target the workflow token may create) and carry the source
+commit inside their record; live ledger writes remain unexercised until this
+setup exists. It does not create a GitHub Release; §7 still governs releases.
 
 Both workflows only run from `main`: `workflow_run` and `schedule` triggers do
 not fire for other branches, so changes to them take effect after merging.
@@ -296,14 +305,13 @@ Do not copy historical commit messages wholesale. Existing branch history must
 not be rewritten without explicit approval; the final squash commit must comply
 with the authorship rule above.
 
-`main` is protected by a ruleset (enabled once the **Device evidence**
-workflow exists on `main`): no direct pushes, no force pushes, linear
-history, one approving review with stale approvals dismissed on push, all
-review threads resolved, and the **Android checks** and **Device evidence**
-status checks required and up to date with `main`. Do not add workflow-level
-path filters: docs-only PRs must still report the required checks rather than
-leave them pending. Add **Backend checks** (REPO-04) and **Contract checks**
-(BE-03) to the required list when those workflows exist.
+`main` is protected by an active ruleset: no direct pushes, no force pushes,
+linear history, one approving review with stale approvals dismissed on push,
+all review threads resolved, no bypass actors, and the **Android checks** and
+**Device evidence** status checks required and up to date with `main`. Do not
+add workflow-level path filters: docs-only PRs must still report the required
+checks rather than leave them pending. Add **Backend checks** (REPO-04) and
+**Contract checks** (BE-03) to the required list when those workflows exist.
 
 ## 7. Document and release
 

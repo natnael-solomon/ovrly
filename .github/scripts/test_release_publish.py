@@ -15,6 +15,7 @@ from release_publish import (
 SHA = "a" * 40
 SHA_B = "b" * 40
 WF = "c" * 40
+HEAD = "9" * 40
 CERT = "d" * 64
 OTHER_CERT = "e" * 64
 TOOLS = {"aapt2": "/fake/aapt2", "apksigner": "/fake/apksigner"}
@@ -51,12 +52,18 @@ class FakeRunner:
 
 
 class FakeGitHub:
-    def __init__(self):
+    def __init__(self, approvals_status=200):
         self.created = []
         self.approvals = [{"user": {"login": "natnael-solomon"}, "state": "approved", "comment": "ok"}]
+        self.approvals_status = approvals_status
 
     def get(self, path):
+        if path == "git/ref/heads/main":
+            return {"object": {"sha": HEAD, "type": "commit"}}
         if path.endswith("/approvals"):
+            if self.approvals_status != 200:
+                from telegram_api import GitHubApiError
+                raise GitHubApiError(self.approvals_status, "nope", "GET", path)
             return self.approvals
         raise AssertionError(path)
 
@@ -75,6 +82,13 @@ def ledger_with(reservations=(), issuances=()):
     return ledger
 
 
+def provenance(unsigned_sha, **over):
+    base = {"schema": "ovrly-build-provenance/v1", "code": 2, "source_sha": SHA, "unsigned_sha256": unsigned_sha,
+            "version_name": "0.1.0", "package": "app.ovrly", "run_id": 10, "run_attempt": 1, "workflow_sha": WF}
+    base.update(over)
+    return base
+
+
 class PublishBuildTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -84,7 +98,10 @@ class PublishBuildTest(unittest.TestCase):
         from release_publish import sha256_of
         self.unsigned_sha = sha256_of(self.unsigned)
         self.prov = self.tmp / "build-provenance.json"
-        self.prov.write_text(json.dumps({"unsigned_sha256": self.unsigned_sha, "source_sha": SHA, "code": 2}))
+        self.write_prov()
+
+    def write_prov(self, **over):
+        self.prov.write_text(json.dumps(provenance(self.unsigned_sha, **over)))
 
     def cfg(self, **over):
         base = {
@@ -122,13 +139,45 @@ class PublishBuildTest(unittest.TestCase):
         self.assertEqual(gh.created, [])
 
     def test_digest_and_provenance_mismatches(self):
-        for over in ({"build_output_sha256": "0" * 64}, {"source_sha": SHA_B}, {"code": 3}):
-            with self.subTest(over=over), self.assertRaises(PublishError):
-                ledger = ledger_with([(2, SHA), (3, SHA_B)])
-                cfg = self.cfg(**over)
-                if "source_sha" in over:
-                    ledger.reservations[2]["source_sha"] = SHA_B
-                publish_new_build(FakeGitHub(), ledger, cfg, TOOLS, FakeRunner())
+        cfg_cases = {"output digest": {"build_output_sha256": "0" * 64}, "wrong code": {"code": 3}}
+        for name, over in cfg_cases.items():
+            with self.subTest(name=name), self.assertRaises(PublishError):
+                publish_new_build(FakeGitHub(), ledger_with([(2, SHA), (3, SHA_B)]), self.cfg(**over), TOOLS, FakeRunner())
+        prov_cases = {
+            "schema": {"schema": "other/v9"}, "run_id": {"run_id": 11}, "run_attempt": {"run_attempt": 2},
+            "workflow_sha": {"workflow_sha": SHA_B}, "source": {"source_sha": SHA_B}, "package": {"package": "com.x"},
+            "digest": {"unsigned_sha256": "0" * 64},
+        }
+        for name, over in prov_cases.items():
+            self.write_prov(**over)
+            with self.subTest(name=name), self.assertRaises(PublishError):
+                publish_new_build(FakeGitHub(), ledger_with([(2, SHA)]), self.cfg(), TOOLS, FakeRunner())
+
+    def test_reservation_tuple_must_match_current_context(self):
+        for key, value in (("run_id", 11), ("run_attempt", 2), ("workflow_sha", SHA_B), ("source_sha", SHA_B)):
+            ledger = ledger_with([(2, SHA)])
+            ledger.reservations[2][key] = value
+            with self.subTest(key=key), self.assertRaises(PublishError) as raised:
+                publish_new_build(FakeGitHub(), ledger, self.cfg(), TOOLS, FakeRunner())
+            self.assertIn("different source, run, attempt or workflow", str(raised.exception))
+
+    def test_size_guards_before_signing_and_before_issuance(self):
+        import release_publish
+        original = release_publish.MAX_UPLOAD_BYTES
+        self.addCleanup(setattr, release_publish, "MAX_UPLOAD_BYTES", original)
+        release_publish.MAX_UPLOAD_BYTES = 200        # unsigned is 300 bytes
+        gh, runner = FakeGitHub(), FakeRunner()
+        with self.assertRaises(PublishError) as raised:
+            publish_new_build(gh, ledger_with([(2, SHA)]), self.cfg(), TOOLS, runner)
+        self.assertIn("50 MB", str(raised.exception))
+        self.assertEqual(runner.calls, [])
+        release_publish.MAX_UPLOAD_BYTES = 303        # unsigned fits; signed (300 + 6) does not
+        gh, runner = FakeGitHub(), FakeRunner()
+        with self.assertRaises(PublishError) as raised:
+            publish_new_build(gh, ledger_with([(2, SHA)]), self.cfg(), TOOLS, runner)
+        self.assertIn("Signed APK", str(raised.exception))
+        self.assertEqual(gh.created, [])
+        self.assertFalse(Path(self.cfg()["signed_apk"]).exists())
 
     def test_badging_failures(self):
         for kw in ({"package": "com.other"}, {"code": 9}, {"debuggable": True}):
@@ -144,7 +193,7 @@ class PublishBuildTest(unittest.TestCase):
         self.assertEqual(gh.created, [])
 
     def test_cert_cannot_diverge_from_established_ledger_identity(self):
-        self.prov.write_text(json.dumps({"unsigned_sha256": self.unsigned_sha, "source_sha": SHA, "code": 3}))
+        self.write_prov(code=3)
         ledger = ledger_with([(2, SHA_B), (3, SHA)], [(2, SHA_B, OTHER_CERT)])
         with self.assertRaises(PublishError) as raised:
             publish_new_build(FakeGitHub(), ledger, self.cfg(code=3), TOOLS, FakeRunner(code=3))
@@ -156,6 +205,13 @@ class PublishBuildTest(unittest.TestCase):
         self.assertIn("keystore password was incorrect", str(raised.exception))
         self.assertNotIn("--ks-pass", str(raised.exception))
 
+    def test_audit_unavailable_is_recorded_not_hidden(self):
+        gh = FakeGitHub(approvals_status=404)
+        publish_new_build(gh, ledger_with([(2, SHA)]), self.cfg(), TOOLS, FakeRunner())
+        record = json.loads(Path(self.cfg()["signed_provenance"]).read_text())
+        self.assertIs(record["approvals_audit_available"], False)
+        self.assertEqual(record["approvals"], [])
+
     def test_signing_material_is_private_and_cleaned(self):
         with SigningMaterial("QUJD", "s", "k") as m:
             self.assertEqual(m.keystore.read_bytes(), b"ABC")
@@ -164,8 +220,16 @@ class PublishBuildTest(unittest.TestCase):
                 self.assertEqual(os.stat(m.keystore).st_mode & 0o777, 0o600)
             path = m.dir
         self.assertFalse(path.exists())
+
+    def test_signing_material_enter_failure_leaves_no_directory(self):
+        before = set(Path(tempfile.gettempdir()).glob("ovrly-sign-*"))
         with self.assertRaises(PublishError):
             SigningMaterial("not base64!", "s", "k").__enter__()
+        material = SigningMaterial("QUJD", "s", "k")
+        material._write = lambda *a: (_ for _ in ()).throw(OSError("disk full"))
+        with self.assertRaises(OSError):
+            material.__enter__()
+        self.assertEqual(set(Path(tempfile.gettempdir()).glob("ovrly-sign-*")), before)
 
 
 class RedeliveryTest(unittest.TestCase):
@@ -186,26 +250,37 @@ class RedeliveryTest(unittest.TestCase):
                                       "cert_sha256": cert, "package": "app.ovrly"}
         return ledger
 
+    def expected(self, code=5, cert=CERT):
+        return {"code": code, "signed_sha256": self.sha, "cert_sha256": cert}
+
     def test_current_issued_bytes_redeliver_without_signing(self):
         runner = FakeRunner(code=5)
-        result = verify_redelivery(self.ledger(), {"code": 5, "signed_sha256": self.sha}, self.apk, TOOLS, runner)
+        result = verify_redelivery(self.ledger(), self.expected(), self.apk, TOOLS, CERT, runner)
         self.assertEqual(result["code"], 5)
         self.assertFalse(any(a[1] == "sign" for a in runner.calls))
 
     def test_older_code_superseded_even_with_matching_bytes(self):
         ledger = self.ledger(); ledger.issuances[4]["signed_sha256"] = self.sha
         with self.assertRaises(PublishError) as raised:
-            verify_redelivery(ledger, {"code": 4, "signed_sha256": self.sha}, self.apk, TOOLS, FakeRunner(code=4))
+            verify_redelivery(ledger, self.expected(code=4), self.apk, TOOLS, CERT, FakeRunner(code=4))
         self.assertIn("superseded", str(raised.exception))
 
-    def test_different_bytes_cert_or_package_fail(self):
+    def test_pin_ledger_and_evidence_must_all_agree(self):
+        with self.assertRaises(PublishError) as raised:
+            verify_redelivery(self.ledger(), self.expected(), self.apk, TOOLS, OTHER_CERT, FakeRunner(code=5))
+        self.assertIn("do not all agree", str(raised.exception))
         with self.assertRaises(PublishError):
-            verify_redelivery(self.ledger(), {"code": 5, "signed_sha256": "0" * 64}, self.apk, TOOLS, FakeRunner(code=5))
+            verify_redelivery(self.ledger(cert=OTHER_CERT), self.expected(), self.apk, TOOLS, CERT, FakeRunner(code=5))
         with self.assertRaises(PublishError):
-            verify_redelivery(self.ledger(), {"code": 5, "signed_sha256": self.sha}, self.apk, TOOLS, FakeRunner(code=5, cert=OTHER_CERT))
-        with self.assertRaises(PublishError):
-            verify_redelivery(self.ledger(), {"code": 5, "signed_sha256": self.sha}, self.apk, TOOLS, FakeRunner(code=5, package="x.y"))
+            verify_redelivery(self.ledger(), self.expected(cert=OTHER_CERT), self.apk, TOOLS, CERT, FakeRunner(code=5))
 
+    def test_different_bytes_signer_or_package_fail(self):
+        with self.assertRaises(PublishError):
+            verify_redelivery(self.ledger(), dict(self.expected(), signed_sha256="0" * 64), self.apk, TOOLS, CERT, FakeRunner(code=5))
+        with self.assertRaises(PublishError):
+            verify_redelivery(self.ledger(), self.expected(), self.apk, TOOLS, CERT, FakeRunner(code=5, cert=OTHER_CERT))
+        with self.assertRaises(PublishError):
+            verify_redelivery(self.ledger(), self.expected(), self.apk, TOOLS, CERT, FakeRunner(code=5, package="x.y"))
 
 class CaptionTest(unittest.TestCase):
     def test_caption(self):
@@ -216,6 +291,50 @@ class CaptionTest(unittest.TestCase):
         self.assertIn("<b>By</b>  <i>sol</i>", text)
         self.assertNotIn("Note", text)
         self.assertIn("redelivery", render_caption(7, "0.1.0", SHA, "", "dev", "u", "f" * 64, redelivery=True))
+
+    def test_caption_truncates_and_bounds(self):
+        long_subject = "x" * 500
+        text = render_caption(7, "0.1.0", SHA, long_subject, "dev", "u", "f" * 64)
+        self.assertLessEqual(len(text), 1024)
+        self.assertIn("…", text)
+        self.assertNotIn("x" * 30, text)
+
+
+class PublishRerunGuardTest(unittest.TestCase):
+    """'Re-run failed jobs' can restart only publish; both modes must refuse before any side effect."""
+
+    GOOD = {"GITHUB_REF": "refs/heads/main", "GITHUB_WORKFLOW_REF": "o/r/.github/workflows/telegram-apk.yml@refs/heads/main", "GITHUB_RUN_ATTEMPT": "1"}
+
+    def test_first_attempt_from_main_passes(self):
+        from release_publish import guard_execution_context
+        guard_execution_context(self.GOOD)
+
+    def test_rerun_of_publish_job_is_refused(self):
+        from release_publish import guard_execution_context
+        from release_preflight import PreflightError
+        with self.assertRaises(PreflightError) as raised:
+            guard_execution_context({**self.GOOD, "GITHUB_RUN_ATTEMPT": "2"})
+        self.assertIn("redeliver_run_id", str(raised.exception))
+
+    def test_non_main_publish_context_is_refused(self):
+        from release_publish import guard_execution_context
+        from release_preflight import PreflightError
+        with self.assertRaises(PreflightError):
+            guard_execution_context({**self.GOOD, "GITHUB_REF": "refs/heads/feat/x"})
+        with self.assertRaises(PreflightError):
+            guard_execution_context({**self.GOOD, "GITHUB_WORKFLOW_REF": "o/r/.github/workflows/telegram-apk.yml@refs/heads/feat/x"})
+
+    def test_main_entry_points_guard_before_network(self):
+        import release_publish
+        from unittest.mock import patch
+        env = {**self.GOOD, "GITHUB_RUN_ATTEMPT": "2", "MODE": "redeliver"}
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(release_publish, "GitHubClient", side_effect=AssertionError("network touched")), \
+             patch.object(release_publish, "TelegramClient", side_effect=AssertionError("telegram touched")):
+            with self.assertRaises(SystemExit):
+                release_publish.main()
+            with self.assertRaises(SystemExit):
+                release_publish.deliver_main()
 
 
 def _find_tool(name):
@@ -247,11 +366,14 @@ class RealToolSigningTest(unittest.TestCase):
 
     def test_sign_verify_and_badging_with_ephemeral_key(self):
         tmp = Path(tempfile.mkdtemp(prefix="ovrly-fixture-"))
-        self.addCleanup(shutil.rmtree, tmp, True)
+        # Not ignore_errors: a residual fixture key must fail the test, not pass silently.
+        self.addCleanup(shutil.rmtree, tmp)
         keystore = tmp / "fixture.jks"
-        subprocess.run(["keytool", "-genkeypair", "-keystore", str(keystore), "-storepass", "fixture-only",
-                        "-keypass", "fixture-only", "-alias", "fixture", "-keyalg", "RSA", "-keysize", "2048",
-                        "-validity", "1", "-dname", "CN=ovrly test fixture, O=not production"],
+        store_pass, key_pass = "fixture-store-only", "fixture-key-only"    # distinct, like production
+        subprocess.run(["keytool", "-genkeypair", "-storetype", "JKS", "-keystore", str(keystore),
+                        "-storepass", store_pass, "-keypass", key_pass, "-alias", "fixture",
+                        "-keyalg", "RSA", "-keysize", "2048", "-validity", "1",
+                        "-dname", "CN=ovrly test fixture, O=not production"],
                        check=True, capture_output=True)
         import base64
         from release_publish import badging, sha256_of, sign_apk, signer_cert_sha256
@@ -264,13 +386,18 @@ class RealToolSigningTest(unittest.TestCase):
             signer_cert_sha256(tools["apksigner"], unsigned)   # genuinely unsigned
 
         signed = tmp / "signed.apk"
-        with SigningMaterial(base64.b64encode(keystore.read_bytes()).decode(), "fixture-only", "fixture-only") as m:
+        b64 = base64.b64encode(keystore.read_bytes()).decode()
+        with SigningMaterial(b64, store_pass, key_pass) as m:
             sign_apk(tools["apksigner"], unsigned, signed, m.keystore, "fixture", m.store_pass, m.key_pass)
         cert = signer_cert_sha256(tools["apksigner"], signed)
         self.assertRegex(cert, r"^[0-9a-f]{64}$")
         self.assertEqual(badging(tools["aapt2"], signed)["version_code"], info["version_code"])
         self.assertNotEqual(sha256_of(signed), sha256_of(unsigned))
-        print(f"\n[real-tool] unsigned={unsigned} sha256={sha256_of(unsigned)} versionCode={info['version_code']}")
+
+        # Swapped passwords must be rejected: proves store/key wiring is not interchangeable.
+        with SigningMaterial(b64, key_pass, store_pass) as m, self.assertRaises(PublishError):
+            sign_apk(tools["apksigner"], unsigned, tmp / "swapped.apk", m.keystore, "fixture", m.store_pass, m.key_pass)
+        print(f"\n[real-tool] unsigned={unsigned} sha256={sha256_of(unsigned)} versionCode={info['version_code']} fixture_cert={cert[:16]}…")
 
 
 if __name__ == "__main__":

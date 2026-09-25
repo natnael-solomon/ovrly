@@ -21,11 +21,14 @@ import tempfile
 from pathlib import Path
 
 import release_ledger
-from release_preflight import PreflightError, check_protections
-from telegram_api import GitHubApiError, GitHubClient, TelegramClient, display_name, require_env
-from telegram_notify import GAP, compose, field, link, quote
+from release_preflight import PreflightError, check_execution_context, check_protections
+from telegram_api import GitHubApiError, GitHubClient, TelegramClient, display_name, first_line, require_env, truncate
+from telegram_notify import GAP, QUOTE_LIMIT, compose, field, link, quote
 
 EXPECTED_PACKAGE = "app.ovrly"
+BUILD_PROVENANCE_SCHEMA = "ovrly-build-provenance/v1"
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024      # Telegram bot sendDocument limit
+CAPTION_LIMIT = 1024                     # Telegram caption limit
 
 
 class PublishError(RuntimeError):
@@ -100,7 +103,7 @@ class SigningMaterial:
     """Decodes the keystore and passwords into a private temp dir for the lifetime of the block.
 
     Controls are restrictive permissions, cleanup and the ephemeral hosted runner; this is not a
-    secure-erase and does not claim to be.
+    secure-erase and does not claim to be. Any failure while entering removes the directory.
     """
 
     def __init__(self, keystore_b64, store_password, key_password):
@@ -110,15 +113,19 @@ class SigningMaterial:
         self.dir = None
 
     def __enter__(self):
-        self.dir = Path(tempfile.mkdtemp(prefix="ovrly-sign-"))
-        os.chmod(self.dir, stat.S_IRWXU)
         try:
             raw = base64.b64decode(self._b64, validate=True)
         except (ValueError, TypeError):
             fail("RELEASE_KEYSTORE_B64 is not valid base64")
-        self.keystore = self._write("release.jks", raw)
-        self.store_pass = self._write("store.pass", self._store.encode())
-        self.key_pass = self._write("key.pass", self._key.encode())
+        self.dir = Path(tempfile.mkdtemp(prefix="ovrly-sign-"))
+        try:
+            os.chmod(self.dir, stat.S_IRWXU)
+            self.keystore = self._write("release.jks", raw)
+            self.store_pass = self._write("store.pass", self._store.encode())
+            self.key_pass = self._write("key.pass", self._key.encode())
+        except BaseException:
+            self._cleanup()
+            raise
         return self
 
     def _write(self, name, data):
@@ -127,25 +134,36 @@ class SigningMaterial:
             handle.write(data)
         return path
 
+    def _cleanup(self):
+        if self.dir and self.dir.exists():
+            shutil.rmtree(self.dir)   # a failure here is worth knowing about; do not swallow it
+        self.dir = None
+
     def __exit__(self, *exc):
-        if self.dir:
-            shutil.rmtree(self.dir, ignore_errors=True)
+        self._cleanup()
         return False
 
 
 # --- Approval metadata ----------------------------------------------------------------
 
 def approval_metadata(github, run_id, observed_at):
-    """Real fields only. GitHub does not return approval timestamps here, so we record when we looked."""
+    """Real fields only. GitHub does not return approval timestamps here, so we record when we looked.
+
+    If the audit endpoint is unavailable the record says so explicitly rather than presenting an
+    empty list as if nobody had approved.
+    """
     try:
         approvals = github.get(f"actions/runs/{run_id}/approvals")
-    except GitHubApiError:
-        approvals = []
+        available = True
+    except GitHubApiError as error:
+        approvals, available = [], False
+        print(f"::warning::Approval audit unavailable (HTTP {error.status}); the native environment gate remains the control")
     return {
         "approvals": [
             {"user": (a.get("user") or {}).get("login"), "state": a.get("state"), "comment": a.get("comment") or ""}
             for a in approvals
         ],
+        "approvals_audit_available": available,
         "approvals_observed_at": observed_at,
     }
 
@@ -153,19 +171,41 @@ def approval_metadata(github, run_id, observed_at):
 # --- Caption --------------------------------------------------------------------------
 
 def render_caption(code, version_name, source_sha, subject, actor, repository_url, signed_sha256, redelivery=False):
-    headline = link(f"{repository_url}/commit/{source_sha}", f"ovrly {version_name} · build {code}")
-    return compose(
+    headline = link(f"{repository_url}/commit/{source_sha}", f"ovrly {truncate(version_name, 40)} · build {code}")
+    text = compose(
         headline,
-        quote(subject) if subject else "",
+        quote(truncate(first_line(subject), QUOTE_LIMIT)) if subject else "",
         GAP,
         field("Commit", f"<code>{source_sha[:7]}</code>"),
         field("SHA-256", f"<code>{signed_sha256[:16]}…</code>"),
         field("By", f"<i>{display_name(actor)}</i>"),
         field("Note", "redelivery of an issued build") if redelivery else "",
     )
+    if len(text) > CAPTION_LIMIT:
+        fail(f"Caption is {len(text)} characters; Telegram allows {CAPTION_LIMIT}")
+    return text
 
 
 # --- Flows ----------------------------------------------------------------------------
+
+def verify_redelivery(ledger, expected, downloaded_apk, tools, expected_cert, runner=subprocess.run):
+    """Redeliver mode: the bytes must be exactly what the ledger issued under the current HWM."""
+    code = release_ledger.validate_code(expected["code"])
+    issued = ledger.issuances.get(code)
+    if issued is None:
+        fail(f"Code {code} is not issued")
+    if code != ledger.high_water_mark:
+        fail(f"Code {code} is superseded by issued version {ledger.high_water_mark}; older releases cannot be redelivered")
+    expected_cert = (expected_cert or "").lower()
+    if issued["cert_sha256"] != expected_cert or expected.get("cert_sha256") != expected_cert:
+        fail("Issued certificate, preflight evidence and EXPECTED_SIGNING_CERT_SHA256 do not all agree")
+    actual_sha = sha256_of(downloaded_apk)
+    if actual_sha != issued["signed_sha256"] or actual_sha != expected["signed_sha256"]:
+        fail("Downloaded artifact bytes do not match the ledger's issued digest")
+    if signer_cert_sha256(tools["apksigner"], downloaded_apk, runner) != expected_cert:
+        fail("Downloaded artifact is not signed by the pinned certificate")
+    verify_badging(badging(tools["aapt2"], downloaded_apk, runner), code)
+    return {"code": code, "signed_sha256": actual_sha, "cert_sha256": expected_cert, "record": issued}
 
 def publish_new_build(github, ledger, cfg, tools, runner=subprocess.run):
     """Build mode. `cfg` carries paths, expected values and secrets; `tools` the aapt2/apksigner paths."""
@@ -173,8 +213,10 @@ def publish_new_build(github, ledger, cfg, tools, runner=subprocess.run):
     reservation = ledger.reservations.get(code)
     if reservation is None or reservation.get("placeholder"):
         fail(f"No ledger reservation for code {code}")
-    if reservation["source_sha"] != cfg["source_sha"] or reservation["run_id"] != int(cfg["run_id"]):
-        fail(f"Reservation for code {code} belongs to a different source or run")
+    context = {"source_sha": cfg["source_sha"], "run_id": int(cfg["run_id"]),
+               "run_attempt": int(cfg["run_attempt"]), "workflow_sha": cfg["workflow_sha"]}
+    if any(reservation[k] != v for k, v in context.items()):
+        fail(f"Reservation for code {code} was made for a different source, run, attempt or workflow revision")
     if code <= ledger.high_water_mark:
         fail(
             f"Code {code} is not above the issued high-water mark {ledger.high_water_mark}; "
@@ -184,12 +226,20 @@ def publish_new_build(github, ledger, cfg, tools, runner=subprocess.run):
     unsigned = Path(cfg["unsigned_apk"])
     if not unsigned.is_file():
         fail(f"Unsigned APK not found at {unsigned}")
+    size = unsigned.stat().st_size
+    if size > MAX_UPLOAD_BYTES:
+        fail(f"Unsigned APK is {size / 1_048_576:.1f} MB; Telegram bots can upload at most 50 MB, so this build cannot be delivered")
     unsigned_sha = sha256_of(unsigned)
     provenance = json.loads(Path(cfg["build_provenance"]).read_text(encoding="utf-8"))
+    if provenance.get("schema") != BUILD_PROVENANCE_SCHEMA:
+        fail(f"Build provenance schema is {provenance.get('schema')!r}, expected {BUILD_PROVENANCE_SCHEMA}")
     if provenance.get("unsigned_sha256") != unsigned_sha or cfg["build_output_sha256"] != unsigned_sha:
         fail("Unsigned artifact digest does not match the build provenance and job output")
-    if provenance.get("source_sha") != cfg["source_sha"] or provenance.get("code") != code:
-        fail("Build provenance does not describe this source commit and code")
+    expected_provenance = {"code": code, **context}
+    if any(provenance.get(k) != v for k, v in expected_provenance.items()):
+        fail("Build provenance does not describe this code, source commit, run, attempt and workflow revision")
+    if provenance.get("package") != EXPECTED_PACKAGE:
+        fail(f"Build provenance package is {provenance.get('package')!r}")
     verify_badging(badging(tools["aapt2"], unsigned, runner), code)
 
     expected_cert = cfg["expected_cert_sha256"].lower()
@@ -211,6 +261,10 @@ def publish_new_build(github, ledger, cfg, tools, runner=subprocess.run):
         signed.unlink(missing_ok=True)
         fail(f"Signer certificate {actual_cert} does not match EXPECTED_SIGNING_CERT_SHA256")
     verify_badging(badging(tools["aapt2"], signed, runner), code)
+    signed_size = signed.stat().st_size
+    if signed_size > MAX_UPLOAD_BYTES:
+        signed.unlink(missing_ok=True)
+        fail(f"Signed APK is {signed_size / 1_048_576:.1f} MB; Telegram bots can upload at most 50 MB")
     signed_sha = sha256_of(signed)
 
     evidence = {
@@ -225,23 +279,6 @@ def publish_new_build(github, ledger, cfg, tools, runner=subprocess.run):
     record = release_ledger.issue(github, ledger, code, reservation, publish_run, evidence, cfg["tagger"])
     Path(cfg["signed_provenance"]).write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
     return {"code": code, "signed_sha256": signed_sha, "cert_sha256": actual_cert, "record": record}
-
-
-def verify_redelivery(ledger, expected, downloaded_apk, tools, runner=subprocess.run):
-    """Redeliver mode: the bytes must be exactly what the ledger issued under the current HWM."""
-    code = release_ledger.validate_code(expected["code"])
-    issued = ledger.issuances.get(code)
-    if issued is None:
-        fail(f"Code {code} is not issued")
-    if code != ledger.high_water_mark:
-        fail(f"Code {code} is superseded by issued version {ledger.high_water_mark}; older releases cannot be redelivered")
-    actual_sha = sha256_of(downloaded_apk)
-    if actual_sha != issued["signed_sha256"] or actual_sha != expected["signed_sha256"]:
-        fail("Downloaded artifact bytes do not match the ledger's issued digest")
-    if signer_cert_sha256(tools["apksigner"], downloaded_apk, runner) != issued["cert_sha256"]:
-        fail("Downloaded artifact is not signed by the issued certificate")
-    verify_badging(badging(tools["aapt2"], downloaded_apk, runner), code)
-    return {"code": code, "signed_sha256": actual_sha, "cert_sha256": issued["cert_sha256"], "record": issued}
 
 
 def deliver(telegram, apk_path, caption):
@@ -262,10 +299,31 @@ def tools_from_env():
     return {"apksigner": str(apksigner), "aapt2": str(aapt2)}
 
 
+def execution_context_from_env(env=os.environ):
+    return {
+        "ref": env.get("GITHUB_REF", ""),
+        "workflow_ref": env.get("GITHUB_WORKFLOW_REF", ""),
+        "run_attempt": env.get("GITHUB_RUN_ATTEMPT", ""),
+    }
+
+
+def guard_execution_context(env=os.environ):
+    """Refuse partial reruns and non-main contexts before touching network, tools or secrets.
+
+    'Re-run failed jobs' can restart only this job after preflight already passed, bypassing
+    preflight's attempt guard; both modes must therefore re-check here.
+    """
+    check_execution_context(execution_context_from_env(env))
+
+
 def main():
     mode = os.environ.get("MODE")
     if mode not in ("build", "redeliver"):
         fail_and_exit("MODE must be build or redeliver")
+    try:
+        guard_execution_context()
+    except PreflightError as error:
+        fail_and_exit(str(error))
     token, repository, owner, bot_token, chat_id = require_env(
         "GITHUB_TOKEN", "GITHUB_REPOSITORY", "RELEASE_OWNER", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"
     )
@@ -275,7 +333,7 @@ def main():
     try:
         # Protections may have changed while waiting for approval; check again under the publish mutex.
         check_protections(github, owner)
-        ledger = release_ledger.load(github, owner)
+        ledger = release_ledger.load(github, owner, os.environ.get("LEDGER_BOOTSTRAP_TAG_SHA"))
         tools = tools_from_env()
         if mode == "build":
             (keystore_b64, store_password, key_alias, key_password, expected_cert) = require_env(
@@ -301,7 +359,8 @@ def main():
             return
         expected = json.loads(os.environ["EXPECTED"])
         apk = os.environ["DOWNLOADED_APK"]
-        result = verify_redelivery(ledger, expected, apk, tools)
+        (expected_cert,) = require_env("EXPECTED_SIGNING_CERT_SHA256")
+        result = verify_redelivery(ledger, expected, apk, tools, expected_cert)
         caption = render_caption(result["code"], result["record"].get("version_name", ""), result["record"]["source_sha"],
                                  os.environ.get("COMMIT_SUBJECT", ""), result["record"].get("requested_by", ""),
                                  repository_url, result["signed_sha256"], redelivery=True)
@@ -313,6 +372,10 @@ def main():
 
 def deliver_main():
     """Second entry point, run after the signed artifact is uploaded: send the same bytes."""
+    try:
+        guard_execution_context()
+    except PreflightError as error:
+        fail_and_exit(str(error))
     bot_token, chat_id, repository = require_env("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_REPOSITORY")
     record = json.loads(Path(os.environ["SIGNED_PROVENANCE"]).read_text(encoding="utf-8"))
     apk = Path(os.environ["SIGNED_APK"])

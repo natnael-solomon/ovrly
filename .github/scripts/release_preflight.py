@@ -19,12 +19,13 @@ ANDROID_CHECK_NAME = "Android checks"
 RELEASE_WORKFLOW_PATH = ".github/workflows/telegram-apk.yml"
 MAIN_REF = "refs/heads/main"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-LEDGER_PROBE_REFS = (
+LEDGER_RULESET_INCLUDES = {
     "refs/tags/release-ledger/bootstrap",
-    "refs/tags/release-ledger/reserve/1",
-    "refs/tags/release-ledger/issue/1",
-)
+    "refs/tags/release-ledger/reserve/*",
+    "refs/tags/release-ledger/issue/*",
+}
 REQUIRED_TAG_RULES = {"deletion", "update", "non_fast_forward"}
+BUILD_PROVENANCE_SCHEMA = "ovrly-build-provenance/v1"
 
 
 class PreflightError(RuntimeError):
@@ -82,25 +83,39 @@ def check_main_ruleset(github):
 
 
 def check_ledger_protection(github):
-    """The ledger namespace must be immutable for every ref shape we write, with no bypass actors."""
-    ruleset_ids = set()
-    for ref in LEDGER_PROBE_REFS:
-        rules = github.get(f"rules/branches/{ref.replace('/', '%2F')}")
-        present = {rule["type"] for rule in rules}
+    """The ledger namespace must be immutable for every ref shape we write, with no bypass.
+
+    `rules/branches/{ref}` is documented as branch-only and cannot prove tag protection, so this
+    reads the repository's rulesets and requires an ACTIVE tag ruleset whose include list names
+    each ledger pattern exactly, with no excludes and no bypass actors.
+    """
+    for summary in github.paginate("rulesets"):
+        if summary.get("target") != "tag" or summary.get("enforcement") != "active":
+            continue
+        ruleset = github.get(f"rulesets/{summary['id']}")
+        # The list view can be stale; the full record is what counts.
+        if ruleset.get("target") != "tag" or ruleset.get("enforcement") != "active":
+            continue
+        ref_name = (ruleset.get("conditions") or {}).get("ref_name") or {}
+        includes = set(ref_name.get("include") or [])
+        if not LEDGER_RULESET_INCLUDES <= includes:
+            continue
+        if ref_name.get("exclude"):
+            fail(f"Tag ruleset {ruleset['id']} protecting the ledger must have no exclusions")
+        if "bypass_actors" not in ruleset:
+            fail(f"Cannot verify bypass actors on tag ruleset {ruleset['id']}: field missing from the API response")
+        if ruleset["bypass_actors"] != []:
+            fail(f"Tag ruleset {ruleset['id']} protecting the ledger must have no bypass actors")
+        present = {rule.get("type") for rule in ruleset.get("rules") or []}
         missing = REQUIRED_TAG_RULES - present
         if missing:
-            fail(
-                f"Ledger ref {ref} is not protected against {sorted(missing)}. Create a tag ruleset "
-                "covering release-ledger/bootstrap, release-ledger/reserve/** and release-ledger/issue/** "
-                "with deletion, update and non-fast-forward blocked (docs/release-signing.md)."
-            )
-        ruleset_ids.update(rule.get("ruleset_id") for rule in rules if rule.get("ruleset_id"))
-    for ruleset_id in ruleset_ids:
-        ruleset = github.get(f"rulesets/{ruleset_id}")
-        if ruleset.get("target") != "tag":
-            fail(f"Ruleset {ruleset_id} protecting the ledger must target tags, not {ruleset.get('target')}")
-        if ruleset.get("bypass_actors"):
-            fail(f"Ruleset {ruleset_id} protecting the ledger must have no bypass actors")
+            fail(f"Tag ruleset {ruleset['id']} protecting the ledger lacks {sorted(missing)} rules")
+        return
+    fail(
+        "No active tag ruleset protects the release ledger. Create one whose include list is exactly "
+        f"{sorted(LEDGER_RULESET_INCLUDES)} with deletion, update and non-fast-forward blocked and "
+        "no bypass actors (docs/release-signing.md §5)."
+    )
 
 
 def check_environment(github, owner):
@@ -176,8 +191,12 @@ def _run_id_from_details(url):
 
 # --- Redelivery resolution ---------------------------------------------------------
 
-def resolve_redelivery(github, ledger, run_id, repository):
-    """Find the issued artifact a previous publish produced. Failed/cancelled source runs are eligible."""
+def resolve_redelivery(github, ledger, run_id, repository, expected_cert):
+    """Find the issued artifact a previous publish produced. Failed/cancelled source runs are eligible.
+
+    The run must be this workflow, from main, and the ledger issuance must have been written by that
+    exact run and attempt; the artifact is then addressed by id, never by name alone.
+    """
     run = github.get_optional(f"actions/runs/{run_id}")
     if run is None:
         fail(f"Workflow run {run_id} was not found in {repository}")
@@ -185,6 +204,11 @@ def resolve_redelivery(github, ledger, run_id, repository):
         fail(f"Run {run_id} belongs to {run.get('repository', {}).get('full_name')}, not {repository}")
     if run.get("path") != RELEASE_WORKFLOW_PATH:
         fail(f"Run {run_id} is {run.get('path')}, not the release workflow")
+    release_workflow = github.get(f"actions/workflows/{RELEASE_WORKFLOW_PATH.rsplit('/', 1)[1]}")
+    if run.get("workflow_id") != release_workflow.get("id"):
+        fail(f"Run {run_id} has workflow id {run.get('workflow_id')}, but the release workflow is {release_workflow.get('id')}")
+    if run.get("event") != "workflow_dispatch" or run.get("head_branch") != "main":
+        fail(f"Run {run_id} was not a workflow_dispatch from main")
     if run.get("status") != "completed":
         fail(f"Run {run_id} is still {run.get('status')}; wait for it to finish before redelivering")
     if run.get("conclusion") not in ("success", "failure", "cancelled", "timed_out"):
@@ -198,20 +222,31 @@ def resolve_redelivery(github, ledger, run_id, repository):
     artifact = artifacts[0]
     match = re.fullmatch(r"ovrly-signed-(\d+)", artifact["name"])
     code = release_ledger.validate_code(match.group(1) if match else None, "artifact code")
+    digest = artifact.get("digest") or ""
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        fail(f"Artifact {artifact['id']} has no canonical sha256 digest; cannot verify it end to end")
+    producer = artifact.get("workflow_run") or {}
+    if producer.get("id") != int(run_id) or producer.get("head_sha") != run.get("head_sha") or producer.get("head_branch") != "main":
+        fail(f"Artifact {artifact['id']} does not record run {run_id} on main at {run.get('head_sha')} as its producer")
     issued = ledger.issuances.get(code)
     if issued is None:
         fail(f"Code {code} from run {run_id} was never issued in the ledger; nothing to redeliver")
-    if issued["run_id"] != int(run_id):
-        fail(f"Ledger says code {code} was issued by run {issued['run_id']}, not {run_id}")
+    if issued["run_id"] != int(run_id) or issued["run_attempt"] != int(run.get("run_attempt") or 0):
+        fail(f"Ledger says code {code} was issued by run {issued['run_id']} attempt {issued['run_attempt']}, "
+             f"not run {run_id} attempt {run.get('run_attempt')}")
+    if issued["workflow_sha"] != run.get("head_sha"):
+        fail(f"Run {run_id} executed workflow revision {run.get('head_sha')}, but the ledger recorded {issued['workflow_sha']}")
     if code != ledger.high_water_mark:
         fail(
             f"Code {code} is superseded: the current issued version is {ledger.high_water_mark}. "
             "Older releases cannot be redelivered; dispatch a new build if a newer one is needed."
         )
+    if issued["cert_sha256"] != expected_cert:
+        fail("The issued certificate does not match EXPECTED_SIGNING_CERT_SHA256; the owner must review the key configuration")
     return {
         "code": code,
         "artifact_id": artifact["id"],
-        "artifact_digest": artifact.get("digest"),
+        "artifact_digest": digest,
         "source_sha": issued["source_sha"],
         "signed_sha256": issued["signed_sha256"],
         "cert_sha256": issued["cert_sha256"],
@@ -242,21 +277,32 @@ def main():
         mode, target = decide_mode(os.environ.get("INPUT_SOURCE_SHA"), os.environ.get("INPUT_REDELIVER_RUN_ID"))
         check_execution_context(ctx)
         check_protections(github, owner)
-        ledger = release_ledger.load(github, owner)
+        expected_cert = validate_cert_pin(os.environ.get("EXPECTED_SIGNING_CERT_SHA256"))
+        bootstrap_pin = os.environ.get("LEDGER_BOOTSTRAP_TAG_SHA")
+        ledger = release_ledger.load(github, owner, bootstrap_pin)
+        if ledger.issuances and any(rec["cert_sha256"] != expected_cert for rec in ledger.issuances.values()):
+            fail("EXPECTED_SIGNING_CERT_SHA256 differs from the certificate already recorded in the ledger")
         if mode == "build":
             check_merged_into_main(github, target)
             check_android_ci(github, target)
             tagger = {"name": "ovrly release ledger", "email": "release-ledger@users.noreply.github.com"}
-            code, _ = release_ledger.reserve(github, ledger, target, ctx, tagger)
+            code, _ = release_ledger.reserve(github, ledger, target, ctx, tagger, owner, bootstrap_pin)
             write_outputs({"mode": mode, "code": code, "source_sha": target})
             print(f"Reserved version code {code} for {target[:12]}")
         else:
-            resolved = resolve_redelivery(github, ledger, target, repository)
+            resolved = resolve_redelivery(github, ledger, target, repository, expected_cert)
             write_outputs({"mode": mode, **resolved, "expected": json.dumps(resolved, sort_keys=True)})
             print(f"Redelivery of code {resolved['code']} from run {target} is eligible")
     except (PreflightError, release_ledger.LedgerError, GitHubApiError) as error:
         print(f"::error::{error}")
         sys.exit(1)
+
+
+def validate_cert_pin(value):
+    pin = (value or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", pin):
+        fail("EXPECTED_SIGNING_CERT_SHA256 repository variable must be a 64-hex SHA-256 (docs/release-signing.md §4)")
+    return pin
 
 
 if __name__ == "__main__":

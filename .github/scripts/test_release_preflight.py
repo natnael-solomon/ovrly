@@ -11,7 +11,11 @@ from telegram_api import GitHubApiError
 SHA = "a" * 40
 OWNER = "natnael-solomon"
 GOOD_CTX = {"ref": "refs/heads/main", "workflow_ref": "o/r/.github/workflows/telegram-apk.yml@refs/heads/main", "run_attempt": "1"}
-TAG_RULES = [{"type": "deletion", "ruleset_id": 7}, {"type": "update", "ruleset_id": 7}, {"type": "non_fast_forward", "ruleset_id": 7}]
+LEDGER_RULESET = {
+    "id": 7, "target": "tag", "enforcement": "active", "bypass_actors": [],
+    "conditions": {"ref_name": {"include": ["refs/tags/release-ledger/bootstrap", "refs/tags/release-ledger/reserve/*", "refs/tags/release-ledger/issue/*"], "exclude": []}},
+    "rules": [{"type": "deletion"}, {"type": "update"}, {"type": "non_fast_forward"}],
+}
 
 
 def good_responses():
@@ -20,10 +24,7 @@ def good_responses():
             {"type": "pull_request", "parameters": {"required_approving_review_count": 1}},
             {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "Android checks"}]}},
         ],
-        "rules/branches/refs%2Ftags%2Frelease-ledger%2Fbootstrap": TAG_RULES,
-        "rules/branches/refs%2Ftags%2Frelease-ledger%2Freserve%2F1": TAG_RULES,
-        "rules/branches/refs%2Ftags%2Frelease-ledger%2Fissue%2F1": TAG_RULES,
-        "rulesets/7": {"target": "tag", "bypass_actors": []},
+        "rulesets/7": copy.deepcopy(LEDGER_RULESET),
         "environments/production-signing": {
             "protection_rules": [{"type": "required_reviewers", "prevent_self_review": False,
                                   "reviewers": [{"type": "User", "reviewer": {"login": OWNER}}]}],
@@ -44,6 +45,8 @@ class FakeGitHub:
     def __init__(self, responses, pages=None):
         self.responses = responses
         self.pages = pages or {}
+        if "rulesets" not in self.pages:
+            self.pages["rulesets"] = [{"id": 7, "target": "tag", "enforcement": "active"}]
 
     def get(self, path):
         if path not in self.responses:
@@ -93,19 +96,29 @@ class ProtectionTest(unittest.TestCase):
         with self.assertRaises(PreflightError):
             check_main_ruleset(FakeGitHub(r))
 
-    def test_ledger_protection_each_probe_ref(self):
+    def test_ledger_protection_via_tag_rulesets(self):
         check_ledger_protection(FakeGitHub(good_responses()))
-        for probe in ("bootstrap", "reserve%2F1", "issue%2F1"):
-            r = good_responses(); r[f"rules/branches/refs%2Ftags%2Frelease-ledger%2F{probe}"] = TAG_RULES[:2]
-            with self.subTest(probe=probe), self.assertRaises(PreflightError) as raised:
-                check_ledger_protection(FakeGitHub(r))
-            self.assertIn("non_fast_forward", str(raised.exception))
-        r = good_responses(); r["rulesets/7"] = {"target": "tag", "bypass_actors": [{"actor_id": 1}]}
-        with self.assertRaises(PreflightError):
-            check_ledger_protection(FakeGitHub(r))
-        r = good_responses(); r["rulesets/7"] = {"target": "branch", "bypass_actors": []}
-        with self.assertRaises(PreflightError):
-            check_ledger_protection(FakeGitHub(r))
+        cases = {
+            "no rulesets": lambda r, p: p.__setitem__("rulesets", []),
+            "disabled": lambda r, p: p.__setitem__("rulesets", [{"id": 7, "target": "tag", "enforcement": "disabled"}]),
+            "branch target": lambda r, p: p.__setitem__("rulesets", [{"id": 7, "target": "branch", "enforcement": "active"}]),
+            "full record disabled": lambda r, p: r["rulesets/7"].__setitem__("enforcement", "disabled"),
+            "full record branch": lambda r, p: r["rulesets/7"].__setitem__("target", "branch"),
+            "missing include": lambda r, p: r["rulesets/7"]["conditions"]["ref_name"]["include"].remove("refs/tags/release-ledger/issue/*"),
+            "double-star only": lambda r, p: r["rulesets/7"]["conditions"]["ref_name"].__setitem__("include", ["refs/tags/release-ledger/**"]),
+            "has exclude": lambda r, p: r["rulesets/7"]["conditions"]["ref_name"].__setitem__("exclude", ["refs/tags/release-ledger/issue/9"]),
+            "bypass actor": lambda r, p: r["rulesets/7"].__setitem__("bypass_actors", [{"actor_id": 1}]),
+            "bypass missing": lambda r, p: r["rulesets/7"].pop("bypass_actors"),
+            "missing update rule": lambda r, p: r["rulesets/7"].__setitem__("rules", [{"type": "deletion"}, {"type": "non_fast_forward"}]),
+        }
+        for name, mutate in cases.items():
+            r, p = good_responses(), {}
+            gh = FakeGitHub(r, p)
+            mutate(r, gh.pages)
+            with self.subTest(name=name), self.assertRaises(PreflightError) as raised:
+                check_ledger_protection(gh)
+            if name == "bypass missing":
+                self.assertIn("Cannot verify", str(raised.exception))
 
     def test_environment_variants(self):
         check_environment(FakeGitHub(good_responses()), OWNER)
@@ -164,56 +177,98 @@ class EligibilityTest(unittest.TestCase):
 
 class RedeliveryTest(unittest.TestCase):
     HEX = "1" * 64
+    WF_SHA = "b" * 40
 
-    def ledger(self, hwm=5):
+    def ledger(self, hwm=5, cert=None):
+        cert = cert or self.HEX
         ledger = release_ledger.Ledger(floor=1, bootstrap={})
         for code in range(2, hwm + 1):
             ledger.reservations[code] = {"code": code}
-            ledger.issuances[code] = {"code": code, "run_id": 100 + code, "source_sha": SHA,
-                                      "signed_sha256": self.HEX, "cert_sha256": self.HEX, "package": "app.ovrly"}
+            ledger.issuances[code] = {"code": code, "run_id": 100 + code, "run_attempt": 1, "workflow_sha": self.WF_SHA,
+                                      "source_sha": SHA, "signed_sha256": self.HEX, "cert_sha256": cert, "package": "app.ovrly"}
         return ledger
 
-    def github(self, run_id=105, conclusion="failure", artifacts=None, path=".github/workflows/telegram-apk.yml", status="completed"):
-        responses = {f"actions/runs/{run_id}": {"repository": {"full_name": "o/r"}, "path": path, "status": status, "conclusion": conclusion}}
-        default = [{"id": 9001, "name": "ovrly-signed-5", "expired": False, "digest": "sha256:" + self.HEX}]
+    def run_info(self, **over):
+        base = {"repository": {"full_name": "o/r"}, "path": ".github/workflows/telegram-apk.yml", "workflow_id": 777,
+                "event": "workflow_dispatch", "head_branch": "main", "head_sha": self.WF_SHA, "run_attempt": 1,
+                "status": "completed", "conclusion": "failure"}
+        base.update(over)
+        return base
+
+    def github(self, run_id=105, artifacts=None, **run_over):
+        responses = {f"actions/runs/{run_id}": self.run_info(**run_over),
+                     "actions/workflows/telegram-apk.yml": {"id": 777, "path": ".github/workflows/telegram-apk.yml"}}
+        default = [{"id": 9001, "name": "ovrly-signed-5", "expired": False, "digest": "sha256:" + self.HEX,
+                    "workflow_run": {"id": run_id, "head_sha": self.WF_SHA, "head_branch": "main"}}]
         return FakeGitHub(responses, {f"actions/runs/{run_id}/artifacts": default if artifacts is None else artifacts})
 
-    def test_failed_telegram_run_with_current_issued_artifact_is_eligible(self):
-        resolved = resolve_redelivery(self.github(), self.ledger(), 105, "o/r")
-        self.assertEqual(resolved["code"], 5)
-        self.assertEqual(resolved["artifact_id"], 9001)
-        self.assertEqual(resolved["signed_sha256"], self.HEX)
+    def resolve(self, gh, ledger, run_id=105, cert=None):
+        return resolve_redelivery(gh, ledger, run_id, "o/r", cert or self.HEX)
 
-    def test_timed_out_and_cancelled_eligible_active_not(self):
+    def test_failed_telegram_run_with_current_issued_artifact_is_eligible(self):
+        resolved = self.resolve(self.github(), self.ledger())
+        self.assertEqual((resolved["code"], resolved["artifact_id"], resolved["signed_sha256"]), (5, 9001, self.HEX))
+
+    def test_timed_out_cancelled_and_success_eligible_active_not(self):
         for conclusion in ("timed_out", "cancelled", "success"):
-            resolve_redelivery(self.github(conclusion=conclusion), self.ledger(), 105, "o/r")
+            self.resolve(self.github(conclusion=conclusion), self.ledger())
         with self.assertRaises(PreflightError):
-            resolve_redelivery(self.github(status="in_progress", conclusion=None), self.ledger(), 105, "o/r")
+            self.resolve(self.github(status="in_progress", conclusion=None), self.ledger())
 
     def test_older_issued_artifact_is_superseded(self):
-        gh = self.github(run_id=104, artifacts=[{"id": 9000, "name": "ovrly-signed-4", "expired": False}])
+        gh = self.github(run_id=104, artifacts=[{"id": 9000, "name": "ovrly-signed-4", "expired": False, "digest": "sha256:" + self.HEX,
+                                                  "workflow_run": {"id": 104, "head_sha": self.WF_SHA, "head_branch": "main"}}])
         with self.assertRaises(PreflightError) as raised:
-            resolve_redelivery(gh, self.ledger(), 104, "o/r")
+            self.resolve(gh, self.ledger(), 104)
         self.assertIn("superseded", str(raised.exception))
 
     def test_missing_expired_or_unissued_artifact_fails(self):
         with self.assertRaises(PreflightError):
-            resolve_redelivery(self.github(artifacts=[]), self.ledger(), 105, "o/r")
+            self.resolve(self.github(artifacts=[]), self.ledger())
         with self.assertRaises(PreflightError):
-            resolve_redelivery(self.github(artifacts=[{"id": 1, "name": "ovrly-signed-5", "expired": True}]), self.ledger(), 105, "o/r")
+            self.resolve(self.github(artifacts=[{"id": 1, "name": "ovrly-signed-5", "expired": True}]), self.ledger())
         ledger = self.ledger(); ledger.issuances.pop(5)
         with self.assertRaises(PreflightError):
-            resolve_redelivery(self.github(), ledger, 105, "o/r")
+            self.resolve(self.github(), ledger)
 
-    def test_untrusted_producer_fails(self):
-        with self.assertRaises(PreflightError):
-            resolve_redelivery(self.github(path=".github/workflows/android.yml"), self.ledger(), 105, "o/r")
-        gh = self.github(); gh.responses["actions/runs/105"]["repository"] = {"full_name": "fork/r"}
-        with self.assertRaises(PreflightError):
-            resolve_redelivery(gh, self.ledger(), 105, "o/r")
+    def test_untrusted_producer_binding_fails(self):
+        cases = {
+            "other workflow": dict(path=".github/workflows/android.yml"),
+            "other workflow id": dict(workflow_id=778),
+            "fork": dict(repository={"full_name": "fork/r"}),
+            "not dispatch": dict(event="push"),
+            "not main": dict(head_branch="feat/x"),
+            "other revision": dict(head_sha="9" * 40),
+            "other attempt": dict(run_attempt=2),
+        }
+        for name, over in cases.items():
+            with self.subTest(name=name), self.assertRaises(PreflightError):
+                self.resolve(self.github(**over), self.ledger())
         ledger = self.ledger(); ledger.issuances[5]["run_id"] = 999
         with self.assertRaises(PreflightError):
-            resolve_redelivery(self.github(), ledger, 105, "o/r")
+            self.resolve(self.github(), ledger)
+
+    def test_artifact_producer_facts_are_required(self):
+        def mutate(fn):
+            gh = self.github()
+            fn(gh.pages["actions/runs/105/artifacts"][0])
+            return gh
+        cases = {
+            "other run": lambda a: a["workflow_run"].__setitem__("id", 42),
+            "other head": lambda a: a["workflow_run"].__setitem__("head_sha", "8" * 40),
+            "other branch": lambda a: a["workflow_run"].__setitem__("head_branch", "feat/x"),
+            "no producer": lambda a: a.pop("workflow_run"),
+            "no digest": lambda a: a.pop("digest"),
+            "bad digest": lambda a: a.__setitem__("digest", "md5:abc"),
+        }
+        for name, fn in cases.items():
+            with self.subTest(name=name), self.assertRaises(PreflightError):
+                self.resolve(mutate(fn), self.ledger())
+
+    def test_certificate_pin_must_match_issuance(self):
+        with self.assertRaises(PreflightError) as raised:
+            self.resolve(self.github(), self.ledger(), cert="2" * 64)
+        self.assertIn("EXPECTED_SIGNING_CERT_SHA256", str(raised.exception))
 
 
 if __name__ == "__main__":

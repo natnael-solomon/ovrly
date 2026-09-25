@@ -4,7 +4,8 @@ name: Telegram APK
 #
 #   preflight  trusted helper code from the workflow revision; verifies protections and eligibility,
 #              reserves a version code in the immutable ledger. Only job besides publish with any write.
-#   build      untrusted application code at the requested commit; NO credentials, NO secrets.
+#   build      application code at the requested commit; read-only token, no persisted credentials
+#              and no production secrets.
 #              Produces an unsigned, minified, non-debuggable APK and its provenance.
 #   publish    protected environment (owner approval gates the secrets); verifies the artifact,
 #              signs, records issuance in the ledger, THEN uploads and sends. Serialized repo-wide.
@@ -49,7 +50,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.workflow_sha }}
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            .github/workflows
           persist-credentials: false
 
       - name: Test the release helpers
@@ -61,6 +64,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
           INPUT_REDELIVER_RUN_ID: ${{ inputs.redeliver_run_id }}
+          EXPECTED_SIGNING_CERT_SHA256: ${{ vars.EXPECTED_SIGNING_CERT_SHA256 }}
+          LEDGER_BOOTSTRAP_TAG_SHA: ${{ vars.LEDGER_BOOTSTRAP_TAG_SHA }}
         run: python3 .github/scripts/release_preflight.py
 
   build:
@@ -120,30 +125,48 @@ jobs:
           SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
         run: |
           apk=android/app/build/outputs/apk/release/app-release-unsigned.apk
-          test -f "$apk"
+          if [[ ! -f "$apk" ]]; then
+            echo "::error::Expected unsigned release APK was not produced: $apk"
+            exit 1
+          fi
+          if [[ ! -f android/app/build/outputs/mapping/release/mapping.txt ]]; then
+            echo "::error::R8 mapping is missing; the release must be minified"
+            exit 1
+          fi
           aapt2="$ANDROID_HOME/build-tools/36.0.0/aapt2"
           badging=$("$aapt2" dump badging "$apk")
-          grep -q "package: name='app.ovrly' versionCode='$CODE'" <<<"$badging"
-          ! grep -q "application-debuggable" <<<"$badging"
           sha=$(sha256sum "$apk" | cut -d' ' -f1)
-          version_name=$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" <<<"$badging" | head -n1)
           mkdir -p out && cp "$apk" out/app-release-unsigned.apk
-          cp android/app/build/outputs/mapping/release/mapping.txt out/mapping.txt 2>/dev/null || true
-          python3 - "$CODE" "$SOURCE_SHA" "$sha" "$version_name" > out/build-provenance.json <<'PY'
-          import json, os, sys
-          code, source_sha, sha, version_name = sys.argv[1:5]
-          print(json.dumps({
+          cp android/app/build/outputs/mapping/release/mapping.txt out/mapping.txt
+          python3 - "$CODE" "$SOURCE_SHA" "$sha" "$badging" "$(git log -1 --format=%s)" <<'PY'
+          import json, os, re, sys
+          from pathlib import Path
+
+          code, source_sha, sha, badging, subject = sys.argv[1:]
+          package = re.search(
+              r"^package: name='([^']+)' versionCode='(\d+)' versionName='([^'\r\n]*)'",
+              badging, re.MULTILINE,
+          )
+          if (not package or package[1] != "app.ovrly" or package[2] != code
+                  or "application-debuggable" in badging):
+              sys.exit("::error::Unsigned APK must be app.ovrly, non-debuggable, with the reserved version code")
+          if not code.isascii() or not code.isdecimal() or not 1 <= int(code) <= 2100000000:
+              sys.exit("::error::Reserved version code is outside 1..2100000000")
+          version_name = package[3]
+          provenance = {
               "schema": "ovrly-build-provenance/v1", "code": int(code), "source_sha": source_sha,
               "unsigned_sha256": sha, "version_name": version_name, "package": "app.ovrly",
               "run_id": int(os.environ["GITHUB_RUN_ID"]), "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
               "workflow_sha": os.environ["GITHUB_WORKFLOW_SHA"],
-          }, indent=2, sort_keys=True))
+          }
+          Path("out/build-provenance.json").write_text(
+              json.dumps(provenance, indent=2, sort_keys=True), encoding="utf-8",
+          )
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8", newline="\n") as output:
+              output.write(f"sha256={sha}\nversion_name={version_name}\n")
+              output.write("subject=" + " ".join(subject.splitlines()) + "\n")
+          print(f"Unsigned APK: app.ovrly, versionCode={code}, source={source_sha}, SHA-256={sha}")
           PY
-          {
-            echo "sha256=$sha"
-            echo "version_name=$version_name"
-            echo "subject=$(git log -1 --format=%s)"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Upload unsigned artifact
         id: upload
@@ -183,7 +206,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.workflow_sha }}
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            .github/workflows
           persist-credentials: false
 
       - name: Set up JDK 21
@@ -194,7 +219,8 @@ jobs:
 
       - name: Ensure build-tools for apksigner and aapt2
         run: |
-          if [[ ! -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]]; then
+          if [[ ! -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ||
+                ! -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" ]]; then
             sdkmanager --install "build-tools;36.0.0"
           fi
 
@@ -236,6 +262,7 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
           EXPECTED_SIGNING_CERT_SHA256: ${{ vars.EXPECTED_SIGNING_CERT_SHA256 }}
+          LEDGER_BOOTSTRAP_TAG_SHA: ${{ vars.LEDGER_BOOTSTRAP_TAG_SHA }}
         run: |
           mkdir -p out
           OBSERVED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" python3 .github/scripts/release_publish.py
@@ -266,6 +293,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           EXPECTED: ${{ needs.preflight.outputs.expected }}
           DOWNLOADED_APK: in/ovrly-${{ needs.preflight.outputs.code }}.apk
+          EXPECTED_SIGNING_CERT_SHA256: ${{ vars.EXPECTED_SIGNING_CERT_SHA256 }}
+          LEDGER_BOOTSTRAP_TAG_SHA: ${{ vars.LEDGER_BOOTSTRAP_TAG_SHA }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
         run: python3 .github/scripts/release_publish.py
