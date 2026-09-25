@@ -8,7 +8,9 @@ The CI workflow is in [`.github/workflows/android.yml`](.github/workflows/androi
 and runs on every pull request and push to `main`. The public
 [ovrly development Project](https://github.com/users/natnael-solomon/projects/3)
 holds all task issues; its README is the team briefing. The `main` protection
-ruleset is prepared but still disabled; enabling it is tracked as `REPO-02`.
+ruleset is active (see §6), and the production-signing environment, ledger
+and key described in §4 are provisioned, with the key's offline backup
+verified by the owner; the first production build has not been dispatched.
 This document does not enforce those rules.
 
 ## 1. Pick up work
@@ -88,12 +90,16 @@ such as serial numbers.
 
 **Android checks** runs on PRs to `main`, pushes to `main` and manual dispatch.
 One Ubuntu 24.04 job uses JDK 21 and the project's Gradle wrapper to build,
-unit test and lint together. Known documentation and isolated `evaluation/`
-changes (including its dedicated workflow) skip Android setup and Gradle, but
-still return the same required check. Changes to Android change detection itself
-still require the full job. Initial pushes,
-manual runs and unknown paths run the full checks. Change-detection tests
-run on every invocation.
+unit test and lint together. When Android work runs it also assembles the
+unsigned release APK with a ledger-style version code and exercises the
+release helpers' real `apksigner`/`aapt2` path against it using an ephemeral
+fixture key generated in a temporary directory and deleted afterwards; no
+production key is involved and no APK is uploaded. Known documentation and
+isolated `evaluation/` changes (including its dedicated workflow) skip Android
+setup and Gradle, but still return the same required check. Changes to Android
+change detection itself still require the full job. Initial pushes, manual runs
+and unknown paths run the full checks. Change-detection tests run on every
+invocation.
 
 **Evaluation contract checks** runs separately on every PR, push to `main` and
 manual dispatch, without workflow-level path filters. It tests the Python
@@ -143,6 +149,93 @@ silent summary of Status, Priority and Area changes plus additions and
 removals. Draft items are ignored. The first run records a baseline and posts
 "Board tracking started" instead of listing everything. It can be run
 manually from Actions.
+
+**Telegram APK** (`telegram-apk.yml`) is the gated pre-launch build. Any
+developer may request one after fetching by running
+`scripts/request-build.ps1` (Windows) or `sh scripts/request-build.sh`
+(Linux, WSL, Git Bash): it resolves `origin/main` to its exact commit, shows
+the SHA and subject, asks once, and dispatches the workflow. The Actions UI
+works too if you paste the full 40-character SHA yourself; a personal shortcut
+is `gh alias set ovrly-build '!sh scripts/request-build.sh --yes'`. There is
+deliberately no automatic trigger (push, label, comment or schedule): a
+request must be a person choosing a commit, because every dispatch reserves a
+version code and queues an owner approval. The workflow refuses branch names,
+unmerged commits, commits without a successful **Android checks** run from the
+real Android workflow, reruns of an earlier attempt, and any repository whose
+protections are not in place (see the prerequisites below). Three jobs with
+distinct trust:
+
+1. **Preflight** runs helper code from the workflow's own revision, checks
+   every protection, and reserves the next version code in the immutable
+   ledger. It is bound to this source commit and this run attempt; building
+   the same commit again gets a new code.
+2. **Build** checks out the requested commit with no credentials and no
+   secrets and produces an unsigned, minified, non-debuggable APK plus a
+   provenance file. The unsigned artifact is uploaded to the run; on a public
+   repository anyone can download it.
+3. **Sign, issue and deliver** runs in the `production-signing` environment,
+   so its secrets exist only after the owner approves this completed build.
+   Under a repository-wide mutex it re-checks protections, verifies the
+   artifact against the build provenance and the ledger, signs with the
+   production key, checks the signer against the pinned certificate, records
+   the issuance in the ledger, and only then uploads the signed artifact and
+   sends it to the existing Telegram destination. A build whose code is not
+   above the issued high-water mark when it reaches this job is refused, so an
+   older build approved late cannot be shipped after a newer one.
+
+Before approving, the owner confirms in the run: the source commit is the one
+requested, `Android checks` is green on it, the unsigned artifact's SHA-256 in
+the log matches the build provenance, and the build was not superseded.
+
+**Redelivery.** If Telegram fails after the signed artifact was uploaded,
+dispatch the workflow with `redeliver_run_id` set to that run. Preflight
+locates the issued artifact by id, checks it is the current issued version and
+that its bytes and certificate match the ledger, and the publish job resends
+exactly those bytes after owner approval. Nothing is built, allocated or
+signed. Older issued builds cannot be redelivered; dispatch a new build
+instead. A missing or expired artifact also requires a new build. Telegram
+does not offer exactly-once delivery: a timeout after Telegram accepted the
+upload can produce a duplicate; the caption carries the build number and the
+first 16 hex digits of the APK's SHA-256 so duplicates are recognisable.
+
+**Version codes.** The ledger lives in annotated tags under
+`refs/tags/release-ledger/`: `bootstrap` (owner-created baseline),
+`reserve/<code>` (a build reservation) and `issue/<code>` (a signed, verified
+build). Codes are `max(existing) + 1`, never reused; failed or cancelled runs
+leave gaps, which is fine. The first CI code is 2, above the app's local
+default of 1. Google Play accepts 1..2100000000 inclusive; both the helper and
+the Gradle build reject anything else, and local builds without the property
+stay at 1. When the app moves to Google Play, its first upload must carry a
+version code above the highest code in the ledger, reserved or issued, enrol
+this same signing key as the app-signing key, and the ledger remains the only
+counter; never start a second one. Builds sent to Telegram before this ledger
+existed are unverified historical artifacts with no recoverable provenance.
+
+**Evidence.** Each run keeps the unsigned and signed artifacts for 90 days,
+the ledger tags permanently, and both provenance files (source SHA, version
+code, digests, certificate, and the approval records GitHub returns). Failure
+after issuance but before upload leaves an issued, undistributed code; the
+next build simply takes the following code.
+
+**Prerequisites** (owner setup, verified by preflight on every run and
+described step by step in [docs/release-signing.md](docs/release-signing.md)):
+the active `main` ruleset requiring pull request review and `Android checks`
+(already in place); an active tag ruleset whose include list is exactly
+`refs/tags/release-ledger/bootstrap`, `refs/tags/release-ledger/reserve/*` and
+`refs/tags/release-ledger/issue/*`, blocking update, deletion and
+non-fast-forward, with no exclusions and no bypass actors; the
+`production-signing` environment with the owner as its sole required reviewer,
+self-review allowed, a custom branch policy of exactly `main`, and
+administrator bypass off (the API reports this as `can_admins_bypass`, which is
+outside the published schema, so it is observed and must be exactly `false`;
+confirm it in the UI too); the four signing secrets in that environment; the
+`EXPECTED_SIGNING_CERT_SHA256` and `LEDGER_BOOTSTRAP_TAG_SHA` repository
+variables; and the owner-created ledger bootstrap tag those variables pin.
+Until every one is present the workflow stops at preflight with a message
+naming what is missing. Ledger tags anchor to the `main` HEAD current when CI
+wrote them (the only target the workflow token may create) and carry the source
+commit inside their record; live ledger writes remain unexercised until this
+setup exists. It does not create a GitHub Release; §7 still governs releases.
 
 Both workflows only run from `main`: `workflow_run` and `schedule` triggers do
 not fire for other branches, so changes to them take effect after merging.
@@ -221,14 +314,13 @@ Do not copy historical commit messages wholesale. Existing branch history must
 not be rewritten without explicit approval; the final squash commit must comply
 with the authorship rule above.
 
-`main` is protected by a ruleset (enabled once the **Device evidence**
-workflow exists on `main`): no direct pushes, no force pushes, linear
-history, one approving review with stale approvals dismissed on push, all
-review threads resolved, and the **Android checks** and **Device evidence**
-status checks required and up to date with `main`. Do not add workflow-level
-path filters: docs-only PRs must still report the required checks rather than
-leave them pending. Add **Backend checks** (REPO-04) and **Contract checks**
-(BE-03) to the required list when those workflows exist.
+`main` is protected by an active ruleset: no direct pushes, no force pushes,
+linear history, one approving review with stale approvals dismissed on push,
+all review threads resolved, no bypass actors, and the **Android checks** and
+**Device evidence** status checks required and up to date with `main`. Do not
+add workflow-level path filters: docs-only PRs must still report the required
+checks rather than leave them pending. Add **Backend checks** (REPO-04) and
+**Contract checks** (BE-03) to the required list when those workflows exist.
 
 ## 7. Document and release
 
@@ -240,3 +332,14 @@ Merging does not automatically create a release or publish an APK. For now,
 only the project owner authorizes releases and public builds. At release
 time, assign the version and date, document known limitations and publish
 only the explicitly approved artifacts.
+
+Production signing uses one key that the owner generates and keeps: an
+encrypted offline backup with separately stored recovery credentials, plus a
+protected working copy in the `production-signing` environment for CI. Verify
+that the backup restores before the key signs anything. Passwords, keystores
+and private keys never go into Git, chat, logs or session artifacts. The setup
+and its verification steps are in
+[docs/release-signing.md](docs/release-signing.md). Before production delivery
+is considered verified, two consecutive production-signed builds must update
+in place on an authorised device, preserving seeded test data, with launch,
+overlay, capture and share checks recorded in the PR.

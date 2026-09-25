@@ -6,6 +6,8 @@ import os
 import sys
 import urllib.error
 import urllib.request
+import uuid
+from pathlib import Path
 
 TELEGRAM_API = "https://api.telegram.org"
 GITHUB_API = "https://api.github.com"
@@ -118,6 +120,49 @@ class TelegramClient:
     def pin(self, message_id):
         self.call("pinChatMessage", message_id=message_id, disable_notification=True)
 
+    def send_document(self, path, caption, silent=True):
+        """Upload a file (multipart, up to 50 MB) with an HTML caption."""
+        path = Path(path)
+        fields = {
+            "chat_id": str(self.chat_id),
+            "caption": caption,
+            "parse_mode": "HTML",
+            "disable_notification": "true" if silent else "false",
+        }
+        body, content_type = encode_multipart(fields, "document", path.name, path.read_bytes())
+        url = f"{TELEGRAM_API}/bot{self._token}/sendDocument"
+        request = urllib.request.Request(url, data=body, method="POST")
+        request.add_header("Content-Type", content_type)
+        try:
+            with urllib.request.urlopen(request, timeout=300) as response:
+                payload = json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            try:
+                payload = json.loads(error.read())
+            except ValueError:
+                payload = {"description": f"HTTP {error.code}"}
+        except urllib.error.URLError as error:
+            raise TelegramError(f"sendDocument: network error: {error.reason}") from None
+        if not payload.get("ok"):
+            raise TelegramError(f"sendDocument: {payload.get('description', 'unknown error')}")
+        return payload["result"]["message_id"]
+
+
+def encode_multipart(fields, file_field, filename, data):
+    boundary = uuid.uuid4().hex
+    parts = []
+    for name, value in fields.items():
+        parts.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode()
+        )
+    parts.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+        f"filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n".encode()
+    )
+    parts.append(data)
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
 
 class VariableState:
     """JSON state persisted in a GitHub Actions repository variable."""
@@ -165,3 +210,80 @@ def require_env(*names):
         print(f"::error::Missing configuration: {', '.join(missing)}")
         sys.exit(1)
     return [os.environ[name] for name in names]
+
+
+class GitHubApiError(RuntimeError):
+    def __init__(self, status, message, method, path):
+        super().__init__(f"{method} {path}: HTTP {status}: {message}")
+        self.status = status
+        self.message = message
+
+
+class GitHubClient:
+    """Minimal GitHub REST client with Link-header pagination; used by the release helpers."""
+
+    def __init__(self, token, repository, transport=http_json, api=GITHUB_API):
+        self._api = api
+        self._repository = repository
+        self._transport = transport
+        self._headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    def request(self, method, path, payload=None, ok=(200, 201)):
+        url = path if path.startswith("http") else f"{self._api}/repos/{self._repository}/{path}"
+        status, body = self._transport(url, method, payload, self._headers)
+        if status not in ok:
+            message = body.get("message", "") if isinstance(body, dict) else str(body)
+            raise GitHubApiError(status, message, method, path)
+        return body
+
+    def get(self, path, ok=(200,)):
+        return self.request("GET", path, ok=ok)
+
+    def get_optional(self, path):
+        """GET that returns None on 404 instead of raising."""
+        try:
+            return self.get(path)
+        except GitHubApiError as error:
+            if error.status == 404:
+                return None
+            raise
+
+    def paginate(self, path, key=None):
+        """Follow rel=next links; yields items (or body[key] items when the body is an object)."""
+        separator = "&" if "?" in path else "?"
+        url = f"{self._api}/repos/{self._repository}/{path}{separator}per_page=100"
+        while url:
+            status, body, headers = self._page(url)
+            if status != 200:
+                raise GitHubApiError(status, body.get("message", "") if isinstance(body, dict) else "", "GET", path)
+            items = body if key is None else body.get(key, [])
+            yield from items
+            url = next_link(headers.get("Link", ""))
+
+    def _page(self, url):
+        """Transport hook for paginated GETs; tests inject a `pages` callable returning (status, body, headers)."""
+        pages = getattr(self, "pages", None)
+        if pages is not None:
+            return pages(url, self._headers)
+        request = urllib.request.Request(url, headers=self._headers)
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.status, json.loads(response.read() or b"null"), dict(response.headers)
+        except urllib.error.HTTPError as error:
+            raw = error.read()
+            try:
+                return error.code, json.loads(raw), dict(error.headers)
+            except ValueError:
+                return error.code, {"message": raw.decode("utf-8", "replace")}, dict(error.headers)
+
+
+def next_link(link_header):
+    for part in link_header.split(","):
+        segment = part.strip()
+        if segment.endswith('rel="next"'):
+            return segment[segment.index("<") + 1: segment.index(">")]
+    return None

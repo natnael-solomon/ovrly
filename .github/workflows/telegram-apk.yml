@@ -1,0 +1,300 @@
+name: Telegram APK
+
+# Gated production build for pre-launch Telegram distribution. Three jobs with three trust levels:
+#
+#   preflight  trusted helper code from the workflow revision; verifies protections and eligibility,
+#              reserves a version code in the immutable ledger. Only job besides publish with any write.
+#   build      application code at the requested commit; read-only token, no persisted credentials
+#              and no production secrets.
+#              Produces an unsigned, minified, non-debuggable APK and its provenance.
+#   publish    protected environment (owner approval gates the secrets); verifies the artifact,
+#              signs, records issuance in the ledger, THEN uploads and sends. Serialized repo-wide.
+#
+# Redelivery resends the exact bytes of the current issued build through the same approval,
+# without building, allocating or signing. See WORKFLOW.md §4 and docs/release-signing.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full 40-hex commit already merged into main (leave empty for redelivery)
+        required: false
+        default: ''
+      redeliver_run_id:
+        description: Run id whose issued signed artifact should be resent (leave empty for a new build)
+        required: false
+        default: ''
+
+permissions: {}
+
+env:
+  RELEASE_OWNER: natnael-solomon
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write   # ledger reservation tags only; this job never runs application code
+      actions: read
+      checks: read
+    outputs:
+      mode: ${{ steps.gate.outputs.mode }}
+      code: ${{ steps.gate.outputs.code }}
+      source_sha: ${{ steps.gate.outputs.source_sha }}
+      expected: ${{ steps.gate.outputs.expected }}
+      artifact_id: ${{ steps.gate.outputs.artifact_id }}
+    steps:
+      - name: Check out trusted helper code (workflow revision)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: |
+            .github/scripts
+            .github/workflows
+          persist-credentials: false
+
+      - name: Test the release helpers
+        run: python3 -m unittest discover -s .github/scripts -p 'test_release_*.py'
+
+      - name: Verify protections, eligibility and reserve a version code
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+          INPUT_REDELIVER_RUN_ID: ${{ inputs.redeliver_run_id }}
+          EXPECTED_SIGNING_CERT_SHA256: ${{ vars.EXPECTED_SIGNING_CERT_SHA256 }}
+          LEDGER_BOOTSTRAP_TAG_SHA: ${{ vars.LEDGER_BOOTSTRAP_TAG_SHA }}
+        run: python3 .github/scripts/release_preflight.py
+
+  build:
+    name: Build unsigned release
+    needs: preflight
+    if: needs.preflight.outputs.mode == 'build'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      unsigned_sha256: ${{ steps.provenance.outputs.sha256 }}
+      version_name: ${{ steps.provenance.outputs.version_name }}
+      subject: ${{ steps.provenance.outputs.subject }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the requested commit without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.preflight.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Ensure required Android SDK packages
+        run: |
+          missing=()
+          [[ -f "$ANDROID_HOME/platforms/android-37.0/android.jar" ]] || missing+=("platforms;android-37.0")
+          [[ -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" ]] || missing+=("build-tools;36.0.0")
+          if (( ${#missing[@]} )); then sdkmanager --install "${missing[@]}"; fi
+
+      - name: Set up Gradle and validate wrappers
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: enhanced
+          cache-read-only: true
+
+      - name: Build unsigned minified release
+        working-directory: android
+        env:
+          CODE: ${{ needs.preflight.outputs.code }}
+        run: >-
+          sh gradlew --no-daemon --console=plain --build-cache
+          -Povrly.versionCode="$CODE" :app:assembleRelease
+
+      - name: Record build provenance
+        id: provenance
+        env:
+          CODE: ${{ needs.preflight.outputs.code }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+        run: |
+          apk=android/app/build/outputs/apk/release/app-release-unsigned.apk
+          if [[ ! -f "$apk" ]]; then
+            echo "::error::Expected unsigned release APK was not produced: $apk"
+            exit 1
+          fi
+          if [[ ! -f android/app/build/outputs/mapping/release/mapping.txt ]]; then
+            echo "::error::R8 mapping is missing; the release must be minified"
+            exit 1
+          fi
+          aapt2="$ANDROID_HOME/build-tools/36.0.0/aapt2"
+          badging=$("$aapt2" dump badging "$apk")
+          sha=$(sha256sum "$apk" | cut -d' ' -f1)
+          mkdir -p out && cp "$apk" out/app-release-unsigned.apk
+          cp android/app/build/outputs/mapping/release/mapping.txt out/mapping.txt
+          python3 - "$CODE" "$SOURCE_SHA" "$sha" "$badging" "$(git log -1 --format=%s)" <<'PY'
+          import json, os, re, sys
+          from pathlib import Path
+
+          code, source_sha, sha, badging, subject = sys.argv[1:]
+          package = re.search(
+              r"^package: name='([^']+)' versionCode='(\d+)' versionName='([^'\r\n]*)'",
+              badging, re.MULTILINE,
+          )
+          if (not package or package[1] != "app.ovrly" or package[2] != code
+                  or "application-debuggable" in badging):
+              sys.exit("::error::Unsigned APK must be app.ovrly, non-debuggable, with the reserved version code")
+          if not code.isascii() or not code.isdecimal() or not 1 <= int(code) <= 2100000000:
+              sys.exit("::error::Reserved version code is outside 1..2100000000")
+          version_name = package[3]
+          provenance = {
+              "schema": "ovrly-build-provenance/v1", "code": int(code), "source_sha": source_sha,
+              "unsigned_sha256": sha, "version_name": version_name, "package": "app.ovrly",
+              "run_id": int(os.environ["GITHUB_RUN_ID"]), "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "workflow_sha": os.environ["GITHUB_WORKFLOW_SHA"],
+          }
+          Path("out/build-provenance.json").write_text(
+              json.dumps(provenance, indent=2, sort_keys=True), encoding="utf-8",
+          )
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8", newline="\n") as output:
+              output.write(f"sha256={sha}\nversion_name={version_name}\n")
+              output.write("subject=" + " ".join(subject.splitlines()) + "\n")
+          print(f"Unsigned APK: app.ovrly, versionCode={code}, source={source_sha}, SHA-256={sha}")
+          PY
+
+      - name: Upload unsigned artifact
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ovrly-unsigned-${{ needs.preflight.outputs.code }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: Sign, issue and deliver
+    needs: [preflight, build]
+    # Redelivery skips the build job; anything else that is not a clean success stops here.
+    if: >-
+      ${{ !cancelled() && needs.preflight.result == 'success' &&
+          (needs.build.result == 'success' ||
+           (needs.preflight.outputs.mode == 'redeliver' && needs.build.result == 'skipped')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production-signing
+    # One static repo-wide mutex for every publish in both modes: the high-water-mark check, signing,
+    # issuance, exposure and delivery are serialized. queue:max keeps later approvals waiting
+    # (up to 100) instead of cancelling them; this queue is separate from human approval order.
+    concurrency:
+      group: ovrly-production-publish
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: write   # ledger issuance tag only; no application code runs in this job
+      actions: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out trusted helper code (workflow revision)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: |
+            .github/scripts
+            .github/workflows
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Ensure build-tools for apksigner and aapt2
+        run: |
+          if [[ ! -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ||
+                ! -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" ]]; then
+            sdkmanager --install "build-tools;36.0.0"
+          fi
+
+      - name: Download the unsigned artifact produced by this run
+        if: needs.preflight.outputs.mode == 'build'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: in
+          digest-mismatch: error
+
+      - name: Download the issued signed artifact for redelivery
+        if: needs.preflight.outputs.mode == 'redeliver'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.preflight.outputs.artifact_id }}
+          run-id: ${{ inputs.redeliver_run_id }}
+          github-token: ${{ github.token }}
+          path: in
+          digest-mismatch: error
+
+      - name: Verify, sign and record issuance (new build)
+        if: needs.preflight.outputs.mode == 'build'
+        env:
+          MODE: build
+          GITHUB_TOKEN: ${{ github.token }}
+          CODE: ${{ needs.preflight.outputs.code }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          UNSIGNED_APK: in/app-release-unsigned.apk
+          BUILD_PROVENANCE: in/build-provenance.json
+          BUILD_OUTPUT_SHA256: ${{ needs.build.outputs.unsigned_sha256 }}
+          VERSION_NAME: ${{ needs.build.outputs.version_name }}
+          SIGNED_APK: out/ovrly-${{ needs.preflight.outputs.code }}.apk
+          SIGNED_PROVENANCE: out/signed-provenance.json
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          EXPECTED_SIGNING_CERT_SHA256: ${{ vars.EXPECTED_SIGNING_CERT_SHA256 }}
+          LEDGER_BOOTSTRAP_TAG_SHA: ${{ vars.LEDGER_BOOTSTRAP_TAG_SHA }}
+        run: |
+          mkdir -p out
+          OBSERVED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" python3 .github/scripts/release_publish.py
+
+      - name: Expose the signed artifact (after issuance)
+        if: needs.preflight.outputs.mode == 'build'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ovrly-signed-${{ needs.preflight.outputs.code }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Deliver to Telegram (new build)
+        if: needs.preflight.outputs.mode == 'build'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          SIGNED_APK: out/ovrly-${{ needs.preflight.outputs.code }}.apk
+          SIGNED_PROVENANCE: out/signed-provenance.json
+          COMMIT_SUBJECT: ${{ needs.build.outputs.subject }}
+        run: python3 .github/scripts/release_publish.py --deliver
+
+      - name: Verify and redeliver the issued artifact
+        if: needs.preflight.outputs.mode == 'redeliver'
+        env:
+          MODE: redeliver
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED: ${{ needs.preflight.outputs.expected }}
+          DOWNLOADED_APK: in/ovrly-${{ needs.preflight.outputs.code }}.apk
+          EXPECTED_SIGNING_CERT_SHA256: ${{ vars.EXPECTED_SIGNING_CERT_SHA256 }}
+          LEDGER_BOOTSTRAP_TAG_SHA: ${{ vars.LEDGER_BOOTSTRAP_TAG_SHA }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+        run: python3 .github/scripts/release_publish.py
