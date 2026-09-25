@@ -1,4 +1,4 @@
-"""Skip Android work only when the complete diff contains known documentation."""
+"""Skip Android work only for known documentation or isolated evaluation paths."""
 
 import json
 import os
@@ -14,6 +14,10 @@ def is_documentation(name):
         or (name.startswith("docs/") and path.suffix == ".md")
         or name in {"android/README.md", "backend/README.md"}
     )
+
+
+def is_evaluation(name):
+    return name.startswith("evaluation/") or name == ".github/workflows/evaluation.yml"
 
 
 def needs_android(event_name, event, repository):
@@ -44,9 +48,9 @@ def needs_android(event_name, event, repository):
         return True, "Diff unavailable (for example, after a force push): full checks."
 
     names = [name.decode("utf-8") for name in diff.stdout.split(b"\0") if name]
-    if not names or any(not is_documentation(name) for name in names):
+    if not names or any(not (is_documentation(name) or is_evaluation(name)) for name in names):
         return True, "Code, tooling, unknown paths or an empty diff: full checks."
-    return False, f"Only known documentation changed ({len(names)} paths); Android work skipped."
+    return False, f"Only documentation/evaluation changed ({len(names)} paths); Android work skipped."
 
 
 def main():

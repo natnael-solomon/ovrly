@@ -4,6 +4,7 @@
 
 ### Added
 
+- Versioned evaluation-data schemas, blind annotation/adjudication workflow, synthetic JSONL examples, and dependency-free validation with CI. The real reviewed clip corpus remains outstanding; these examples are not evaluation results.
 - Native Kotlin/Jetpack Compose Android companion and manually activated floating controls.
 - Explicit-consent playback-audio and sampled-screen capture, bounded to three minutes and 32 MiB of app-private media.
 - Temporary-capture retention and deletion controls.
@@ -31,6 +32,10 @@
 - Made Liquid Chrome the fresh-install default while preserving saved appearance choices.
 - Moved working companion controls into Settings, shortened labels and moved technical explanations into disclosures without removing capture consent.
 - Sized the demo overlay below half the usable screen with 16 dp side/bottom margins, a draggable header and independently scrolling content.
+
+### Fixed
+
+- Reject whitespace-suffixed evaluation IDs and SHA-256 values, including hashes used for cross-split media isolation, and preserve Unicode separators within JSON strings when reading physical JSONL records.
 
 ### Known limitations
 

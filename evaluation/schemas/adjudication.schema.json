@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Whole-clip adjudicated gold v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "adjudication_id", "clip_id", "synthetic", "adjudicator_id", "annotation_ids", "review_note", "decisions"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "adjudication_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
+    "clip_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
+    "synthetic": {"type": "boolean"},
+    "adjudicator_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
+    "annotation_ids": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"}},
+    "review_note": {"type": "string", "minLength": 1},
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["gold_id", "proposition_id", "references", "start_ms", "end_ms", "modality", "eligible", "proposition", "reason", "resolution"],
+        "properties": {
+          "gold_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
+          "proposition_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
+          "references": {
+            "type": "array", "uniqueItems": true,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["annotation_id", "occurrence_id"],
+              "properties": {
+                "annotation_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
+                "occurrence_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"}
+              }
+            }
+          },
+          "start_ms": {"type": "integer", "minimum": 0},
+          "end_ms": {"type": "integer", "minimum": 1},
+          "modality": {"enum": ["speech", "on-screen-text", "both"]},
+          "eligible": {"type": "boolean"},
+          "proposition": {"type": "string", "minLength": 1},
+          "reason": {"enum": ["factual-claim", "factual-premise", "opinion", "quoted-not-endorsed", "insufficient-context", "not-a-claim"]},
+          "resolution": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

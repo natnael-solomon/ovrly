@@ -1,5 +1,6 @@
 import unittest
 
+from telegram_api import TelegramError
 from telegram_board import RULE, diff, fetch_project, render_board, render_changes, run, snapshot
 from test_telegram_api import FakeTelegram
 
@@ -167,18 +168,19 @@ class RunTest(unittest.TestCase):
         self.assertEqual(telegram.methods(), ["editMessageText", "sendMessage", "pinChatMessage"])
         self.assertEqual(state["message_id"], 103)
 
-    def test_pin_failure_is_tolerated(self):
-        from telegram_api import TelegramError
-
-        class NoPin(FakeTelegram):
+    def test_pin_failure_does_not_abort_baseline(self):
+        class PinFailingTelegram(FakeTelegram):
             def call(self, method, **params):
                 if method == "pinChatMessage":
-                    raise TelegramError("pinChatMessage: not enough rights")
+                    self.calls.append((method, params))
+                    raise TelegramError("pinChatMessage: Forbidden")
                 return super().call(method, **params)
 
-        telegram, state = NoPin(), {}
+        telegram, state = PinFailingTelegram(), {}
         outcome = run(telegram, state, PROJECT, [node("a", 1, "Ready")], now=0)
+        self.assertEqual(telegram.methods(), ["sendMessage", "pinChatMessage", "sendMessage"])
         self.assertEqual(state["message_id"], 101)
+        self.assertIn("1 items", outcome)
         self.assertIn("Baseline", outcome)
 
 
