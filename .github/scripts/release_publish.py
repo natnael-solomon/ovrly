@@ -288,15 +288,22 @@ def deliver(telegram, apk_path, caption):
 # --- Entry point ---------------------------------------------------------------------
 
 def tools_from_env():
+    """Resolve aapt2 and apksigner from the PINNED build-tools version only; never the newest installed."""
     home = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
     if not home:
         fail("ANDROID_HOME is not set; apksigner and aapt2 are required")
-    tools = Path(home) / "build-tools" / os.environ.get("BUILD_TOOLS_VERSION", "36.0.0")
-    apksigner = tools / "apksigner"
-    aapt2 = tools / "aapt2"
-    if not apksigner.exists() or not aapt2.exists():
-        fail(f"apksigner/aapt2 not found under {tools}")
-    return {"apksigner": str(apksigner), "aapt2": str(aapt2)}
+    version = os.environ.get("BUILD_TOOLS_VERSION", "36.0.0")
+    tools = Path(home) / "build-tools" / version
+    suffixes = (".bat", ".exe", "") if os.name == "nt" else ("",)
+
+    def locate(name):
+        for suffix in suffixes:
+            candidate = tools / f"{name}{suffix}"
+            if candidate.exists():
+                return str(candidate)
+        fail(f"{name} not found in build-tools {version} under {tools}")
+
+    return {"apksigner": locate("apksigner"), "aapt2": locate("aapt2"), "version": version}
 
 
 def execution_context_from_env(env=os.environ):

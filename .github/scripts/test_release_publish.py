@@ -337,14 +337,51 @@ class PublishRerunGuardTest(unittest.TestCase):
                 release_publish.deliver_main()
 
 
-def _find_tool(name):
-    home = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk")
-    for candidate in sorted(Path(home, "build-tools").glob("*"), reverse=True) if Path(home, "build-tools").exists() else []:
-        for suffix in ("", ".bat", ".exe"):
-            path = candidate / f"{name}{suffix}"
-            if path.exists():
-                return str(path)
-    return None
+class PinnedToolsTest(unittest.TestCase):
+    """The resolver must ignore newer installed build-tools; the fixture and production share it."""
+
+    def test_pinned_version_wins_over_newer_installed(self):
+        from unittest.mock import patch
+        from release_publish import tools_from_env
+        sdk = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, sdk)
+        for version in ("36.0.0", "37.0.0"):
+            d = sdk / "build-tools" / version
+            d.mkdir(parents=True)
+            for name in ("apksigner", "aapt2"):
+                for suffix in ((".bat", ".exe") if os.name == "nt" else ("",)):
+                    (d / f"{name}{suffix}").write_text("")
+        with patch.dict(os.environ, {"ANDROID_HOME": str(sdk)}, clear=False):
+            os.environ.pop("BUILD_TOOLS_VERSION", None)
+            tools = tools_from_env()
+        self.assertEqual(tools["version"], "36.0.0")
+        self.assertIn(os.sep + "36.0.0" + os.sep, tools["apksigner"])
+        self.assertNotIn("37.0.0", tools["aapt2"])
+
+    def test_missing_pinned_version_fails_even_if_newer_exists(self):
+        from unittest.mock import patch
+        from release_publish import tools_from_env
+        sdk = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, sdk)
+        (sdk / "build-tools" / "37.0.0").mkdir(parents=True)
+        with patch.dict(os.environ, {"ANDROID_HOME": str(sdk)}, clear=False):
+            os.environ.pop("BUILD_TOOLS_VERSION", None)
+            with self.assertRaises(PublishError) as raised:
+                tools_from_env()
+        self.assertIn("36.0.0", str(raised.exception))
+
+
+def _pinned_tools():
+    """Same resolver production uses: the pinned build-tools version, never the newest installed."""
+    from release_publish import tools_from_env
+    if not (os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")):
+        local = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk")
+        if Path(local, "build-tools").exists():
+            os.environ["ANDROID_HOME"] = local
+    try:
+        return tools_from_env()
+    except PublishError:
+        return None
 
 
 def _find_unsigned_apk():
@@ -355,13 +392,15 @@ def _find_unsigned_apk():
     return default if default.is_file() else None
 
 
-@unittest.skipUnless(_find_tool("apksigner") and _find_tool("aapt2") and _find_unsigned_apk() and shutil.which("keytool"),
-                     "real-tool test needs build-tools, keytool and a built unsigned release APK")
+@unittest.skipUnless(_pinned_tools() and _find_unsigned_apk() and shutil.which("keytool"),
+                     "real-tool test needs the pinned build-tools, keytool and a built unsigned release APK")
 class RealToolSigningTest(unittest.TestCase):
     """Signs the actual unsigned release APK with an ephemeral fixture key in a temp dir.
 
-    The key is generated here, used once, and deleted with the directory. It is never installed,
-    uploaded, committed or logged, and has no relationship to any production or developer identity.
+    Uses exactly the tool resolver production uses (pinned build-tools version), so a format or
+    behaviour difference in a newer SDK cannot pass here and fail in the release job. The key is
+    generated here, used once, and deleted with the directory. It is never installed, uploaded,
+    committed or logged, and has no relationship to any production or developer identity.
     """
 
     def test_sign_verify_and_badging_with_ephemeral_key(self):
@@ -377,7 +416,9 @@ class RealToolSigningTest(unittest.TestCase):
                        check=True, capture_output=True)
         import base64
         from release_publish import badging, sha256_of, sign_apk, signer_cert_sha256
-        tools = {"apksigner": _find_tool("apksigner"), "aapt2": _find_tool("aapt2")}
+        tools = _pinned_tools()
+        version_out = subprocess.run([tools["apksigner"], "--version"], capture_output=True, text=True).stdout.strip()
+        print(f"\n[real-tool] build-tools={tools['version']} apksigner={tools['apksigner']} apksigner-version={version_out}")
         unsigned = _find_unsigned_apk()
         info = badging(tools["aapt2"], unsigned)
         self.assertEqual(info["package"], "app.ovrly")
@@ -389,6 +430,8 @@ class RealToolSigningTest(unittest.TestCase):
         b64 = base64.b64encode(keystore.read_bytes()).decode()
         with SigningMaterial(b64, store_pass, key_pass) as m:
             sign_apk(tools["apksigner"], unsigned, signed, m.keystore, "fixture", m.store_pass, m.key_pass)
+        raw = subprocess.run([tools["apksigner"], "verify", "--print-certs", str(signed)], capture_output=True, text=True)
+        print(f"[real-tool] verify rc={raw.returncode} stdout:\n{raw.stdout.strip()}")
         cert = signer_cert_sha256(tools["apksigner"], signed)
         self.assertRegex(cert, r"^[0-9a-f]{64}$")
         self.assertEqual(badging(tools["aapt2"], signed)["version_code"], info["version_code"])
@@ -397,7 +440,7 @@ class RealToolSigningTest(unittest.TestCase):
         # Swapped passwords must be rejected: proves store/key wiring is not interchangeable.
         with SigningMaterial(b64, key_pass, store_pass) as m, self.assertRaises(PublishError):
             sign_apk(tools["apksigner"], unsigned, tmp / "swapped.apk", m.keystore, "fixture", m.store_pass, m.key_pass)
-        print(f"\n[real-tool] unsigned={unsigned} sha256={sha256_of(unsigned)} versionCode={info['version_code']} fixture_cert={cert[:16]}…")
+        print(f"[real-tool] unsigned={unsigned} sha256={sha256_of(unsigned)} versionCode={info['version_code']} fixture_cert={cert[:16]}…")
 
 
 if __name__ == "__main__":

@@ -83,6 +83,27 @@ jobs:
           sh gradlew --no-daemon --console=plain --build-cache
           -Povrly.versionCode=2 :app:assembleRelease
 
+      - name: Check version-code property bounds (configuration only)
+        if: steps.changes.outputs.android == 'true'
+        working-directory: android
+        run: |
+          expect_ok() {
+            sh gradlew --no-daemon --console=plain --offline -q -Povrly.versionCode="$1" help >/dev/null \
+              || { echo "::error::ovrly.versionCode=$1 must be accepted"; exit 1; }
+          }
+          expect_rejected() {
+            if out=$(sh gradlew --no-daemon --console=plain --offline -q -Povrly.versionCode="$1" help 2>&1); then
+              echo "::error::ovrly.versionCode=$1 must be rejected"; exit 1
+            fi
+            grep -Fq "ovrly.versionCode must be an integer in 1..2100000000, got '$1'" <<<"$out" \
+              || { echo "::error::ovrly.versionCode=$1 was rejected without the expected message"; echo "$out" | tail -n 20; exit 1; }
+          }
+          expect_ok 1
+          expect_ok 2100000000
+          expect_rejected 0
+          expect_rejected 2100000001
+          expect_rejected abc
+
       - name: Verify release signing with ephemeral key
         if: steps.changes.outputs.android == 'true'
         env:
