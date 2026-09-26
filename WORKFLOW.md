@@ -194,9 +194,58 @@ run's code, and never downloads its artifacts. No production build/signing or
 notification triggers are changed.
 
 This is the backend/workflow portion of REPO-03 (#7), not its full completion.
-Android detekt/ktlint, broader secret/dependency/supply-chain scans and
+Android detekt/ktlint, dependency/supply-chain scans and
 administrator-only repository settings remain separate work. These gates do not
 replace device evidence, backend integration tests or review.
+
+**Secret scanning** is also part of the shared pre-commit/Quality checks gate.
+It runs pinned Gitleaks over all reachable history of the locally fetched refs
+(including merge-resolution patches), the index, and unstaged tracked changes.
+CI checks out full history on every invocation, including docs-only PRs and
+stacked targets. Shallow checkouts fail explicitly; fetch complete history before
+retrying. Untracked/ignored local files are not scanned until they are staged.
+This is pattern-based detection with Gitleaks' built-in rules and exclusions,
+not a guarantee that every secret or binary payload can be detected.
+
+The same scan can be run directly, without installing Git hooks:
+
+```sh
+uv run --project backend --frozen --group quality python .github/scripts/secret_scan.py
+```
+
+`.github/gitleaks.json` pins the upstream release and SHA-256 archives for
+Linux/WSL, macOS and Windows x64/arm64. On first use, the helper downloads from the
+official release into ignored `.local/quality-tools/`, verifies the checksum,
+and extracts only the executable to a disposable directory. Every reuse verifies
+the cached archive again. Tool updates require reviewing the version and hashes;
+there is no automatic unpinned fallback, Go build, Docker image or licensed
+GitHub Action. The helper checks 2 GiB free and never prunes data.
+
+Gitleaks uses full redaction, and the wrapper prints only rule IDs and file/line
+locations. Raw output is withheld, temporary reports are deleted, and no reports
+are uploaded. All analysis stays local to the machine/runner. A finding, missing
+report, Git/scanner failure or invalid checksum fails the gate. Real-secret
+findings require revocation/rotation and owner-coordinated remediation, never
+automatic history rewriting or an allowlist entry.
+
+`.gitleaks.toml` extends default rules. No repository-specific false positives
+were found in the initial history scan, so no exceptions are currently present.
+Future exceptions must be reviewed, rule-specific and constrained by exact value
+and path; do not suppress entire source/test directories or baseline real keys.
+Inline `gitleaks:allow`, environment configuration overrides and
+`.gitleaksignore` fingerprints cannot silently bypass this helper: the first two
+are disabled and the fingerprint file is rejected.
+
+An independent Git path guard rejects `voxide.local.properties` at any depth in
+the index or reachable history, even if empty, renamed or later deleted. An
+ignored local file remains allowed. Synthetic fixtures verify staged-versus-
+working-copy handling, deleted historical secrets, merge-only additions,
+redaction, private-file protection, malformed configuration and shallow-history
+failure. These fixture tests are another required local/CI hook.
+
+This completes only the secret-scanning slice of #7. GitHub secret scanning,
+push protection, dependency alerts and other administrator settings are not
+enabled by this PR; dependency/OSV auditing and Android tooling remain separate.
 
 **Evaluation contract checks** runs separately on every PR to any branch, push to `main` and
 manual dispatch, without workflow-level path filters. It tests the Python

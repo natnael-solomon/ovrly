@@ -152,6 +152,8 @@ fixtures without PostgreSQL. The same command runs in the dedicated
 PostgreSQL/migration/coverage checks below. See [WORKFLOW](../WORKFLOW.md#continuous-integration)
 for tool pins, optional hook installation and the narrowly documented workflow
 exceptions. REPO-03 (#7) still tracks Android tooling and broader scanning.
+The shared hooks also scan reachable Git history and tracked changes for secrets,
+using a checksum-pinned native Gitleaks binary; no provider receives source code.
 
 ### CI and coverage
 
