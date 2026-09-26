@@ -38,3 +38,15 @@ repos:
         entry: uv run --project backend --frozen --group quality python .github/scripts/test_quality_gates.py
         pass_filenames: false
         always_run: true
+      - id: secrets
+        name: Secrets and private-file history
+        language: system
+        entry: uv run --project backend --frozen --group quality python .github/scripts/secret_scan.py
+        pass_filenames: false
+        always_run: true
+      - id: secret-policy
+        name: Secret scanning negative fixtures
+        language: system
+        entry: uv run --project backend --frozen --group quality python .github/scripts/test_secret_scan.py
+        pass_filenames: false
+        always_run: true

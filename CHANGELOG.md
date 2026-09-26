@@ -4,6 +4,7 @@
 
 ### Added
 
+- Redacted, checksum-pinned Gitleaks scans in the shared local/CI gates, covering reachable Git history and tracked changes, plus a private Voxide configuration guard and synthetic enforcement tests. No repository security settings or Git history are changed.
 - Shared local/CI backend and workflow quality gates: Ruff security rules, coded type ignores, pinned actionlint and offline zizmor, with regression-guarded exceptions. Android tooling and broader scanning remain separate work under #7.
 - Dedicated backend CI with docs-only skipping, strict types, PostgreSQL/migration tests, service coverage and main-baseline regression checks, seven-day reports, and grouped uv dependency updates. Android coverage and required-check activation remain outstanding.
 - Backend bootstrap with FastAPI readiness, PostgreSQL/Alembic, a shared standalone/embedded worker lifecycle, local tests and one-command Linux/WSL setup using PostgreSQL-only Docker. Research, durable jobs/leases and backend CI remain separate work.
