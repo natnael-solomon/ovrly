@@ -28,11 +28,30 @@ The theme and opacity preference update the active window without restarting cap
 
 Before merging overlay changes, verify on authorized devices: Android 10/11 fallback; supported Android 12+ blur behind the panel only; runtime blur disablement/battery saver; dragging versus demo-body scrolling; touch pass-through; rotation and 200% text; permission revocation; close/notification/task cleanup; and confirmed versus canceled demo entry during a real capture. Verify theme persistence and that closing a demo never restarts media access. The unit tests cover palette contrast, fallback decisions and demo-entry policy, not GPU composition or physical-device behavior.
 
-## Future boundary
+## Backend foundation
 
-`backend` is reserved, not implemented. The proposed backend is one Python codebase with HTTP endpoints, jobs, research logic and external-provider adapters. API and worker processes may run separately without separate repositories or duplicated domain models.
+`backend` is a Python 3.11/uv project. `services/api` owns the FastAPI application
+and its lifespan; `services/worker` owns one worker lifecycle used both as a
+standalone process and as an optional lifespan task (`OVRLY_EMBED_WORKER=1`).
+Settings and SQLAlchemy asyncio/Psycopg database access are shared. PostgreSQL 16
+runs locally through Compose; the API and worker run natively, avoiding an
+additional container image. `scripts/backend.sh` starts this local stack with
+migrations. Alembic establishes versioned migration history without product tables.
 
-The Android/backend integration will use a single versioned API contract with validated schemas and compatibility tests. No OpenAPI document or endpoint is currently claimed to exist. First agree on captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors.
+`/healthz` reports database readiness and, when enabled, embedded-worker health.
+It does not contact providers or claim a separate worker is healthy. Failures
+return a safe 503; failed embedded-worker startup prevents serving requests.
+Shutdown stops owned worker tasks and disposes connections. There are no jobs,
+leases or media processing yet; durable execution and lease draining belong to
+BE-04 (#16). Backend checks are local until REPO-04 (#13) adds their CI workflow.
+
+## Future integration boundary
+
+The Android/backend integration will use a single versioned API contract with
+validated schemas and compatibility tests. FastAPI exposes its bootstrap OpenAPI
+and health route, but no versioned product contract or product endpoints exist.
+First agree on captured intervals, timestamped segments, ordered claims, evidence
+citations, job states, cancellation and explicit errors.
 
 Hosted model weights stay with the provider. Credentials stay on the server; research prompts and adapters will live in the backend. Versioned research evaluation fixtures live in the root `evaluation/` directory, independently of backend implementation. Voxide remains a separate companion-navigation path. No capture upload is enabled by this directory layout.
 
