@@ -25,6 +25,8 @@ The backend foundation runs locally with `sh scripts/backend.sh` (Linux/WSL,
 uv and Docker Compose required). Docker runs PostgreSQL only; the API and
 lifecycle-only worker run through uv. Research and Android/backend integration
 are not connected yet. See the backend instructions for configuration and checks.
+Backend CI covers strict types, lint, real PostgreSQL tests, migrations and
+coverage; its remaining rollout and cross-stack coverage work is tracked in #13.
 
 ## License
 

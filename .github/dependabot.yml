@@ -18,3 +18,13 @@ updates:
     groups:
       kotlin-plugins:
         patterns: ['org.jetbrains.kotlin*']
+
+  - package-ecosystem: uv
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      backend-updates:
+        patterns: ['*']
+        update-types: [minor, patch]

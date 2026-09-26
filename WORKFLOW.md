@@ -85,9 +85,9 @@ Preserve applicable attribution.
   for your operating system.
 - Add or update tests when changing behavior.
 - Backend changes require the local frozen uv install, Ruff checks, PostgreSQL
-  integration tests and migration checks in `backend/README.md`. The dedicated
-  backend CI workflow remains REPO-04 (#13); existing Android/evaluation checks
-  do not run backend tests. State this limitation in backend PRs.
+  integration tests, strict MyPy and migration/coverage checks in
+  `backend/README.md`. The dedicated Backend CI workflow runs these checks;
+  Android/evaluation checks are not a substitute for backend validation.
 - Documentation-only changes do not require an Android build.
 - Recording, permission and floating-overlay behavior changes also require
   relevant checks on an authorized physical device before merging.
@@ -122,6 +122,30 @@ an older base is not evidence for the current combination. No workflow-level
 path filters, branch protections, release triggers or Telegram triggers are
 relaxed for stacks. Backend paths still trigger the conservative full Android
 job until a separate change-detection policy is agreed.
+
+**Backend checks** is the stable result of the **Backend CI** workflow. It runs
+on PRs to any branch (including edits/retargeting), pushes to `main` and manual
+dispatch. A lightweight job tests the shared diff logic and backend coverage
+policy on every invocation. Only known docs-only diffs skip the validation job,
+so they do not start PostgreSQL or install Python dependencies. Detection errors,
+unknown paths and cancelled/failed required validation never become green skips.
+
+Validation has a 15-minute timeout and uses Python 3.11, pinned setup-uv, a frozen
+uv lockfile, Ruff, strict MyPy, an ephemeral PostgreSQL 16 service, Alembic upgrade
+and drift checks, and pytest under coverage.py. PRs read uv caches; only main
+pushes save them. JUnit, coverage XML/JSON, baseline reports and coverage summaries
+are retained for seven days, including available failure reports. Backend
+dependabot updates use the native `uv` ecosystem with weekly grouped minor/patch
+updates. No provider calls or production secrets are needed.
+
+The runner remeasures main's code/tests with the same coverage configuration and
+version, enforcing an overall drop of at most one percentage point and 90% on the
+existing worker tree. Main push comparisons use the preceding main commit.
+Missing pre-bootstrap baselines and unimplemented auth/contracts modules are
+explicitly reported, not fabricated as passing coverage. See `backend/README.md`
+for local parity commands and the remaining REPO-04 coverage work. Android
+unit/instrumented coverage and the actual future auth/contracts/job-engine gates
+still require their own implementation evidence.
 
 **Evaluation contract checks** runs separately on every PR to any branch, push to `main` and
 manual dispatch, without workflow-level path filters. It tests the Python
@@ -341,8 +365,11 @@ linear history, one approving review with stale approvals dismissed on push,
 all review threads resolved, no bypass actors, and the **Android checks** and
 **Device evidence** status checks required and up to date with `main`. Do not
 add workflow-level path filters: docs-only PRs must still report the required
-checks rather than leave them pending. Add **Backend checks** (REPO-04) and
-**Contract checks** (BE-03) to the required list when those workflows exist.
+checks rather than leave them pending. Once Backend CI is merged and its stable
+**Backend checks** result has run successfully, a repository administrator must
+add that check to the ruleset without removing the existing checks. This change
+does not alter repository settings. Add **Contract checks** (BE-03) when that
+workflow exists.
 
 ## 7. Document and release
 

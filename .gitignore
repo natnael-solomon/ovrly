@@ -50,6 +50,7 @@ replay_pid*.log
 /backend/.data/
 /backend/.media/
 /backend/.logs/
+/backend/reports/
 
 # Personal tooling, agent sessions and disposable experiments
 /.local/
