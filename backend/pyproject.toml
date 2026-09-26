@@ -21,6 +21,11 @@ dev = [
     "pytest-asyncio>=1,<2",
     "ruff>=0.11,<1",
 ]
+quality = [
+    "actionlint-py==1.7.12.25",
+    "pre-commit==4.6.2",
+    "zizmor==1.30.1",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -39,12 +44,17 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "ASYNC"]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC", "PGH003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest assertions are test expectations, not production security checks.
+"tests/**/*.py" = ["S101"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
 plugins = ["pydantic.mypy"]
+enable_error_code = ["ignore-without-code"]
 
 [tool.coverage.run]
 source = ["services"]

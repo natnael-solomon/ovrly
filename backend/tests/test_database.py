@@ -21,7 +21,7 @@ def test_migration_roundtrip_and_drift(database_url):
         ["upgrade", "head"],
         ["check"],
     ):
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - current interpreter and fixed Alembic arguments
             [sys.executable, "-m", "alembic", *args],
             env=env,
             capture_output=True,

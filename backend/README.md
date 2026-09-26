@@ -132,6 +132,27 @@ safe failure responses, both worker modes, signal shutdown, cancellation and
 resource cleanup, and startup-helper negative paths. No provider keys or
 personal media are needed.
 
+Ruff includes security rules (`S`) and rejects bare `type: ignore` comments
+(`PGH003`); MyPy also enables `ignore-without-code`. Only pytest's `S101`
+assertion rule is ignored under `tests/`. Two fixed test subprocess calls have
+line-specific, explained `S603` annotations; production code has no security-rule
+exemptions.
+
+The optional `quality` dependency group adds locked pre-commit, actionlint and
+zizmor tooling without changing runtime dependencies. From the repository root:
+
+```sh
+uv sync --project backend --frozen --group quality
+uv run --project backend --frozen --group quality pre-commit run --all-files
+```
+
+This runs backend lint/format/types, workflow analysis and gate enforcement
+fixtures without PostgreSQL. The same command runs in the dedicated
+**Quality checks** job, including on docs-only PRs. It does not replace the
+PostgreSQL/migration/coverage checks below. See [WORKFLOW](../WORKFLOW.md#continuous-integration)
+for tool pins, optional hook installation and the narrowly documented workflow
+exceptions. REPO-03 (#7) still tracks Android tooling and broader scanning.
+
 ### CI and coverage
 
 **Backend CI** runs on PRs to any branch (including stacked targets and
@@ -141,7 +162,7 @@ diffs skip backend execution; unknown paths, evaluation, Android and tooling
 changes conservatively run it. The stable **Backend checks** result fails if
 detection or required validation fails/is cancelled; docs-only skips still
 produce that check. PostgreSQL and Python setup are not started for docs-only
-changes.
+changes in this Backend CI workflow; the separate Quality checks job still runs.
 
 The validation job uses Python 3.11, pinned setup-uv, the frozen lockfile, Ruff,
 strict MyPy with the Pydantic plugin, PostgreSQL 16, migration upgrade/drift

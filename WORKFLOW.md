@@ -147,6 +147,57 @@ for local parity commands and the remaining REPO-04 coverage work. Android
 unit/instrumented coverage and the actual future auth/contracts/job-engine gates
 still require their own implementation evidence.
 
+**Quality checks** runs the root pre-commit configuration on every PR target
+(including edits/retargeting), main push and manual run. It has no path skips:
+even docs-only changes exercise the current policy. The job is read-only, has a
+10-minute timeout, uses no secrets, and only main pushes save uv caches. It does
+not start PostgreSQL or install Android/Go tooling.
+
+From the repository root, run the exact same gates locally:
+
+```sh
+uv sync --project backend --frozen --group quality
+uv run --project backend --frozen --group quality pre-commit run --all-files
+```
+
+Optionally install the local Git hook yourself with
+`uv run --project backend --frozen --group quality pre-commit install`. The setup
+does not install hooks automatically. All hooks run full scopes even on
+config-only changes and are check-only: they do not rewrite files. Tool versions
+are in `backend/uv.lock`, with exact pins for pre-commit, actionlint-py and zizmor
+in the optional `quality` group. The actionlint Python wrapper downloads the
+pinned upstream binary and verifies its SHA-256; no Go compiler is required.
+Initial dependency setup needs network access and retains ordinary uv caches.
+
+The gates cover backend Ruff lint/format (including `S` security rules and
+`PGH003` coded type-ignore requirements), strict MyPy with `ignore-without-code`,
+actionlint workflow syntax/expressions, and offline zizmor workflow/composite
+action analysis using its regular persona. Optional actionlint ShellCheck and
+Pyflakes integrations are explicitly disabled so installed host tools cannot
+change results; this is not a shell/inline-Python lint rollout. Zizmor fails on
+collection errors and does not contact GitHub or require a token. Dependency and
+pre-commit-input auditing are outside its selected collection scope.
+
+Policy and real negative-fixture tests are also a hook. They prove unsafe backend
+constructs, bare type ignores, unpinned actions, template injection and malformed
+workflows fail. Missing tools fail this hook, rather than silently skipping it.
+Other lightweight script-test jobs may skip the tool integration class; the
+dedicated Quality check must run it.
+
+Two workflow exceptions are deliberately narrow and regression-guarded:
+actionlint 1.7.12 does not parse the existing release `queue: max`, so only that
+message in `telegram-apk.yml` is filtered while the exact publish concurrency
+configuration is tested. Remove the filter when the pinned parser supports it.
+The notifier's `workflow_run` trigger has a zizmor annotation because it only
+renders event metadata: it checks out the workflow revision, not the triggering
+run's code, and never downloads its artifacts. No production build/signing or
+notification triggers are changed.
+
+This is the backend/workflow portion of REPO-03 (#7), not its full completion.
+Android detekt/ktlint, broader secret/dependency/supply-chain scans and
+administrator-only repository settings remain separate work. These gates do not
+replace device evidence, backend integration tests or review.
+
 **Evaluation contract checks** runs separately on every PR to any branch, push to `main` and
 manual dispatch, without workflow-level path filters. It tests the Python
 standard-library validator and synthetic examples; if a future
