@@ -5,7 +5,7 @@ and [backend README](backend/README.md) for setup, and [AGENTS.md](AGENTS.md)
 for coding-agent instructions.
 
 The CI workflow is in [`.github/workflows/android.yml`](.github/workflows/android.yml)
-and runs on every pull request and push to `main`. The public
+and runs on pull requests to any branch and pushes to `main`. The public
 [ovrly development Project](https://github.com/users/natnael-solomon/projects/3)
 holds all task issues; its README is the team briefing. The `main` protection
 ruleset is active (see §6), and the production-signing environment, ledger
@@ -49,6 +49,14 @@ upgrades or formatting churn. Do not use permanent branches per developer.
 No routine direct pushes or force pushes to `main`. The initial repository
 import is a one-time, owner-authorized exception.
 
+Dependent work may use stacked feature branches while its parent PR is unmerged:
+branch the child from the parent feature branch, and target that branch in the
+child PR. The first PR still targets `main`. Link the dependency in each child
+PR and keep its diff focused. After an authorized parent squash merge, transplant
+only the child's commits onto the updated base and retarget it; do not merge the
+old parent history back into `main`. Rebasing/pushing rewritten published branch
+history requires explicit authorization. Stacking never authorizes a merge.
+
 ## 3. Commit
 
 Review the diff and staged files before committing. Prefer small, coherent
@@ -76,6 +84,10 @@ Preserve applicable attribution.
   lint. Use the [Android build instructions](android/README.md#setup)
   for your operating system.
 - Add or update tests when changing behavior.
+- Backend changes require the local frozen uv install, Ruff checks, PostgreSQL
+  integration tests and migration checks in `backend/README.md`. The dedicated
+  backend CI workflow remains REPO-04 (#13); existing Android/evaluation checks
+  do not run backend tests. State this limitation in backend PRs.
 - Documentation-only changes do not require an Android build.
 - Recording, permission and floating-overlay behavior changes also require
   relevant checks on an authorized physical device before merging.
@@ -88,7 +100,7 @@ such as serial numbers.
 
 ### Continuous integration
 
-**Android checks** runs on PRs to `main`, pushes to `main` and manual dispatch.
+**Android checks** runs on PRs to any target branch, pushes to `main` and manual dispatch.
 One Ubuntu 24.04 job uses JDK 21 and the project's Gradle wrapper to build,
 unit test and lint together. When Android work runs it also assembles the
 unsigned release APK with a ledger-style version code and exercises the
@@ -101,7 +113,17 @@ change detection itself still require the full job. Initial pushes, manual runs
 and unknown paths run the full checks. Change-detection tests run on every
 invocation.
 
-**Evaluation contract checks** runs separately on every PR, push to `main` and
+Android, Device evidence and Evaluation contract PR checks also run when a PR is
+edited, including when its base is retargeted. Change detection compares against
+the event's actual base commit, so a stacked PR does not inherit its parent's
+device-evidence requirement or source diff. Retargeting to `main` checks the
+new full diff. Revalidate a child when its parent changes; a green run against
+an older base is not evidence for the current combination. No workflow-level
+path filters, branch protections, release triggers or Telegram triggers are
+relaxed for stacks. Backend paths still trigger the conservative full Android
+job until a separate change-detection policy is agreed.
+
+**Evaluation contract checks** runs separately on every PR to any branch, push to `main` and
 manual dispatch, without workflow-level path filters. It tests the Python
 standard-library validator and synthetic examples; if a future
 `evaluation/corpus/` is present it also checks frozen metadata, not media bytes

@@ -21,6 +21,11 @@ Requires JDK 21, Android SDK platform 37 and Build Tools 36.0.0. The project bui
 - [Team workflow](WORKFLOW.md)
 - [Changelog](CHANGELOG.md)
 
+The backend foundation runs locally with `sh scripts/backend.sh` (Linux/WSL,
+uv and Docker Compose required). Docker runs PostgreSQL only; the API and
+lifecycle-only worker run through uv. Research and Android/backend integration
+are not connected yet. See the backend instructions for configuration and checks.
+
 ## License
 
 Ovrly's original code is source-available under [PolyForm Noncommercial 1.0.0](LICENSE.md), not an open-source license. It permits noncommercial use, modification and sharing, including the institutional uses specified in the license. Commercial use outside those permissions requires a separate agreement with the relevant copyright holders.
