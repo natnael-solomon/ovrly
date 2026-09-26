@@ -14,7 +14,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "coverage>=7.10,<8",
     "httpx>=0.28,<1",
+    "mypy>=1.15,<2",
     "pytest>=8,<10",
     "pytest-asyncio>=1,<2",
     "ruff>=0.11,<1",
@@ -38,3 +40,18 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.coverage.run]
+source = ["services"]
+relative_files = true
+parallel = true
+patch = ["subprocess"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2

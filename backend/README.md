@@ -116,6 +116,7 @@ From `backend/` with the local PostgreSQL service running:
 uv sync --frozen
 uv run --frozen ruff check .
 uv run --frozen ruff format --check .
+uv run --frozen mypy --strict services/
 OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0.0.1:55432/ovrly' \
   uv run --frozen pytest -q
 ```
@@ -131,9 +132,70 @@ safe failure responses, both worker modes, signal shutdown, cancellation and
 resource cleanup, and startup-helper negative paths. No provider keys or
 personal media are needed.
 
-The dedicated **Backend checks** workflow remains [REPO-04 / #13](https://github.com/natnael-solomon/ovrly/issues/13).
-Backend tests currently run locally, not in the existing Android/evaluation
-jobs. Durable jobs, leases and drain/recovery assertions remain
+### CI and coverage
+
+**Backend CI** runs on PRs to any branch (including stacked targets and
+retargeting), pushes to `main`, and manual dispatch. A lightweight job always
+tests change detection and coverage policy. Only entirely known-documentation
+diffs skip backend execution; unknown paths, evaluation, Android and tooling
+changes conservatively run it. The stable **Backend checks** result fails if
+detection or required validation fails/is cancelled; docs-only skips still
+produce that check. PostgreSQL and Python setup are not started for docs-only
+changes.
+
+The validation job uses Python 3.11, pinned setup-uv, the frozen lockfile, Ruff,
+strict MyPy with the Pydantic plugin, PostgreSQL 16, migration upgrade/drift
+checks and the real test suite. Only pushes to `main` save uv caches; PRs can read
+them. Dependabot checks the `/backend` uv project weekly with grouped minor/patch
+updates. There are no production secrets or live providers in this workflow.
+
+Run the same test/coverage pipeline locally after fetching `origin/main`, from
+`backend/`:
+
+```sh
+git fetch origin main
+OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0.0.1:55432/ovrly' \
+  uv run --frozen python ../.github/scripts/backend_checks.py
+```
+
+This runs tests under coverage.py, including spawned Python workers, and writes
+ignored `reports/junit.xml`, `coverage.xml`, `coverage.json`, `summary.md` and
+`comparison.json`. CI uploads these as `backend-reports` for seven days, along
+with available baseline reports, even after failure. Raw coverage databases are
+not uploaded. Scope is all `services/**/*.py` with no service-file exclusions:
+tests and migration scaffolding are outside the service denominator. The runner
+rejects reports missing service files or containing inconsistent line counts.
+
+For PRs/manual/local runs the comparison target is the fetched `origin/main`
+commit, **not** the parent feature branch. Main pushes compare to the previous
+main commit, not themselves. The runner creates a disposable detached worktree,
+uses that commit's locked dependencies/tests and the current run's exact coverage
+version/configuration, then removes only its own worktree. It does not mutate
+your checkout, contact providers or trust a stale/missing artifact as a baseline.
+It checks the 2 GiB headroom before measurement and before installing baseline
+dependencies; baseline caches can remain in uv's cache.
+
+The overall line-coverage regression limit is a drop of **at most 1 percentage
+point**, calculated from exact counts without rounding. If main genuinely has
+no backend manifest yet, the report says the baseline is unavailable; it does
+not claim the regression check passed. Unknown refs, failing baseline tests,
+missing reports or source without a manifest fail instead of taking that path.
+
+The current `services/worker` tree is held to **90% line coverage**, including
+the standalone entry point. `services/api/auth` and `services/contracts` have
+future 90% floors (module files and package directories supported); absence is
+shown as **not implemented / not evaluated**, not 100%. Their eventual locations
+must be confirmed when those tasks land. Android coverage is not part of this
+denominator and must not be inferred from backend results.
+
+Remaining [REPO-04 / #13](https://github.com/natnael-solomon/ovrly/issues/13) work:
+Android unit/instrumented reports and capture/share floors depend on the emulator
+work in #37; auth/contracts/job-engine coverage must be verified on their real
+implementations; a maintainer must add **Backend checks** to the main ruleset
+after the workflow lands and reports successfully. This PR does not change
+protection settings or complete the whole issue.
+
+Durable jobs, leases and drain/recovery assertions remain
 [BE-04 / #16](https://github.com/natnael-solomon/ovrly/issues/16).
 
 ## Stack record and boundaries

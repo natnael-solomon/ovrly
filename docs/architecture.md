@@ -43,7 +43,13 @@ It does not contact providers or claim a separate worker is healthy. Failures
 return a safe 503; failed embedded-worker startup prevents serving requests.
 Shutdown stops owned worker tasks and disposes connections. There are no jobs,
 leases or media processing yet; durable execution and lease draining belong to
-BE-04 (#16). Backend checks are local until REPO-04 (#13) adds their CI workflow.
+BE-04 (#16). Backend CI now runs the frozen environment, lint/types,
+PostgreSQL/migration tests and service coverage independently of Android CI.
+Only known docs-only changes skip execution; the final Backend checks result
+still reports. Main comparison uses a disposable worktree and explicitly
+discloses the absence of a pre-bootstrap baseline. REPO-04 (#13) remains open
+for Android coverage, future-module evidence and administrator activation of the
+required check.
 
 ## Future integration boundary
 
