@@ -1,0 +1,40 @@
+minimum_pre_commit_version: '4.6.2'
+repos:
+  - repo: local
+    hooks:
+      - id: backend-ruff
+        name: Backend lint and security rules
+        language: system
+        entry: uv run --project backend --frozen ruff check backend
+        pass_filenames: false
+        always_run: true
+      - id: backend-format
+        name: Backend formatting
+        language: system
+        entry: uv run --project backend --frozen ruff format --check backend
+        pass_filenames: false
+        always_run: true
+      - id: backend-types
+        name: Backend strict types
+        language: system
+        entry: uv run --directory backend --frozen mypy --strict services/
+        pass_filenames: false
+        always_run: true
+      - id: actionlint
+        name: GitHub workflow syntax and expressions
+        language: system
+        entry: uv run --project backend --frozen --group quality actionlint -shellcheck= -pyflakes=
+        pass_filenames: false
+        always_run: true
+      - id: zizmor
+        name: GitHub workflow security (offline)
+        language: system
+        entry: uv run --project backend --frozen --group quality zizmor --offline --strict-collection --collect workflows --collect actions --persona regular --no-progress --format plain .
+        pass_filenames: false
+        always_run: true
+      - id: quality-policy
+        name: Quality gate policy and negative fixtures
+        language: system
+        entry: uv run --project backend --frozen --group quality python .github/scripts/test_quality_gates.py
+        pass_filenames: false
+        always_run: true

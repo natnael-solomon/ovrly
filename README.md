@@ -27,6 +27,8 @@ lifecycle-only worker run through uv. Research and Android/backend integration
 are not connected yet. See the backend instructions for configuration and checks.
 Backend CI covers strict types, lint, real PostgreSQL tests, migrations and
 coverage; its remaining rollout and cross-stack coverage work is tracked in #13.
+Backend/workflow quality gates run through the root pre-commit configuration,
+locally and in CI; see [the shared commands](WORKFLOW.md#continuous-integration).
 
 ## License
 

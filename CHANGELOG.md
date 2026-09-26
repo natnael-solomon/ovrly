@@ -4,6 +4,7 @@
 
 ### Added
 
+- Shared local/CI backend and workflow quality gates: Ruff security rules, coded type ignores, pinned actionlint and offline zizmor, with regression-guarded exceptions. Android tooling and broader scanning remain separate work under #7.
 - Dedicated backend CI with docs-only skipping, strict types, PostgreSQL/migration tests, service coverage and main-baseline regression checks, seven-day reports, and grouped uv dependency updates. Android coverage and required-check activation remain outstanding.
 - Backend bootstrap with FastAPI readiness, PostgreSQL/Alembic, a shared standalone/embedded worker lifecycle, local tests and one-command Linux/WSL setup using PostgreSQL-only Docker. Research, durable jobs/leases and backend CI remain separate work.
 - Versioned evaluation-data schemas, blind annotation/adjudication workflow, synthetic JSONL examples, and dependency-free validation with CI. The real reviewed clip corpus remains outstanding; these examples are not evaluation results.
