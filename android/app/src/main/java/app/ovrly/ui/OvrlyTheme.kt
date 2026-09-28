@@ -104,10 +104,18 @@ private fun sans(size: Int, height: Int, weight: FontWeight = FontWeight.Normal)
 private fun serif(size: Int, height: Int) =
     TextStyle(fontFamily = OvrlySerif, fontSize = size.sp, lineHeight = height.sp)
 
-private val OvrlyTypography = Typography(
-    displayLarge = serif(56, 60), displayMedium = serif(48, 52), displaySmall = serif(40, 44),
-    headlineLarge = serif(36, 40), headlineMedium = serif(32, 36), headlineSmall = serif(28, 32),
-    titleLarge = serif(26, 32), titleMedium = sans(17, 24, FontWeight.Medium),
+internal object OvrlyEditorialTypography {
+    val display = serif(40, 44)
+    val title = serif(26, 32)
+    val wordmark = serif(36, 40)
+}
+
+internal val OvrlyTypography = Typography(
+    displayLarge = sans(56, 60), displayMedium = sans(48, 52), displaySmall = sans(40, 44),
+    headlineLarge = sans(36, 40, FontWeight.Medium),
+    headlineMedium = sans(32, 36, FontWeight.Medium),
+    headlineSmall = sans(28, 32, FontWeight.Medium),
+    titleLarge = sans(26, 32, FontWeight.Medium), titleMedium = sans(17, 24, FontWeight.Medium),
     titleSmall = sans(15, 22, FontWeight.Medium),
     bodyLarge = sans(16, 24), bodyMedium = sans(14, 22), bodySmall = sans(12, 18),
     labelLarge = sans(14, 20, FontWeight.Medium),
@@ -157,7 +165,7 @@ fun OvrlyTheme(dark: Boolean = false, content: @Composable () -> Unit) {
 @Composable
 internal fun Wordmark(
     modifier: Modifier = Modifier,
-    style: TextStyle = MaterialTheme.typography.headlineLarge,
+    style: TextStyle = OvrlyEditorialTypography.wordmark,
 ) {
     val p = LocalOvrlyPalette.current
     Text(
