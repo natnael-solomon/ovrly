@@ -39,7 +39,7 @@ Never commit credentials, signing keys, personal media, machine configuration, g
 | Change | Required evidence |
 | --- | --- |
 | Android code/build | Debug build, unit tests and lint; add or update tests for changed behavior. |
-| Backend | Frozen uv install, Ruff, PostgreSQL tests and migration checks in the [backend README](backend/README.md#local-checks). Backend CI remains #13; Android/evaluation checks do not run these tests. |
+| Backend | Frozen uv install, Ruff lint/format, strict MyPy, PostgreSQL tests, migrations and coverage checks in the [backend README](backend/README.md#local-checks). Android/evaluation checks do not replace Backend CI. |
 | Recording, permissions, overlay or voice behavior | Applicable automated checks and checks on an authorized physical device. |
 | Documentation only | Relevant documentation checks; no Android build required. |
 
@@ -51,14 +51,19 @@ Record commands and outcomes, remaining limitations and, when applicable, device
 | --- | --- |
 | **Android checks** | On PRs to any branch, pushes to `main` and manual runs: Ubuntu 24.04, JDK 21, wrapper-based debug build/tests/lint, unsigned release build with a ledger-style code, and real `apksigner`/`aapt2` verification using a temporary fixture key. No production key or APK upload. |
 | **Evaluation contract checks** | On PRs, pushes to `main` and manual runs: standard-library validator tests, synthetic examples and frozen metadata if `evaluation/corpus/` exists. No media downloads, provider keys or pipeline scoring. See [evaluation](evaluation/README.md). |
+| **Backend checks** | On PRs to any branch, edits/retargeting, `main` pushes and manual runs: change-detection tests, frozen Python 3.11/uv environment, Ruff, strict MyPy, PostgreSQL 16, Alembic upgrade/drift checks and service coverage. Validation has a 15-minute timeout. |
 
 Known documentation and isolated evaluation changes skip Android setup/Gradle but still report the check. Changes to Android change detection, unknown paths, initial pushes and manual runs use the full job. Change-detection tests always run. Do not add workflow-level path filters that leave required checks pending.
 
 Android, Device evidence and Evaluation contract checks accept every PR base and rerun on edits, including retargeting. They compare with the event's actual base commit. Revalidate children when a parent changes; old green checks do not validate the new combination. Backend changes still run the conservative full Android job. Stack support does not change protection, release or Telegram triggers.
 
+Backend execution skips only known documentation-only diffs; the stable result still reports. Failed detection, missing outputs and failed/cancelled required validation fail the result. Only `main` pushes save uv caches. Available JUnit, coverage XML/JSON, baseline reports and summaries are retained for seven days.
+
+Coverage includes every service Python file. The current worker floor is 90%; overall coverage may fall by at most one percentage point against remeasured `main`. Main pushes compare the preceding commit. Baseline tests and dependencies run in an owned disposable worktree with the current coverage version/configuration. Missing pre-bootstrap baselines and unimplemented auth/contracts are reported explicitly. See the [backend coverage commands](backend/README.md#ci-and-coverage). Android coverage, future-module coverage and required-check activation remain #13.
+
 `setup-gradle` validates wrapper JARs and owns the only Gradle cache: dependencies, wrapper distributions, build scripts, transforms and local outputs via `--build-cache`. Only `main` writes caches; PRs read them. SDK packages are reused or installed if missing; the full SDK is not cached. Configuration caching, Build Scans and provider-secret use are disabled. The enhanced cache provider is proprietary and [free for public repositories](https://github.com/gradle/actions/blob/v6.3.0/DISTRIBUTION.md); review its terms before making the repository private.
 
-Available test/lint reports, including failed-run reports, are retained for seven days. Superseded PR runs are cancelled. Actions are commit-pinned. Dependabot proposes weekly Action and Android dependency updates; it does not auto-merge.
+Available test/lint reports, including failed-run reports, are retained for seven days. Superseded PR runs are cancelled. Actions are commit-pinned. Dependabot proposes weekly Action, Android and backend uv updates with grouped backend minor/patch releases; it does not auto-merge.
 
 Evaluation contract checks do not complete RES-01 or replace the future RES-03 regression check.
 
