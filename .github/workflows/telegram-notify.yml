@@ -1,6 +1,7 @@
 name: Telegram notifications
 
-on:
+# Notification only: workflow-revision code, no triggering-run artifacts or code.
+on: # zizmor: ignore[dangerous-triggers]
   workflow_run:
     workflows: [Android CI]
     types: [completed]
@@ -23,6 +24,7 @@ jobs:
       - name: Check out notifier scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.workflow_sha }}
           sparse-checkout: .github/scripts
           persist-credentials: false
 
