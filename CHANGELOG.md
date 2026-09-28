@@ -4,7 +4,8 @@
 
 ### Added
 
-- Backend foundation with FastAPI readiness, PostgreSQL/Alembic, standalone or embedded worker lifecycle, local tests and one-command Linux/WSL setup. Durable jobs and backend CI remain separate work.
+- Backend CI with PostgreSQL/migration tests, strict types, service coverage, main-baseline comparison, seven-day reports and grouped uv dependency updates. Android coverage and required-check activation remain open under #13.
+- Backend foundation with FastAPI readiness, PostgreSQL/Alembic, standalone or embedded worker lifecycle, local tests and one-command Linux/WSL setup. Durable jobs remain separate work.
 - Native Kotlin/Compose Android companion with manually activated floating controls, consented playback-audio and sampled-screen capture, and temporary-media retention/deletion. Capture is limited to three minutes and 32 MiB.
 - Share validation for supported video content URIs and web URL references, without downloading or analysis.
 - Design gallery with 15 glass treatments, seven states per design, synthetic backdrops and higher-opacity comparisons.

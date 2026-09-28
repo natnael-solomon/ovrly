@@ -55,7 +55,9 @@ Unit tests cover palette contrast, fallback decisions and demo-entry policy. The
 
 `/healthz` checks the database and, when enabled, the embedded worker. Failures return a safe 503; failed embedded-worker startup prevents API startup. API-only readiness does not monitor a separate worker. Shutdown stops owned tasks and closes database connections. The migration baseline creates no product tables.
 
-This is lifecycle scaffolding. Jobs, leases, recovery and lease draining remain #16; backend CI remains #13. It does not establish hosting entitlement or durable processing.
+This is lifecycle scaffolding. Jobs, leases, recovery and lease draining remain #16. It does not establish hosting entitlement or durable processing.
+
+Backend CI checks the frozen environment, lint/types, PostgreSQL/migrations and service coverage. Known documentation-only changes skip execution but report the final check. Coverage is compared with remeasured `main`; a missing pre-bootstrap baseline is disclosed. Android coverage, future-module evidence and required-check activation remain #13.
 
 ## Future integration boundary
 
