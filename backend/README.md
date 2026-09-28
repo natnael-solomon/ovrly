@@ -126,6 +126,12 @@ only that database afterward, including on failure. They never reset the
 configured development database. Missing test configuration/database access is
 an error, not a successful skip. Override the test URL if local settings differ.
 
+Put the host and database in the URL authority/path, not query overrides.
+`dbname`, `database`, `host`, `hostaddr`, `service` and `servicefile` query
+parameters are rejected before connecting. Unset `PGHOSTADDR`, `PGSERVICE`
+and `PGSERVICEFILE`; inherited routing must not redirect disposable tests.
+Ordinary options such as `sslmode` remain supported.
+
 Coverage includes real PostgreSQL readiness, migration round trips and drift,
 safe failure responses, both worker modes, signal shutdown, cancellation and
 resource cleanup, and startup-helper negative paths. No provider keys or
@@ -142,9 +148,9 @@ This implements the infrastructure choice in
 [BE-02 / #12](https://github.com/natnael-solomon/ovrly/issues/12):
 Python 3.11, uv, FastAPI/Uvicorn, PostgreSQL 16, SQLAlchemy asyncio/Psycopg and
 Alembic, with a single Python codebase for API and worker. The issue associates
-this stack with `BC-D03` / `RFC-D41-D43`. The original contract/RFC is not in this
-checkout; this is an implementation record, not a claim to have approved or
-reproduced those missing decisions. The full decision-log task remains #5.
+this stack with `BC-D03` / `RFC-D41-D43`. This records the implemented stack,
+not approval of the remaining infrastructure or hosting decisions. The full
+decision-log task remains #5; provider/hosting evidence remains #11 and #21.
 
 Keep provider credentials and private media out of Git; future media uploads
 require explicit consent and a retention policy. No hosting entitlement or

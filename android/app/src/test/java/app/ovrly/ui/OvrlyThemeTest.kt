@@ -3,6 +3,8 @@ package app.ovrly.ui
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -10,6 +12,41 @@ import kotlin.math.max
 import kotlin.math.min
 
 class OvrlyThemeTest {
+    @Test fun materialTypographyKeepsFunctionalSurfacesInLexend() {
+        with(OvrlyTypography) {
+            listOf(
+                displayLarge, displayMedium, displaySmall,
+                headlineLarge, headlineMedium, headlineSmall,
+                titleLarge, titleMedium, titleSmall,
+                bodyLarge, bodyMedium, bodySmall,
+                labelLarge, labelMedium, labelSmall,
+            ).forEach { assertEquals(OvrlySans, it.fontFamily) }
+        }
+    }
+
+    @Test fun dialogAndDemoClaimHeadingsKeepTheirSizeWithMediumWeight() {
+        with(OvrlyTypography) {
+            assertEquals(28.sp, headlineSmall.fontSize)
+            assertEquals(32.sp, headlineSmall.lineHeight)
+            assertEquals(FontWeight.Medium, headlineSmall.fontWeight)
+            assertEquals(26.sp, titleLarge.fontSize)
+            assertEquals(32.sp, titleLarge.lineHeight)
+            assertEquals(FontWeight.Medium, titleLarge.fontWeight)
+        }
+    }
+
+    @Test fun editorialStylesKeepInstrumentSerifAndExistingMetrics() {
+        with(OvrlyEditorialTypography) {
+            listOf(display, title, wordmark).forEach { assertEquals(OvrlySerif, it.fontFamily) }
+            assertEquals(40.sp, display.fontSize)
+            assertEquals(44.sp, display.lineHeight)
+            assertEquals(26.sp, title.fontSize)
+            assertEquals(32.sp, title.lineHeight)
+            assertEquals(36.sp, wordmark.fontSize)
+            assertEquals(40.sp, wordmark.lineHeight)
+        }
+    }
+
     @Test fun themesMatchTheTwoMockReferences() {
         assertEquals(Color(0xFFF0EFE5), paletteFor(false).paper)
         assertEquals(Color(0xFF080910), paletteFor(true).paper)

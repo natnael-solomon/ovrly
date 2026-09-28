@@ -134,7 +134,7 @@ fun GalleryScreen(onBack: () -> Unit, onDemo: (() -> Unit)? = null) {
                     Text(
                         text = "Overlay studies",
                         color = GalleryInk,
-                        style = MaterialTheme.typography.displaySmall,
+                        style = OvrlyEditorialTypography.display,
                         modifier = Modifier.semantics { heading() },
                     )
                     GalleryBody(
@@ -555,7 +555,7 @@ internal fun GallerySampleHeading(text: String) {
     Text(
         text = text,
         color = GalleryInk,
-        style = MaterialTheme.typography.titleLarge,
+        style = OvrlyEditorialTypography.title,
         modifier = Modifier.semantics { heading() },
     )
 }

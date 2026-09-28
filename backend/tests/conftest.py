@@ -18,6 +18,12 @@ def database_url() -> Iterator[str]:
     url = make_url(admin_url)
     if url.drivername != "postgresql+psycopg" or url.host not in {"127.0.0.1", "localhost"}:
         pytest.fail("Tests require an explicitly configured loopback PostgreSQL database")
+    if {"dbname", "database", "host", "hostaddr", "service", "servicefile"} & {
+        key.lower() for key in url.query
+    }:
+        pytest.fail("Test database URLs must not contain routing overrides in query parameters")
+    if any(os.environ.get(key) for key in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE")):
+        pytest.fail("Unset PGHOSTADDR, PGSERVICE and PGSERVICEFILE before database tests")
     name = "ovrly_test_" + uuid.uuid4().hex
     connection_url = url.set(drivername="postgresql").render_as_string(hide_password=False)
     with psycopg.connect(connection_url, autocommit=True, connect_timeout=3) as admin:
