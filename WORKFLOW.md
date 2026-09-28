@@ -52,6 +52,7 @@ Record commands and outcomes, remaining limitations and, when applicable, device
 | **Android checks** | On PRs to any branch, pushes to `main` and manual runs: Ubuntu 24.04, JDK 21, wrapper-based debug build/tests/lint, unsigned release build with a ledger-style code, and real `apksigner`/`aapt2` verification using a temporary fixture key. No production key or APK upload. |
 | **Evaluation contract checks** | On PRs, pushes to `main` and manual runs: standard-library validator tests, synthetic examples and frozen metadata if `evaluation/corpus/` exists. No media downloads, provider keys or pipeline scoring. See [evaluation](evaluation/README.md). |
 | **Backend checks** | On PRs to any branch, edits/retargeting, `main` pushes and manual runs: change-detection tests, frozen Python 3.11/uv environment, Ruff, strict MyPy, PostgreSQL 16, Alembic upgrade/drift checks and service coverage. Validation has a 15-minute timeout. |
+| **Quality checks** | On every PR target/edit, `main` push and manual run: shared pre-commit backend lint/format/types, workflow analysis, secret scanning and real negative fixtures. No path skips, PostgreSQL, Android setup or provider calls; 10-minute timeout. |
 
 Known documentation and isolated evaluation changes skip Android setup/Gradle but still report the check. Changes to Android change detection, unknown paths, initial pushes and manual runs use the full job. Change-detection tests always run. Do not add workflow-level path filters that leave required checks pending.
 
@@ -66,6 +67,41 @@ Coverage includes every service Python file. The current worker floor is 90%; ov
 Available test/lint reports, including failed-run reports, are retained for seven days. Superseded PR runs are cancelled. Actions are commit-pinned. Dependabot proposes weekly Action, Android and backend uv updates with grouped backend minor/patch releases; it does not auto-merge.
 
 Evaluation contract checks do not complete RES-01 or replace the future RES-03 regression check.
+
+#### Shared quality gates
+
+From the repository root:
+
+```sh
+uv sync --project backend --frozen --group quality
+uv run --project backend --frozen --group quality pre-commit run --all-files
+```
+
+CI runs the same command, including on documentation-only PRs. Hooks are check-only, run full scopes and fail if required tools are missing. Optional installation is `uv run --project backend --frozen --group quality pre-commit install`; setup never installs hooks automatically. Only `main` pushes save caches.
+
+The optional `quality` group pins pre-commit 4.6.2, actionlint-py 1.7.12.25 and zizmor 1.30.1. The actionlint wrapper checks the downloaded upstream 1.7.12 binary's SHA-256. Ruff enables security and coded-ignore rules; strict MyPy rejects uncoded ignores. Zizmor analyzes workflows/composite actions offline, using regular persona and strict collection. ShellCheck/Pyflakes integrations and dependency/pre-commit-input audits are outside this scope.
+
+Two tested exceptions remain: actionlint's exact `queue: max` parser error is ignored only in `telegram-apk.yml`, while tests enforce publish ordering; the metadata-only notifier permits `workflow_run`, checks out `github.workflow_sha` and never downloads triggering-run artifacts. Remove the parser exception when supported. No production trigger or protection is changed.
+
+Android detekt/ktlint, dependency/OSV auditing and administrator settings remain #7. These checks do not replace device evidence, integration tests or review.
+
+#### Secret scanning
+
+Shared hooks run Gitleaks 8.30.1 against all reachable history of fetched refs, including merge-resolution patches, the index and unstaged tracked changes. CI fetches full history; shallow clones fail. Untracked/ignored files are checked only when staged. Pattern matching cannot guarantee detection of every secret type or binary payload.
+
+To scan directly:
+
+```sh
+uv run --project backend --frozen --group quality python .github/scripts/secret_scan.py
+```
+
+`.github/gitleaks.json` pins release archive hashes for Linux/WSL, macOS and Windows x64/arm64. Downloads use the official release; every cache reuse is checksum-verified. Only the executable is extracted into temporary storage. The helper requires 2 GiB free, retains its ignored `.local/quality-tools/` cache and never prunes data.
+
+Native output is fully redacted and withheld; the wrapper prints file, line and rule only. Temporary reports are deleted, never uploaded. Findings, missing reports, invalid checksums and tool/Git failures fail the gate. An independent guard rejects `voxide.local.properties` anywhere in the index/history, including empty or later-deleted files; ignored local copies are allowed.
+
+`.gitleaks.toml` extends defaults without current exceptions. Review any future exception by rule, exact value and path; never baseline real keys or whole directories. Inline allows and environment configuration overrides are disabled; `.gitleaksignore` is rejected. Real credentials require owner-coordinated rotation/remediation, not automatic history rewriting. Synthetic tests cover history, merge additions, index/working differences, redaction and failure paths.
+
+GitHub scanning, push protection, alerts and dependency audits are separate settings/tools; these hooks do not configure them.
 
 ### Telegram notifications
 

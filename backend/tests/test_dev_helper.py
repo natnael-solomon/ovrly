@@ -50,8 +50,8 @@ esac
 
 
 def run_helper(env, tmp_path):
-    return subprocess.run(
-        ["sh", str(SCRIPT)],
+    return subprocess.run(  # noqa: S603 - fixed repository helper and isolated fixture environment
+        ["/bin/sh", str(SCRIPT)],
         cwd=tmp_path,
         env=env,
         capture_output=True,
