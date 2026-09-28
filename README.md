@@ -6,6 +6,8 @@ Native Android companion with floating controls and local video-interval capture
 
 Open `android` in Android Studio. Follow the [Android setup instructions](android/README.md#setup) for prerequisites and Windows, WSL or Linux commands.
 
+For the backend, run `sh scripts/backend.sh` on Linux/WSL with uv and Docker Compose. See the [backend setup](backend/README.md#local-setup-linux--wsl).
+
 - [Task board](https://github.com/users/natnael-solomon/projects/3)
 - [Team workflow](WORKFLOW.md)
 - [Backend](backend/README.md)

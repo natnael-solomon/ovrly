@@ -49,11 +49,17 @@ Use authorized devices and approved content:
 
 Unit tests cover palette contrast, fallback decisions and demo-entry policy. They do not test GPU composition or physical-device behavior.
 
-## Future boundary
+## Backend foundation
 
-`backend` is reserved, not implemented on main. The proposed shape is one Python codebase for HTTP endpoints, jobs, research and provider adapters, with API and worker processes able to run separately.
+`backend` is one Python 3.11/uv project with FastAPI, shared settings and SQLAlchemy asyncio/Psycopg. `services/api` owns the API lifespan; `services/worker` runs standalone or as an optional lifespan task (`OVRLY_EMBED_WORKER=1`). The [Linux/WSL helper](../backend/README.md#local-setup-linux--wsl) starts PostgreSQL 16 in Compose, applies Alembic migrations and runs the API and embedded worker natively.
 
-Before connecting Android, agree a versioned API contract with validated schemas and compatibility tests: captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors. No OpenAPI document or endpoint is currently implemented.
+`/healthz` checks the database and, when enabled, the embedded worker. Failures return a safe 503; failed embedded-worker startup prevents API startup. API-only readiness does not monitor a separate worker. Shutdown stops owned tasks and closes database connections. The migration baseline creates no product tables.
+
+This is lifecycle scaffolding. Jobs, leases, recovery and lease draining remain #16; backend CI remains #13. It does not establish hosting entitlement or durable processing.
+
+## Future integration boundary
+
+Before connecting Android, agree a versioned API contract with validated schemas and compatibility tests: captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors. FastAPI exposes bootstrap OpenAPI and health endpoints, but no product contract or product endpoints exist.
 
 Hosted model weights stay with the provider. Credentials stay on the server; prompts and adapters belong in the backend. Evaluation fixtures live in root `evaluation/`, independently of backend implementation. Voxide remains a separate companion-navigation path. The directory layout enables no capture upload.
 
@@ -65,6 +71,6 @@ Synthetic examples test the contract; RES-01 still requires the reviewed 10-20-c
 
 ## Development ownership
 
-Android builds independently of backend dependencies. Future backend platform and research work can share one Python project, but client/server contract changes need both sides' review.
+Android builds independently of backend dependencies. Backend platform and research work share one Python project; client/server contract changes need both sides' review.
 
 Generated builds, caches, APKs and machine configuration stay out of Git. Use ignored root `.local` for personal tooling/media and `.scratch` for disposable experiments. Version shared configuration and approved test fixtures; keep evaluation media outside version control by default.

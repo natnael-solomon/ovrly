@@ -18,6 +18,8 @@ Start from up-to-date `main` on a short-lived task branch, such as `feat/share-i
 
 Keep PRs focused. Avoid unrelated refactoring, dependency upgrades and formatting. No routine direct or force pushes to `main`; the initial owner-authorized import was a one-time exception.
 
+Dependent PRs may target an unmerged parent feature branch. Link the parent and keep the child diff focused. After an authorized parent squash merge, transplant only the child's commits onto the updated base and retarget it; do not merge the old parent history back into `main`. Rewriting published history requires explicit authorization. Stacking does not authorize merging.
+
 ## 3. Commit
 
 Inspect the diff and staged files. Use small, coherent commits with `type(scope): description`; the scope is optional.
@@ -37,6 +39,7 @@ Never commit credentials, signing keys, personal media, machine configuration, g
 | Change | Required evidence |
 | --- | --- |
 | Android code/build | Debug build, unit tests and lint; add or update tests for changed behavior. |
+| Backend | Frozen uv install, Ruff, PostgreSQL tests and migration checks in the [backend README](backend/README.md#local-checks). Backend CI remains #13; Android/evaluation checks do not run these tests. |
 | Recording, permissions, overlay or voice behavior | Applicable automated checks and checks on an authorized physical device. |
 | Documentation only | Relevant documentation checks; no Android build required. |
 
@@ -46,10 +49,12 @@ Record commands and outcomes, remaining limitations and, when applicable, device
 
 | Workflow | What it checks |
 | --- | --- |
-| **Android checks** | On PRs to `main`, pushes to `main` and manual runs: Ubuntu 24.04, JDK 21, wrapper-based debug build/tests/lint, unsigned release build with a ledger-style code, and real `apksigner`/`aapt2` verification using a temporary fixture key. No production key or APK upload. |
+| **Android checks** | On PRs to any branch, pushes to `main` and manual runs: Ubuntu 24.04, JDK 21, wrapper-based debug build/tests/lint, unsigned release build with a ledger-style code, and real `apksigner`/`aapt2` verification using a temporary fixture key. No production key or APK upload. |
 | **Evaluation contract checks** | On PRs, pushes to `main` and manual runs: standard-library validator tests, synthetic examples and frozen metadata if `evaluation/corpus/` exists. No media downloads, provider keys or pipeline scoring. See [evaluation](evaluation/README.md). |
 
 Known documentation and isolated evaluation changes skip Android setup/Gradle but still report the check. Changes to Android change detection, unknown paths, initial pushes and manual runs use the full job. Change-detection tests always run. Do not add workflow-level path filters that leave required checks pending.
+
+Android, Device evidence and Evaluation contract checks accept every PR base and rerun on edits, including retargeting. They compare with the event's actual base commit. Revalidate children when a parent changes; old green checks do not validate the new combination. Backend changes still run the conservative full Android job. Stack support does not change protection, release or Telegram triggers.
 
 `setup-gradle` validates wrapper JARs and owns the only Gradle cache: dependencies, wrapper distributions, build scripts, transforms and local outputs via `--build-cache`. Only `main` writes caches; PRs read them. SDK packages are reused or installed if missing; the full SDK is not cached. Configuration caching, Build Scans and provider-secret use are disabled. The enhanced cache provider is proprietary and [free for public repositories](https://github.com/gradle/actions/blob/v6.3.0/DISTRIBUTION.md); review its terms before making the repository private.
 
