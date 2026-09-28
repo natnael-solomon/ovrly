@@ -1,0 +1,7 @@
+# actionlint 1.7.12 does not recognize GitHub's queue:max yet. Preserve the
+# production publish mutex; test_quality_gates.py checks the exact queue config.
+# Remove this single-file exception when the pinned parser supports it.
+paths:
+  .github/workflows/telegram-apk.yml:
+    ignore:
+      - '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
