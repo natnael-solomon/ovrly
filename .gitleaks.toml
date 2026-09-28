@@ -1,0 +1,7 @@
+title = "Ovrly secret scanning"
+
+[extend]
+useDefault = true
+
+# Add only confirmed false positives here, scoped by rule, exact value and path.
+# Never baseline real credentials or exclude whole test/source directories.
