@@ -57,7 +57,7 @@ Launch branding ignores the system dark-mode setting and follows only the app's 
 
 ## Appearance and overlay demo
 
-Liquid Chrome is the fresh-install default; existing Light/Dark choices are preserved independently of Android's theme. Light mode follows Mock 1. Both apply to all screens, dialogs, overlays and the gallery. Lexend is bundled for interface text; Instrument Serif is retained for the wordmark and sample titles. Both retain their [SIL Open Font licenses](app/src/main/assets/licenses/).
+Liquid Chrome is the fresh-install default; existing Light/Dark choices are preserved independently of Android's theme. Light mode follows Mock 1. Both apply to all screens, dialogs, overlays and the gallery. Lexend is the default for interface text, including dialog and demo-overlay claim headings. Instrument Serif is reserved for explicit editorial styles: featured/Explore/report-detail titles, gallery headings and the text-based wordmark. Existing type sizes are unchanged. Both retain their [SIL Open Font licenses](app/src/main/assets/licenses/).
 
 The app opens on **Your space**, a clearly labeled sample collection. **Explore** offers topic filters, search and sample reports with original chrome artwork. Sample saves affect the preview collection only and survive navigation and restored activity state, not a fresh session. No account, saved research or backend is implied. **Settings** retains capture, permissions, overlay controls, appearance, share intake, voice, storage and gallery access, with technical details behind disclosures. Overlay setup, notifications and incoming shares route directly to Settings.
 
