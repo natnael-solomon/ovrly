@@ -2,57 +2,69 @@
 
 ## Implemented boundary
 
-`android` is a standalone Gradle root with one `:app` module. The Kotlin packages remain unchanged:
+`android` is a standalone Gradle root with one `:app` module.
 
 | Package | Responsibility |
 | --- | --- |
 | `capture` | Projection/playback capture, bounded temporary output and lifecycle |
-| `overlay` | Manual floating-window service, movement and control callbacks |
-| `share` | Validation of supported shared video URIs and URL references |
-| `ui` | Companion controls, production glass shell and isolated design fixtures |
+| `overlay` | Floating-window lifecycle, movement and controls |
+| `share` | Validation of video URIs and URL references |
+| `ui` | Companion screens, production controls and isolated sample/gallery content |
 | `voice` | Experimental, explicitly configured Voxide companion navigation |
 
-Android owns permissions and media access. Hiding controls is not stopping capture. Capture stop releases media access; future research cancellation must remain a separate action. Gallery fixtures are not live results.
+Android owns permissions and media access. Hiding controls does not stop capture. Stopping capture releases media access; research cancellation is a separate, future action.
 
-Windows builds can use `scripts/android.ps1`, which resolves paths from its own location and restores the caller's environment afterwards. Linux and WSL builds use `sh gradlew` inside `android`. Both use the same pinned Gradle wrapper and dependencies.
+`AppShell` provides Your space, Explore and Settings. The activity owns the selected tab; external capture/share intents open Settings. Capture and voice keep their existing state stores and an active-session shortcut across tabs. Sample saves use restored UI state, not capture storage or a provider. Tab and report scroll positions have separate saveable scopes.
+
+See the [Android README](../android/README.md) for builds and [UI maintenance](android-ui.md) for appearance, artwork and splash behavior.
 
 ## Overlay material and demo boundaries
 
-`AppShell` owns the Your space / Explore / Settings navigation and preview-only sample selections. The activity owns the selected tab so external capture/share intents still land in Settings. Real capture and voice state remain in their existing stores; an active-session shortcut stays visible across tabs. Sample report saves use restored UI state only, never capture storage or a provider. Tab and report scroll positions use separate saveable state scopes.
+Compact controls and the larger demo are mutually exclusive modes of one foreground service. Production controls retain real callbacks. The demo exposes simulated claims/evidence, a real close action and no recording or provider access.
 
-The compact and demo overlays are mutually exclusive modes of the existing foreground service, not two competing windows. Real controls retain their callbacks; the demo composable has only simulated fixture interactions and a real close action. Entry from the activity confirms any required session stop, waits for capture cleanup, and checks that the activity is still foregrounded. The service also rejects demo entry during capture and closes a demo if capture subsequently starts. Starting a real session from the companion closes the demo. No capture or voice session is automatically resumed.
+| Transition | Required behavior |
+| --- | --- |
+| Open a demo from the activity | Confirm stopping any real session, wait for capture cleanup and verify the activity is still foregrounded. |
+| Open a demo through the service | Reject entry during capture. |
+| Start capture or voice from the companion | Close the demo. Capture starting through another route also closes it. |
+| Close a demo | Do not restart capture or voice. |
+| Change theme or opacity | Update the active window without restarting capture. |
 
-`OverlayWindow` uses a service-owned, non-focusable `Dialog` window with `TYPE_APPLICATION_OVERLAY`. This supplies the public `Window`/`DecorView` needed by Android 12's `setBackgroundBlurRadius`; blurring a Compose node would not blur another app. Compact controls stay wrap-content. The demo uses the available width minus 16 dp side margins and a height below half the usable display, initially bottom-aligned with a 16 dp margin. System-bar/cutout insets are excluded; the header remains draggable vertically while its body scrolls, and close stays outside the scroll area. The host never sets `FLAG_BLUR_BEHIND` or dims surrounding video. Blur support changes are observed at runtime and the listener is removed on dismissal. The higher-opacity preference disables blur and uses an opaque surface. Android 10/11 use the same fallback without calling newer APIs.
+### Window and layout
 
-The theme and opacity preference update the active window without restarting capture. Gallery fixtures remain synthetic; their material treatments do not prove native cross-window behavior. Font license notices ship in APK assets.
+`OverlayWindow` uses a service-owned, non-focusable `Dialog` with `TYPE_APPLICATION_OVERLAY`. Its public `Window`/`DecorView` supports Android 12's `setBackgroundBlurRadius` for content behind the panel. Blurring a Compose node cannot provide cross-window blur.
 
-Before merging overlay changes, verify on authorized devices: Android 10/11 fallback; supported Android 12+ blur behind the panel only; runtime blur disablement/battery saver; dragging versus demo-body scrolling; touch pass-through; rotation and 200% text; permission revocation; close/notification/task cleanup; and confirmed versus canceled demo entry during a real capture. Verify theme persistence and that closing a demo never restarts media access. The unit tests cover palette contrast, fallback decisions and demo-entry policy, not GPU composition or physical-device behavior.
+Compact controls remain wrap-content. The demo has 16 dp side margins, stays below half the usable display height and starts at the bottom with a 16 dp margin. System bars and cutouts are excluded. Drag the header vertically; scroll the body separately. Close stays outside the scroll area.
+
+The host does not set `FLAG_BLUR_BEHIND` or dim surrounding content. It observes blur availability and removes the listener on dismissal. Android 10/11, disabled/unsupported blur and higher-opacity mode use opaque surfaces. Gallery materials are synthetic and do not establish device blur behavior.
+
+### Device checks before merging
+
+Use authorized devices and approved content:
+
+- Android 10/11 fallback; supported Android 12+ blur limited to the panel; runtime blur disablement and battery saver.
+- Header dragging versus body scrolling, outside-touch pass-through, rotation and 200% text.
+- Permission revocation, close/notification/task cleanup and confirmed versus cancelled demo entry during capture.
+- Theme persistence and no automatic restart of media access after closing the demo.
+
+Unit tests cover palette contrast, fallback decisions and demo-entry policy. They do not test GPU composition or physical-device behavior.
 
 ## Future boundary
 
-`backend` is reserved, not implemented. The proposed backend is one Python codebase with HTTP endpoints, jobs, research logic and external-provider adapters. API and worker processes may run separately without separate repositories or duplicated domain models.
+`backend` is reserved, not implemented on main. The proposed shape is one Python codebase for HTTP endpoints, jobs, research and provider adapters, with API and worker processes able to run separately.
 
-The Android/backend integration will use a single versioned API contract with validated schemas and compatibility tests. No OpenAPI document or endpoint is currently claimed to exist. First agree on captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors.
+Before connecting Android, agree a versioned API contract with validated schemas and compatibility tests: captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors. No OpenAPI document or endpoint is currently implemented.
 
-Hosted model weights stay with the provider. Credentials stay on the server; research prompts and adapters will live in the backend. Versioned research evaluation fixtures live in the root `evaluation/` directory, independently of backend implementation. Voxide remains a separate companion-navigation path. No capture upload is enabled by this directory layout.
+Hosted model weights stay with the provider. Credentials stay on the server; prompts and adapters belong in the backend. Evaluation fixtures live in root `evaluation/`, independently of backend implementation. Voxide remains a separate companion-navigation path. The directory layout enables no capture upload.
 
 ## Evaluation-data boundary
 
-[`evaluation/`](../evaluation/README.md) defines JSON Schema/JSONL contracts for
-clip provenance, two independent whole-clip annotation passes and adjudicated
-claim occurrences. Its standard-library validator checks snapshot integrity,
-references, intervals and declared creator/topic/repost isolation across dev/test.
-Synthetic examples exercise the contract but are not benchmark data or human
-review evidence. RES-01 still requires the real 10-20-clip reviewed corpus.
+[`evaluation/`](../evaluation/README.md) defines JSON Schema/JSONL contracts for provenance, two independent whole-clip annotation passes and adjudicated claim occurrences. The standard-library validator checks snapshot integrity, references, intervals and declared creator/topic/repost isolation across dev/test.
 
-Media stays outside version control by default. Metadata-only CI validation
-never fetches media or calls providers; local media verification additionally
-checks byte hashes. Legal rights, independent review, actual scenario coverage
-and undeclared leakage need human sign-off. Neither validation mode scores a
-pipeline, and normalized claims are not ASR transcripts or OCR-box ground truth.
+Synthetic examples test the contract; RES-01 still requires the reviewed 10-20-clip corpus. Metadata-only CI never fetches media or calls providers. Local media verification additionally checks byte hashes. Rights, independent review, scenario coverage and undeclared leakage require human sign-off. Neither mode scores a pipeline; normalized claims are not ASR transcripts or OCR-box ground truth.
 
 ## Development ownership
 
-Android development can proceed without backend dependencies. Backend platform and research work can share the future Python project with separate internal ownership, but contract changes need both client and server review.
+Android builds independently of backend dependencies. Future backend platform and research work can share one Python project, but client/server contract changes need both sides' review.
 
-Builds, caches, local machine configuration and packaged APKs are ignored. Keep personal tooling and media in the ignored root `.local` directory, and disposable experiments in `.scratch`. Shared configuration and approved test fixtures stay in version control.
+Generated builds, caches, APKs and machine configuration stay out of Git. Use ignored root `.local` for personal tooling/media and `.scratch` for disposable experiments. Version shared configuration and approved test fixtures; keep evaluation media outside version control by default.
