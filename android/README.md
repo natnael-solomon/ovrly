@@ -40,10 +40,11 @@ overrides do not apply to the app's runtime dependencies.
 
 Gradle verifies dependency bytes against `gradle/verification-metadata.xml`.
 Never bypass a checksum failure. For an intentional dependency update, resolve
-the affected build/check tasks with `--write-verification-metadata sha256`, review
-the new coordinates and hashes against their publishers, then rerun without that
-flag. Keep Linux CI artifacts covered as well as local builds. CI never regenerates
-baselines or verification metadata.
+the affected build/check tasks with
+`--refresh-dependencies --write-verification-metadata sha256`. Review the new
+coordinates and hashes against their publishers, then rerun without those flags.
+Include parent POMs/BOMs and Linux CI artifacts; a warm-cache pass alone does not
+prove complete metadata coverage. CI never regenerates baselines or verification metadata.
 
 Repository pre-commit checks also run these gates and audit dependencies; they
 require JDK 21, the SDK, uv and network access. See [shared checks](../WORKFLOW.md#shared-quality-gates).

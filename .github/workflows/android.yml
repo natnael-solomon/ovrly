@@ -136,6 +136,7 @@ jobs:
             android/app/build/test-results/testDebugUnitTest/*.xml
             android/app/build/reports/lint-results-debug.*
             android/build/reports/detekt/
+            android/build/reports/dependency-verification/
             android/build/reports/ktlint/
             android/app/build/reports/ktlint/
           retention-days: 7
