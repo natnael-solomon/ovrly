@@ -20,6 +20,30 @@ repos:
         entry: uv run --directory backend --frozen mypy --strict services/
         pass_filenames: false
         always_run: true
+      - id: android-quality
+        name: Android detekt, Compose rules and ktlint
+        language: system
+        entry: uv run --project backend --frozen --group quality python .github/scripts/android_quality.py
+        pass_filenames: false
+        always_run: true
+      - id: backend-audit
+        name: Backend locked dependency vulnerabilities
+        language: system
+        entry: uv run --project backend --frozen --group quality python .github/scripts/dependency_audit.py backend
+        pass_filenames: false
+        always_run: true
+      - id: osv
+        name: Repository dependency vulnerabilities
+        language: system
+        entry: uv run --project backend --frozen --group quality python .github/scripts/dependency_audit.py osv
+        pass_filenames: false
+        always_run: true
+      - id: dependency-policy
+        name: Android and dependency gate enforcement
+        language: system
+        entry: uv run --project backend --frozen --group quality python .github/scripts/test_dependency_gates.py
+        pass_filenames: false
+        always_run: true
       - id: actionlint
         name: GitHub workflow syntax and expressions
         language: system

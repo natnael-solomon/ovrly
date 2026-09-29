@@ -1,7 +1,7 @@
 param(
     [string]$JdkPath = 'C:\Program Files\Android\Android Studio\jbr',
     [string]$SdkPath = "$env:LOCALAPPDATA\Android\Sdk",
-    [string[]]$Tasks = @(':app:assembleDebug', ':app:testDebugUnitTest', ':app:lintDebug')
+    [string[]]$Tasks = @(':app:assembleDebug', ':app:testDebugUnitTest', ':app:lintDebug', 'qualityCheck')
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path $PSScriptRoot -Parent

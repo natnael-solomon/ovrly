@@ -50,7 +50,8 @@ class QualityConfigurationTest(unittest.TestCase):
         self.assertEqual(["local"], [repo["repo"] for repo in config["repos"]])
         hooks = config["repos"][0]["hooks"]
         self.assertEqual({"backend-ruff", "backend-format", "backend-types", "actionlint", "zizmor",
-                          "quality-policy", "secrets", "secret-policy"},
+                          "quality-policy", "secrets", "secret-policy", "android-quality",
+                          "backend-audit", "osv", "dependency-policy"},
                          {hook["id"] for hook in hooks})
         for hook in hooks:
             with self.subTest(hook=hook["id"]):

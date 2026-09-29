@@ -1,0 +1,600 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:AndroidVoiceAudio.kt$AndroidVoiceAudio$!running.get() || pcm.isEmpty() || pcm.size % 2 != 0 || pcm.size &gt; VoiceProtocol.MAX_AUDIO_BYTES || bufferedBytes + pcm.size &gt; 96_000</ID>
+    <ID>ComplexCondition:AndroidVoiceAudio.kt$AndroidVoiceAudio$running.get() &amp;&amp; playbackPending &amp;&amp; bufferedBytes == 0 &amp;&amp; (track.playbackHeadPosition.toLong() and 0xffffffffL) &gt;= writtenFrames</ID>
+    <ID>ComplexCondition:OverlayWindow.kt$OverlayWindow$current.width == width &amp;&amp; current.height == height &amp;&amp; current.x == x &amp;&amp; current.y == y</ID>
+    <ID>ComplexCondition:ShareInput.kt$SharePolicy$uri.scheme?.lowercase() !in setOf("https", "http") || uri.host.isNullOrBlank() || uri.userInfo != null || trimmed.any { it.isWhitespace() }</ID>
+    <ID>ComplexCondition:VoiceProtocol.kt$VoiceConfiguration$uri == null || uri.scheme !in setOf("https", "wss") || uri.host.isNullOrBlank() || uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null || uri.rawPath !in listOf("", "/") || uri.port !in -1..65535 || uri.port == 0 || baseUrl.contains("vox_sk", ignoreCase = true)</ID>
+    <ID>ComplexCondition:VoiceProtocol.kt$VoiceProtocol$pcm.isEmpty() || pcm.size &gt; MAX_AUDIO_BYTES || pcm.size % 2 != 0 || Base64.getEncoder().encodeToString(pcm) != encoded</ID>
+    <ID>CompositionLocalAllowlist:OvrlyTheme.kt$LocalOvrlyPalette</ID>
+    <ID>CompositionLocalAllowlist:OvrlyTheme.kt$LocalWindowBlur</ID>
+    <ID>CyclomaticComplexMethod:AndroidVoiceAudio.kt$AndroidVoiceAudio$private fun play(track: AudioTrack, drained: () -&gt; Unit)</ID>
+    <ID>CyclomaticComplexMethod:AppShell.kt$@Composable fun AppShell( destination: AppDestination, onDestination: (AppDestination) -&gt; Unit, activeSession: String?, settings: @Composable () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:CaptureService.kt$CaptureService$override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int</ID>
+    <ID>CyclomaticComplexMethod:CaptureService.kt$CaptureService$private fun finish(reason: String, failed: Boolean = false)</ID>
+    <ID>CyclomaticComplexMethod:CompanionScreen.kt$@Composable @OptIn(ExperimentalLayoutApi::class) fun CompanionScreen( capture: CaptureState, share: SharedInput?, storageBusy: Boolean, overlayAllowed: Boolean, overlayVisible: Boolean, notificationsAllowed: Boolean, higherOpacity: Boolean, voiceActive: Boolean, voiceMessage: String, voiceConfigured: Boolean, showSetup: Boolean, onDismissSetup: () -&gt; Unit, onConfirmSetup: () -&gt; Unit, onStart: () -&gt; Unit, onStop: () -&gt; Unit, onOverlayPermission: () -&gt; Unit, onShowOverlay: () -&gt; Unit, onHideOverlay: () -&gt; Unit, onResetOverlay: () -&gt; Unit, onOpacity: (Boolean) -&gt; Unit, onDeleteCapture: () -&gt; Unit, onClearShare: () -&gt; Unit, onGallery: () -&gt; Unit, onNotificationPermission: () -&gt; Unit, onVoiceStart: () -&gt; Unit, onVoiceStop: () -&gt; Unit, dark: Boolean, onDark: (Boolean) -&gt; Unit, overlayStatus: String, demoActive: Boolean, onDemo: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:GalleryBackdrop.kt$@Composable internal fun GalleryBackdrop( backdrop: StudyBackdrop, compact: Boolean, modifier: Modifier = Modifier, onMockBackgroundTap: (() -&gt; Unit)? = null, minimal: Boolean = false, content: @Composable () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:GalleryMaterial.kt$internal fun Modifier.studySurface( design: StudyDesign, palette: StudyPalette, circular: Boolean = false, ): Modifier</ID>
+    <ID>CyclomaticComplexMethod:GalleryOverlay.kt$@Composable private fun StudyControl( state: OverlayVisual, action: StudyAction, design: StudyDesign, palette: StudyPalette, onAction: (StudyAction) -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:MainActivity.kt$MainActivity$override fun onCreate(savedInstanceState: Bundle?)</ID>
+    <ID>CyclomaticComplexMethod:OverlayService.kt$OverlayService$override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int</ID>
+    <ID>CyclomaticComplexMethod:ShareInput.kt$ShareInputReader$private fun readChecked(context: Context, intent: Intent): SharedInput</ID>
+    <ID>CyclomaticComplexMethod:VoiceProtocol.kt$StrictJson$private fun value(depth: Int)</ID>
+    <ID>CyclomaticComplexMethod:VoiceProtocol.kt$VoiceConfiguration$fun unavailableState(): VoiceState?</ID>
+    <ID>CyclomaticComplexMethod:VoiceProtocol.kt$VoiceProtocol$fun parse(text: String): VoiceEvent</ID>
+    <ID>CyclomaticComplexMethod:VoiceSession.kt$VoiceSession$private fun receive(event: VoiceEvent, token: Int)</ID>
+    <ID>LongMethod:AndroidVoiceAudio.kt$AndroidVoiceAudio$@SuppressLint("MissingPermission") override fun start(input: (ByteArray) -&gt; Unit, drained: () -&gt; Unit, failed: (String) -&gt; Unit)</ID>
+    <ID>LongMethod:AppShell.kt$@Composable fun AppShell( destination: AppDestination, onDestination: (AppDestination) -&gt; Unit, activeSession: String?, settings: @Composable () -&gt; Unit, )</ID>
+    <ID>LongMethod:CaptureService.kt$CaptureService$override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int</ID>
+    <ID>LongMethod:ChromeArtwork.kt$@Composable internal fun ChromeArtwork(variant: Int, modifier: Modifier = Modifier)</ID>
+    <ID>LongMethod:CompanionScreen.kt$@Composable @OptIn(ExperimentalLayoutApi::class) fun CompanionScreen( capture: CaptureState, share: SharedInput?, storageBusy: Boolean, overlayAllowed: Boolean, overlayVisible: Boolean, notificationsAllowed: Boolean, higherOpacity: Boolean, voiceActive: Boolean, voiceMessage: String, voiceConfigured: Boolean, showSetup: Boolean, onDismissSetup: () -&gt; Unit, onConfirmSetup: () -&gt; Unit, onStart: () -&gt; Unit, onStop: () -&gt; Unit, onOverlayPermission: () -&gt; Unit, onShowOverlay: () -&gt; Unit, onHideOverlay: () -&gt; Unit, onResetOverlay: () -&gt; Unit, onOpacity: (Boolean) -&gt; Unit, onDeleteCapture: () -&gt; Unit, onClearShare: () -&gt; Unit, onGallery: () -&gt; Unit, onNotificationPermission: () -&gt; Unit, onVoiceStart: () -&gt; Unit, onVoiceStop: () -&gt; Unit, dark: Boolean, onDark: (Boolean) -&gt; Unit, overlayStatus: String, demoActive: Boolean, onDemo: () -&gt; Unit, )</ID>
+    <ID>LongMethod:DemoOverlayPanel.kt$@Composable internal fun DemoOverlayPanel( blurLabel: String, onClose: () -&gt; Unit, modifier: Modifier = Modifier, panelWidth: Dp = 340.dp, maxHeight: Dp = 360.dp, onHeaderHeight: (Int) -&gt; Unit = {}, )</ID>
+    <ID>LongMethod:GalleryBackdrop.kt$@Composable internal fun GalleryBackdrop( backdrop: StudyBackdrop, compact: Boolean, modifier: Modifier = Modifier, onMockBackgroundTap: (() -&gt; Unit)? = null, minimal: Boolean = false, content: @Composable () -&gt; Unit, )</ID>
+    <ID>LongMethod:GalleryMaterial.kt$internal fun Modifier.studySurface( design: StudyDesign, palette: StudyPalette, circular: Boolean = false, ): Modifier</ID>
+    <ID>LongMethod:GalleryOverlay.kt$@Composable internal fun StudyOverlay( state: OverlayVisual, design: StudyDesign, darkBackdrop: Boolean, higherOpacity: Boolean, onAction: (StudyAction) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
+    <ID>LongMethod:GalleryOverlay.kt$@OptIn(ExperimentalLayoutApi::class) @Composable private fun StudyReadout(state: OverlayVisual, palette: StudyPalette, onAction: (StudyAction) -&gt; Unit)</ID>
+    <ID>LongMethod:GalleryScreen.kt$@Composable @OptIn(ExperimentalLayoutApi::class) fun GalleryScreen(onBack: () -&gt; Unit, onDemo: (() -&gt; Unit)? = null)</ID>
+    <ID>LongMethod:GalleryScreen.kt$@Composable private fun GalleryFixtureChooser(selectedIndex: Int, onSelect: (Int) -&gt; Unit)</ID>
+    <ID>LongMethod:GlassOverlay.kt$@Composable @OptIn(ExperimentalLayoutApi::class) fun GlassOverlay( state: OverlayVisual, higherOpacity: Boolean, onSetup: () -&gt; Unit, onStopCapture: () -&gt; Unit, onCancelResearch: () -&gt; Unit, onDetails: () -&gt; Unit, modifier: Modifier = Modifier, referenceMaterial: Boolean = false, )</ID>
+    <ID>LongMethod:MainActivity.kt$MainActivity$override fun onCreate(savedInstanceState: Bundle?)</ID>
+    <ID>LongMethod:OpticalGlass.kt$internal fun Modifier.opticalGlass(higherOpacity: Boolean): Modifier</ID>
+    <ID>LongMethod:OverlayService.kt$OverlayService$private fun attachOverlay()</ID>
+    <ID>LongMethod:VoiceSession.kt$VoiceSession$private fun receive(event: VoiceEvent, token: Int)</ID>
+    <ID>LongParameterList:AppNotifications.kt$AppNotifications$(context: Context, title: String, text: String, action: String, target: Class&lt;out Service&gt;, actionLabel: String = if (action == "hide") "Hide overlay (capture continues)" else "Stop capture", )</ID>
+    <ID>LongParameterList:CompanionScreen.kt$( capture: CaptureState, share: SharedInput?, storageBusy: Boolean, overlayAllowed: Boolean, overlayVisible: Boolean, notificationsAllowed: Boolean, higherOpacity: Boolean, voiceActive: Boolean, voiceMessage: String, voiceConfigured: Boolean, showSetup: Boolean, onDismissSetup: () -&gt; Unit, onConfirmSetup: () -&gt; Unit, onStart: () -&gt; Unit, onStop: () -&gt; Unit, onOverlayPermission: () -&gt; Unit, onShowOverlay: () -&gt; Unit, onHideOverlay: () -&gt; Unit, onResetOverlay: () -&gt; Unit, onOpacity: (Boolean) -&gt; Unit, onDeleteCapture: () -&gt; Unit, onClearShare: () -&gt; Unit, onGallery: () -&gt; Unit, onNotificationPermission: () -&gt; Unit, onVoiceStart: () -&gt; Unit, onVoiceStop: () -&gt; Unit, dark: Boolean, onDark: (Boolean) -&gt; Unit, overlayStatus: String, demoActive: Boolean, onDemo: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:DemoOverlayPanel.kt$( blurLabel: String, onClose: () -&gt; Unit, modifier: Modifier = Modifier, panelWidth: Dp = 340.dp, maxHeight: Dp = 360.dp, onHeaderHeight: (Int) -&gt; Unit = {}, )</ID>
+    <ID>LongParameterList:GalleryBackdrop.kt$( backdrop: StudyBackdrop, compact: Boolean, modifier: Modifier = Modifier, onMockBackgroundTap: (() -&gt; Unit)? = null, minimal: Boolean = false, content: @Composable () -&gt; Unit, )</ID>
+    <ID>LongParameterList:GalleryOverlay.kt$( state: OverlayVisual, design: StudyDesign, darkBackdrop: Boolean, higherOpacity: Boolean, onAction: (StudyAction) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
+    <ID>LongParameterList:GalleryScreen.kt$( fixture: GalleryFixture, design: StudyDesign, backdrop: StudyBackdrop, higherOpacity: Boolean, compact: Boolean = true, countBackgroundTaps: Boolean = false, minimalBackdrop: Boolean = false, )</ID>
+    <ID>LongParameterList:GlassOverlay.kt$( state: OverlayVisual, higherOpacity: Boolean, onSetup: () -&gt; Unit, onStopCapture: () -&gt; Unit, onCancelResearch: () -&gt; Unit, onDetails: () -&gt; Unit, modifier: Modifier = Modifier, referenceMaterial: Boolean = false, )</ID>
+    <ID>LongParameterList:VoiceSession.kt$VoiceSession$( private val configuration: VoiceConfiguration, private val transportFactory: () -&gt; VoiceTransport, private val audioFactory: () -&gt; VoiceAudio, private val permissionGranted: () -&gt; Boolean, private val dispatch: (() -&gt; Unit) -&gt; Unit, private val schedule: (Long, () -&gt; Unit) -&gt; VoiceCancellation, private val openGallery: () -&gt; Unit, private val diagnostics: VoiceDiagnostics, )</ID>
+    <ID>LoopWithTooManyJumpStatements:CaptureService.kt$CaptureService$while</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$0xffffffffL</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$10</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$16_000</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$20</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$24_000</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$250</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$2560</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$320</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$4800</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$64_000</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$8</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$960</ID>
+    <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$96_000</ID>
+    <ID>MagicNumber:AppShell.kt$3</ID>
+    <ID>MagicNumber:CaptureFiles.kt$CaptureFiles$4096</ID>
+    <ID>MagicNumber:CaptureModel.kt$CaptureLimits$1_000</ID>
+    <ID>MagicNumber:CaptureService.kt$CaptureService$0xff</ID>
+    <ID>MagicNumber:CaptureService.kt$CaptureService$20</ID>
+    <ID>MagicNumber:CaptureService.kt$CaptureService$200</ID>
+    <ID>MagicNumber:CaptureService.kt$CaptureService$30</ID>
+    <ID>MagicNumber:CaptureService.kt$CaptureService$32</ID>
+    <ID>MagicNumber:CaptureService.kt$CaptureService$3200</ID>
+    <ID>MagicNumber:CaptureService.kt$CaptureService$33</ID>
+    <ID>MagicNumber:CaptureService.kt$CaptureService$6400</ID>
+    <ID>MagicNumber:CaptureService.kt$CaptureService$72</ID>
+    <ID>MagicNumber:CaptureService.kt$CaptureService$8</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.025f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.02f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.038f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.045f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.04f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.055f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.065f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.06f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.085f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.09f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.105f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.11f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.12f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.14f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.15f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.16f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.18f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.19f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.1f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.22f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.25f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.27f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.2f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.32f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.38f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.47f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.4f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.55f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.62f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.65f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.68f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.6f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.73f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.7f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.82f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0.85f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFF060914</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFF10121D</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFF35384F</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFF525F69</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFF69648C</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFF727D99</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFFACE0CE</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFFBFC1E1</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFFD3C9ED</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFFE0E3D6</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFFE2EEE9</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFFEBF8F1</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$0xFFF1E6F8</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$1.1f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$1.2f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$18f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$20</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$21</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$28f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$3</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$3f</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$5</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$6</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$7</ID>
+    <ID>MagicNumber:ChromeArtwork.kt$8f</ID>
+    <ID>MagicNumber:CompanionScreen.kt$1024</ID>
+    <ID>MagicNumber:CompanionScreen.kt$60</ID>
+    <ID>MagicNumber:DemoPanelGeometry.kt$16</ID>
+    <ID>MagicNumber:DemoPanelGeometry.kt$4</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.015f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.017f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.024f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.058f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.14f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.23f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.25f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.32f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.34f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.38f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.3f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.47f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.4f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.51f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.52f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.54f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.57f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.59f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.61f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.62f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.64f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.6f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.75f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.76f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.79f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.85f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.86f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.88f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.8f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0.91f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF172B2D</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF182524</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF1F3437</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF213B34</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF213D39</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF242B2C</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF34494A</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF3B5147</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF3F4A41</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF46605A</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF5F7566</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF6B6F62</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF858E81</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF8A906C</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF92968A</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFF92968C</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFFC8CDBE</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFFD6D8CB</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFFE3E2D7</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$0xFFEEECE3</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$4</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$5</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$5f</ID>
+    <ID>MagicNumber:GalleryBackdrop.kt$7</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$0xFF182427</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$0xFF466123</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$0xFFD0D3E0</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$0xFFF6F4EE</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.34f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.36f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.38f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.40f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.42f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.48f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.52f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.56f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.58f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.64f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.66f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.70f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.76f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$0.84f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$14f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$16f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$20f</ID>
+    <ID>MagicNumber:GalleryDesigns.kt$StudyDesign$26f</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$0.30f</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$0.42f</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$0.4f</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$0.55f</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$0.5f</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$0.60f</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$0.75f</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$0.7f</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$0.9f</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$0xFF7E8175</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$26f</ID>
+    <ID>MagicNumber:GalleryMaterial.kt$3f</ID>
+    <ID>MagicNumber:GalleryOverlay.kt$0xFFF38E77</ID>
+    <ID>MagicNumber:GalleryOverlay.kt$230f</ID>
+    <ID>MagicNumber:GalleryOverlay.kt$360f</ID>
+    <ID>MagicNumber:GalleryOverlay.kt$60</ID>
+    <ID>MagicNumber:GalleryOverlay.kt$90f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$0.18f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$0.22f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$0.58f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$0xFF303B34</ID>
+    <ID>MagicNumber:GlassOverlay.kt$0xFF819C9D</ID>
+    <ID>MagicNumber:GlassOverlay.kt$0xFF829353</ID>
+    <ID>MagicNumber:GlassOverlay.kt$0xFFBD9B86</ID>
+    <ID>MagicNumber:GlassOverlay.kt$0xFFD4DED4</ID>
+    <ID>MagicNumber:GlassOverlay.kt$0xFFE7EBE2</ID>
+    <ID>MagicNumber:GlassOverlay.kt$0xFFF7F8F4</ID>
+    <ID>MagicNumber:GlassOverlay.kt$12f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$13f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$14f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$15f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$16f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$17f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$18f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$19f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$21f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$24f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$360f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$3f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$4f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$5f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$60</ID>
+    <ID>MagicNumber:GlassOverlay.kt$7f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$8f</ID>
+    <ID>MagicNumber:GlassOverlay.kt$9f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$0.05f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$0.1f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$0.7f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$1.3f</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$31</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$33</ID>
+    <ID>MagicNumber:MainActivity.kt$MainActivity$5000</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.025f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.035f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.04f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.28f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.32f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.40f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.46f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.55f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.64f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.65f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.72f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0.80f</ID>
+    <ID>MagicNumber:OpticalGlass.kt$0xFF52645F</ID>
+    <ID>MagicNumber:OverlayAppearance.kt$OverlayAppearance$0xFF2B302C</ID>
+    <ID>MagicNumber:OverlayAppearance.kt$OverlayAppearance$0xFF444E45</ID>
+    <ID>MagicNumber:OverlayAppearance.kt$OverlayAppearance$0xFF482621</ID>
+    <ID>MagicNumber:OverlayAppearance.kt$OverlayAppearance$0xFFDCE5E3</ID>
+    <ID>MagicNumber:OverlayAppearance.kt$OverlayAppearance$0xFFE5ECEB</ID>
+    <ID>MagicNumber:OverlayAppearance.kt$OverlayAppearance$0xFFEAF0EB</ID>
+    <ID>MagicNumber:OverlayAppearance.kt$OverlayAppearance$0xFFEEF1EC</ID>
+    <ID>MagicNumber:OverlayAppearance.kt$OverlayAppearance$0xFFF0F2ED</ID>
+    <ID>MagicNumber:OverlayAppearance.kt$OverlayAppearance$0xFFF6F8F3</ID>
+    <ID>MagicNumber:OverlayAppearance.kt$OverlayAppearance$0xFFF7F8F5</ID>
+    <ID>MagicNumber:OverlayAppearance.kt$OverlayAppearance$0xFFF8FAF6</ID>
+    <ID>MagicNumber:OverlayService.kt$OverlayService$1000</ID>
+    <ID>MagicNumber:OverlayService.kt$OverlayService$102</ID>
+    <ID>MagicNumber:OverlayService.kt$OverlayService$180</ID>
+    <ID>MagicNumber:OverlayService.kt$OverlayService$24</ID>
+    <ID>MagicNumber:OverlayService.kt$OverlayService$30</ID>
+    <ID>MagicNumber:OverlayService.kt$OverlayService$34</ID>
+    <ID>MagicNumber:OverlayService.kt$OverlayService$48</ID>
+    <ID>MagicNumber:OverlayService.kt$OverlayService$48f</ID>
+    <ID>MagicNumber:OverlayWindow.kt$31</ID>
+    <ID>MagicNumber:OverlayWindow.kt$OverlayWindow$100</ID>
+    <ID>MagicNumber:OverlayWindow.kt$OverlayWindow$24</ID>
+    <ID>MagicNumber:OverlayWindow.kt$OverlayWindow$28f</ID>
+    <ID>MagicNumber:OverlayWindow.kt$OverlayWindow$31</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0.28f</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0.2f</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0.4f</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0.5f</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0.6f</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF080910</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF191C29</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF231D35</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF242737</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF252826</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF29371E</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF303046</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF401920</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF414454</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF44242B</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF466123</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF53594A</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF60271F</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFF943D35</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFB0EFD2</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFBCC0D1</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFC5B4FA</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFD3D4C7</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFD5EB97</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFE1E6D2</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFE5E7DA</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFEDEEF5</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFF0AFB6</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFF0D9D0</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFF0EFE5</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFF8F7EF</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFFFDADF</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$0xFFFFFFF8</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$1.6f</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$11</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$12</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$14</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$15</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$16</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$17</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$18</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$20</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$22</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$24</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$26</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$28</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$32</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$3400</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$36</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$40</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$44</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$48</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$52</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$5200</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$56</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$60</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$OvrlyEditorialTypography$26</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$OvrlyEditorialTypography$32</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$OvrlyEditorialTypography$36</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$OvrlyEditorialTypography$40</ID>
+    <ID>MagicNumber:OvrlyTheme.kt$OvrlyEditorialTypography$44</ID>
+    <ID>MagicNumber:SampleReports.kt$3</ID>
+    <ID>MagicNumber:SampleScreens.kt$1.03f</ID>
+    <ID>MagicNumber:SampleScreens.kt$1.06f</ID>
+    <ID>MagicNumber:SampleScreens.kt$1.35f</ID>
+    <ID>MagicNumber:SampleScreens.kt$1.7f</ID>
+    <ID>MagicNumber:SampleScreens.kt$1.8f</ID>
+    <ID>MagicNumber:ShareInput.kt$ShareInputReader$1000</ID>
+    <ID>MagicNumber:ShareInput.kt$ShareInputReader$33</ID>
+    <ID>MagicNumber:ShareInput.kt$SharePolicy$4096</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$StrictJson$12</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$StrictJson$16</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$StrictJson$32</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$StrictJson$4</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$StrictJson$512</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$VoiceConfiguration$65535</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$VoiceProtocol$128</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$VoiceProtocol$2048</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$VoiceProtocol$3</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$VoiceProtocol$4</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$VoiceProtocol$64</ID>
+    <ID>MagicNumber:VoiceProtocol.kt$VoiceProtocol$8192</ID>
+    <ID>MagicNumber:VoiceSession.kt$VoiceSession$180_000</ID>
+    <ID>MagicNumber:VoiceSession.kt$VoiceSession$240</ID>
+    <ID>MagicNumber:VoiceSession.kt$VoiceSession$30_000</ID>
+    <ID>MagicNumber:VoiceSession.kt$VoiceSession$32</ID>
+    <ID>MagicNumber:VoiceSession.kt$VoiceSession.&lt;no name provided&gt;$16</ID>
+    <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$10</ID>
+    <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$1024</ID>
+    <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$15</ID>
+    <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$300</ID>
+    <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$399</ID>
+    <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$401</ID>
+    <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$403</ID>
+    <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$429</ID>
+    <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$64</ID>
+    <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$8192</ID>
+    <ID>MatchingDeclarationName:AppShell.kt$AppDestination</ID>
+    <ID>MatchingDeclarationName:DemoOverlayPanel.kt$DemoClaim</ID>
+    <ID>MatchingDeclarationName:DemoPolicy.kt$DemoEntry</ID>
+    <ID>MatchingDeclarationName:GalleryBackdrop.kt$StudyBackdrop</ID>
+    <ID>MatchingDeclarationName:GalleryFixtures.kt$GalleryFixture</ID>
+    <ID>MatchingDeclarationName:GalleryOverlay.kt$StudyAction</ID>
+    <ID>MatchingDeclarationName:SampleReports.kt$SampleReport</ID>
+    <ID>MaxLineLength:AndroidVoiceAudio.kt$AndroidVoiceAudio$diagnostics.warning("Hardware echo cancellation rejected the audio session; using half-duplex transmission", cause)</ID>
+    <ID>MaxLineLength:AndroidVoiceAudio.kt$AndroidVoiceAudio$diagnostics.warning("Hardware echo cancellation unavailable in this device state; using half-duplex transmission", cause)</ID>
+    <ID>MaxLineLength:AndroidVoiceAudio.kt$AndroidVoiceAudio$if</ID>
+    <ID>MaxLineLength:AndroidVoiceAudio.kt$AndroidVoiceAudio$reportFailure("Microphone or speaker could not start. Another app may own audio focus, or the audio device is unavailable.", cause)</ID>
+    <ID>MaxLineLength:AppShell.kt$.</ID>
+    <ID>MaxLineLength:CaptureFiles.kt$CaptureFiles$return CaptureState(message = "Expired or interrupted temporary capture was deleted. Research is not connected.")</ID>
+    <ID>MaxLineLength:CaptureFiles.kt$CaptureFiles$val storedBytes = root.listFiles()?.sumOf { it.length() } ?: throw IOException("Cannot inspect capture storage.")</ID>
+    <ID>MaxLineLength:CaptureService.kt$CaptureService$AppNotifications.build(this, "ovrly is capturing", "Screen samples + eligible playback audio. Maximum 3 minutes.", STOP, CaptureService::class.java)</ID>
+    <ID>MaxLineLength:CaptureService.kt$CaptureService$ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)</ID>
+    <ID>MaxLineLength:CaptureService.kt$CaptureService$if</ID>
+    <ID>MaxLineLength:CaptureService.kt$CaptureService$if (!cropped.compress(Bitmap.CompressFormat.JPEG, 72, output)) throw IOException("Screen frame encoding failed.")</ID>
+    <ID>MaxLineLength:CaptureService.kt$CaptureService$if (!running.get()) 0 else recorder?.read(buffer, 0, buffer.size, AudioRecord.READ_NON_BLOCKING) ?: 0</ID>
+    <ID>MaxLineLength:CaptureService.kt$CaptureService$if (cleanupErrors.isNotEmpty()) append(" Cleanup issue: ${cleanupErrors.joinToString()}. Delete local capture before retrying.")</ID>
+    <ID>MaxLineLength:CaptureService.kt$CaptureService$if (duration &gt; 0 &amp;&amp; !signal) append(" No playback signal was detected; silence or source policy may be responsible. Share a video instead.")</ID>
+    <ID>MaxLineLength:CaptureService.kt$CaptureService$if (elapsed &gt;= CaptureLimits.LIVE_MS || elapsed - lastFrameMs &lt; CaptureLimits.FRAME_INTERVAL_MS) return@use</ID>
+    <ID>MaxLineLength:CaptureService.kt$CaptureService$release("playback recorder stop") { if (audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) audio.stop() }</ID>
+    <ID>MaxLineLength:CaptureService.kt$CaptureService$val duration = if (startedMs == 0L) 0 else (SystemClock.elapsedRealtime() - startedMs).coerceIn(0, CaptureLimits.LIVE_MS)</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$"Native authorization is unverified. Voice can open the gallery only; it cannot start capture or the overlay, or discuss evidence. Playback capture is separate."</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$"One capture at a time, up to 32 MiB. A new capture replaces it. Interrupted data and captures older than 24 hours are removed next time the app opens. No upload or account sync."</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$"Playback audio and a screen image about every 5 seconds. No microphone fallback, transcription, research or upload. Android consent is required each time."</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$CapturePhase.RECORDING -&gt; "REC %d:%02d / 3:00".format(capture.seconds / 60, capture.seconds % 60)</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$Column</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$OutlinedButton(onClick = onHideOverlay, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text(if (demoActive) "Close demo overlay" else "Hide overlay only") }</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$OutlinedButton(onClick = onNotificationPermission, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("Allow notifications") }</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$OutlinedButton(onClick = onOverlayPermission, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("Allow overlay access") }</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$OutlinedButton(onClick = onShowOverlay, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("Show overlay") }</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$OutlinedButton(onClick = onVoiceStop, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("Stop microphone") }</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$Row</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$SettingsDisclosure("Supported input", "Video references up to 10 minutes, or one web URL. Nothing is downloaded, copied or queued.")</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$Text("After Android's consent, capture starts immediately for up to 3 minutes. Return to your video and use the overlay or notification to stop.")</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$Text("Android's audio permission is required for playback capture. Audio may include other eligible apps in your profile, even when you select one app's screen. Source apps may block audio or protect pixels.")</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$Text("Previous local capture will be replaced. No research or upload starts. Locking the screen, revoking projection, or stopping capture releases media access.")</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$Text("Stores eligible playback audio (not your microphone) and a screen image about every 5 seconds. This is not a full video recording and cannot cover unseen content.")</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$confirmButton = { TextButton(onClick = onConfirmSetup, enabled = !capture.busy &amp;&amp; !storageBusy) { Text("Continue to Android consent") } }</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$modifier = Modifier.fillMaxWidth()</ID>
+    <ID>MaxLineLength:CompanionViewModel.kt$CompanionViewModel$if (deleted) CaptureStore.set(CaptureState(message = "Expired or interrupted local capture was deleted. Research is not connected."))</ID>
+    <ID>MaxLineLength:CompanionViewModel.kt$CompanionViewModel$mutableShare.value = SharedInput("Inspecting shared reference", "Only local metadata is being inspected. No media upload.", false)</ID>
+    <ID>MaxLineLength:CompanionViewModel.kt$CompanionViewModel$val restored = withContext(Dispatchers.IO) { CaptureFiles(application).restoreOrExpire(System.currentTimeMillis()) }</ID>
+    <ID>MaxLineLength:DemoOverlayPanel.kt$"This illustrates a personal preference rather than a factual verdict. All claims in this panel are fixed examples."</ID>
+    <ID>MaxLineLength:DemoOverlayPanel.kt$"This illustrates a qualification: populations, methods and context can differ. This is not a research finding."</ID>
+    <ID>MaxLineLength:DemoOverlayPanel.kt$"This illustrates how a supporting source summary would read. No source was retrieved and no video was analyzed."</ID>
+    <ID>MaxLineLength:DemoOverlayPanel.kt$Column</ID>
+    <ID>MaxLineLength:DemoOverlayPanel.kt$IconButton</ID>
+    <ID>MaxLineLength:DemoOverlayPanel.kt$Row</ID>
+    <ID>MaxLineLength:DemoOverlayPanel.kt$Text("${claim.time} / ${claim.label}", style = MaterialTheme.typography.labelSmall, color = p.muted)</ID>
+    <ID>MaxLineLength:DemoOverlayPanel.kt$Text("Preview only. No recording or network request is running.", style = MaterialTheme.typography.bodyMedium)</ID>
+    <ID>MaxLineLength:DemoOverlayPanel.kt$color = if (selected == index) MaterialTheme.colorScheme.secondaryContainer else p.surface.copy(alpha = 0.2f)</ID>
+    <ID>MaxLineLength:GalleryBackdrop.kt$StudyBackdrop.READING -&gt; "The page can wait. Notice the space between one thought and the next."</ID>
+    <ID>MaxLineLength:GalleryOverlay.kt$StudyAction.DETAILS -&gt; if (state == OverlayVisual.NoAudio) "Open audio availability details" else "Open claim details"</ID>
+    <ID>MaxLineLength:GalleryScreen.kt$GalleryBody("Explicit opt-in. Simulated evidence, with native blur where supported.", small = true)</ID>
+    <ID>MaxLineLength:GlassOverlay.kt$.</ID>
+    <ID>MaxLineLength:LaunchSplashResourcesTest.kt$LaunchSplashResourcesTest$fun u24(at: Int)</ID>
+    <ID>MaxLineLength:LaunchSplashResourcesTest.kt$LaunchSplashResourcesTest$private</ID>
+    <ID>MaxLineLength:LaunchSplashResourcesTest.kt$LaunchSplashResourcesTest$val appTheme = xml("res/values/styles.xml").elements("style").single { it.getAttribute("name") == "Theme.Ovrly" }</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$CaptureStore.message("Capture or local storage is busy. No new session started; request fresh consent after it finishes.")</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$CaptureStore.message("Capture reported a cleanup issue. Demo was not opened. Check local capture before retrying.")</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$CaptureStore.message("Demo was not opened because the companion left the foreground. Tap Try demo again.")</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$CaptureStore.message("Playback-audio permission denied. Nothing was captured; there is no microphone fallback.")</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$CaptureStore.message("The session has not finished stopping. Demo was not opened; try again when idle.")</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$CaptureStore.set(CaptureState(phase = CapturePhase.STARTING, message = "Starting your selected capture interval..."))</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$CaptureStore.update { it.copy(phase = if (it.phase == CapturePhase.STARTING) CapturePhase.ERROR else it.phase, message = message) }</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$PermissionStep.ALREADY_RUNNING -&gt; CaptureStore.message("A capture is already running. Stop it before starting another.")</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$if</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$if (!granted) CaptureStore.message("Notifications are off. Stop capture from the companion or overlay; Android may show its own capture indicator.")</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$if (Build.VERSION.SDK_INT &gt;= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$onStop = { startService(Intent(this@MainActivity, CaptureService::class.java).setAction(CaptureService.STOP)) }</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$overlaySettings.launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, "package:$packageName".toUri()))</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$private</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$serviceError("Android could not stop the session or open the demo. Try again from the companion.", error)</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$serviceError("Android did not allow capture to start. Keep the companion visible and request fresh consent.", error)</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$serviceError("Permission changed before the demo could open. Check overlay access and try again.", error)</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$startService(Intent(this@MainActivity, CaptureService::class.java).setAction(CaptureService.STOP))</ID>
+    <ID>MaxLineLength:OverlayService.kt$OverlayService$CaptureStore.message("Overlay permission is off. Enable it in Android settings; capture consent is separate.")</ID>
+    <ID>MaxLineLength:OverlayService.kt$OverlayService$CaptureStore.message("Overlay permission was revoked. Any capture continues until stopped in the companion or notification.")</ID>
+    <ID>MaxLineLength:OverlayService.kt$OverlayService$CaptureStore.message("The overlay could not be displayed. Check overlay permission. Capture can still be stopped in the companion or notification.")</ID>
+    <ID>MaxLineLength:OverlayService.kt$OverlayService$onCancelResearch = { CaptureStore.message("Research is not connected; there is no research task to cancel.") }</ID>
+    <ID>MaxLineLength:OverlayService.kt$OverlayService$onStopCapture = { startService(Intent(this@OverlayService, CaptureService::class.java).setAction(CaptureService.STOP)) }</ID>
+    <ID>MaxLineLength:OverlayWindow.kt$OverlayWindow$if (mode == BlurMode.NATIVE) (24 * context.resources.displayMetrics.density).toInt().coerceAtMost(100) else 0</ID>
+    <ID>MaxLineLength:OvrlyTheme.kt$drawRect(glare, topLeft = Offset(0f, 0f), size = Size(band, size.height), blendMode = BlendMode.SrcAtop)</ID>
+    <ID>MaxLineLength:SampleReports.kt$"An example of a claim that needs a place, a measurement and a comparison. No temperature data or source was retrieved."</ID>
+    <ID>MaxLineLength:SampleReports.kt$"An illustrative qualification, not health advice. A real review would need the population, study methods and limits."</ID>
+    <ID>MaxLineLength:SampleReports.kt$"This illustrates a statement that needs definitions and supporting research. No research has been performed."</ID>
+    <ID>MaxLineLength:SampleReports.kt$"This sample shows where local climate, water use and street design would need to be considered. It is not a completed assessment."</ID>
+    <ID>MaxLineLength:SampleScreens.kt$.</ID>
+    <ID>MaxLineLength:SampleScreens.kt$Text("Saves affect this preview collection only.", style = MaterialTheme.typography.bodySmall, color = p.muted)</ID>
+    <ID>MaxLineLength:SampleScreens.kt$if (expanded == index) Text(claim.explanation, style = MaterialTheme.typography.bodyMedium, color = p.muted)</ID>
+    <ID>MaxLineLength:ShareInput.kt$ShareInputReader$if (type?.startsWith("video/") != true) return rejected("The provider did not identify this item as a video.")</ID>
+    <ID>MaxLineLength:ShareInput.kt$ShareInputReader$retriever.setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.declaredLength)</ID>
+    <ID>MaxLineLength:ShareInput.kt$ShareInputReader$return SharedInput("URL reference received", "$url\n\nThis is a reference, not a downloadable video. No download, upload, queue, or research was started.", true)</ID>
+    <ID>MaxLineLength:ShareInput.kt$ShareInputReader$return SharedInput("Video reference received", "Duration: ${duration / 1000}s. The provider granted temporary read access for validation only.\n\nNo media was copied, retained, uploaded, queued, or analyzed. Research is not connected.", true)</ID>
+    <ID>MaxLineLength:ShareInput.kt$ShareInputReader$val</ID>
+    <ID>MaxLineLength:VoiceController.kt$VoiceController$applicationContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED</ID>
+    <ID>MaxLineLength:VoiceProtocol.kt$VoiceConfiguration$return VoiceState("Configuration error", "Only a Voxide publishable key (vox_pub_) is allowed. Never put a secret key in the app.")</ID>
+    <ID>MaxLineLength:VoiceProtocol.kt$VoiceConfiguration$return VoiceState("Configuration error", "Use an HTTPS or WSS origin without credentials, paths, queries or fragments.")</ID>
+    <ID>MaxLineLength:VoiceProtocolTest.kt$VoiceProtocolTest$assertFalse</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession$VoiceProtocol.toolResult(tool, false, "This action is not allowed. Only open_design_gallery is supported.")</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession$failures.isNotEmpty() -&gt; " Cleanup reported ${failures.size} resource failures; see OvrlyVoice diagnostics."</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession$finish("Microphone permission needed", "Microphone access was revoked. Voice stopped.")</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession$if (transport?.send(text) != true) finish("Connection interrupted", "The voice connection could not accept data. Voice stopped.")</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession$mutableState.value = VoiceState("Connecting", "Checking the experimental Voxide connection. Microphone is still off.", true)</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession$mutableState.value = VoiceState("Listening", "Assistant interrupted. Microphone resumes after the echo guard.", true)</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession$mutableState.value = VoiceState("Listening", "Microphone active. Ask to open the design gallery.", true)</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession$mutableState.value = VoiceState("Listening", "Microphone active. Only opening the design gallery is supported.", true)</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession$mutableState.value = VoiceState("Microphone permission needed", "Allow microphone access before starting voice.")</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession$mutableState.value = VoiceState("Speaking", "Assistant audio is playing. Microphone transmission is paused.", true)</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession.&lt;no name provided&gt;$finish("Message limit reached", "Voxide messages arrived faster than they could be processed. Voice stopped.")</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession.&lt;no name provided&gt;$finish("Protocol error", "Voxide sent an invalid or oversized message. Voice stopped safely.")</ID>
+    <ID>MaxLineLength:VoiceSession.kt$VoiceSession.&lt;no name provided&gt;$if (!handled) finish("Stopped", "An unexpected voice fault interrupted the session.")</ID>
+    <ID>MaxLineLength:VoxideTransport.kt$VoxideTransport$401, 403 -&gt; "Voxide refused the $stage request (HTTP $code). Check the publishable key and provider-approved native access; no browser Origin is impersonated."</ID>
+    <ID>MaxLineLength:VoxideTransport.kt$VoxideTransport$failures.isNotEmpty() -&gt; " Connection cleanup reported ${failures.size} resource failures; see OvrlyVoice diagnostics."</ID>
+    <ID>MaxLineLength:build.gradle.kts$buildConfigField("String", "VOXIDE_BASE_URL", quoted(voiceConfig.getProperty("baseUrl", "https://voxide.onrender.com")))</ID>
+    <ID>ModifierComposed:OvrlyTheme.kt$chromeGlare</ID>
+    <ID>ModifierMissing:AppShell.kt$AppShell</ID>
+    <ID>ModifierMissing:CompanionScreen.kt$CompanionScreen</ID>
+    <ID>ModifierMissing:GalleryScreen.kt$GalleryScreen</ID>
+    <ID>ModifierWithoutDefault:GlassOverlay.kt$modifier</ID>
+    <ID>MutableStateAutoboxing:SampleScreens.kt$mutableStateOf&lt;Int?&gt;(0)</ID>
+    <ID>NestedBlockDepth:AndroidVoiceAudio.kt$AndroidVoiceAudio$private fun play(track: AudioTrack, drained: () -&gt; Unit)</ID>
+    <ID>NestedBlockDepth:OverlayAppearanceTest.kt$OverlayAppearanceTest$@Test fun foregroundContrastSurvivesDarkestBackingAcrossGradient()</ID>
+    <ID>NestedBlockDepth:OvrlyThemeTest.kt$OvrlyThemeTest$@Test fun overlayReadableOnExtremeBackdropsWithOrWithoutBlur()</ID>
+    <ID>NestedBlockDepth:ShareInput.kt$ShareInputReader$private fun readChecked(context: Context, intent: Intent): SharedInput</ID>
+    <ID>ReturnCount:AndroidVoiceAudio.kt$AndroidVoiceAudio$private fun capture(record: AudioRecord, input: (ByteArray) -&gt; Unit)</ID>
+    <ID>ReturnCount:AndroidVoiceAudio.kt$AndroidVoiceAudio$private fun play(track: AudioTrack, drained: () -&gt; Unit)</ID>
+    <ID>ReturnCount:CaptureFiles.kt$CaptureFiles$@Synchronized fun expireIfNeeded(nowMs: Long): Boolean</ID>
+    <ID>ReturnCount:CaptureFiles.kt$CaptureFiles$@Synchronized fun restoreOrExpire(nowMs: Long): CaptureState?</ID>
+    <ID>ReturnCount:CaptureService.kt$CaptureService$override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int</ID>
+    <ID>ReturnCount:OverlayService.kt$DragSurface$override fun onInterceptTouchEvent(event: MotionEvent): Boolean</ID>
+    <ID>ReturnCount:OverlayService.kt$OverlayService$override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int</ID>
+    <ID>ReturnCount:ShareInput.kt$ShareInputReader$private fun readChecked(context: Context, intent: Intent): SharedInput</ID>
+    <ID>ReturnCount:ShareInput.kt$SharePolicy$fun webReference(text: String): String?</ID>
+    <ID>ReturnCount:VoiceProtocol.kt$StrictJson$private fun value(depth: Int)</ID>
+    <ID>ReturnCount:VoiceProtocol.kt$VoiceConfiguration$fun unavailableState(): VoiceState?</ID>
+    <ID>ReturnCount:VoiceSession.kt$VoiceSession$private fun receive(event: VoiceEvent, token: Int)</ID>
+    <ID>ThrowingExceptionFromFinally:VoxideTransport.kt$VoxideTransport.&lt;no name provided&gt;$throw t</ID>
+    <ID>ThrowingExceptionsWithoutMessageOrCause:AndroidVoiceAudio.kt$AndroidVoiceAudio$IllegalStateException()</ID>
+    <ID>ThrowsCount:VoiceProtocol.kt$VoiceProtocol$fun parse(text: String): VoiceEvent</ID>
+    <ID>TooManyFunctions:GalleryPreviews.kt$app.ovrly.ui.GalleryPreviews.kt</ID>
+    <ID>TooManyFunctions:GalleryScreen.kt$app.ovrly.ui.GalleryScreen.kt</ID>
+    <ID>TooManyFunctions:GlassOverlay.kt$app.ovrly.ui.GlassOverlay.kt</ID>
+    <ID>TooManyFunctions:MainActivity.kt$MainActivity : ComponentActivity</ID>
+    <ID>TooManyFunctions:OverlayService.kt$OverlayService : LifecycleServiceSavedStateRegistryOwnerViewModelStoreOwner</ID>
+    <ID>TooManyFunctions:VoiceProtocol.kt$StrictJson</ID>
+    <ID>UnusedPrivateMember:AppearancePreviews.kt$@Preview(name = "Chrome / Explore", widthDp = 390, heightDp = 844) @Composable private fun ChromeExplorePreview()</ID>
+    <ID>UnusedPrivateMember:AppearancePreviews.kt$@Preview(name = "Chrome / Your space", widthDp = 390, heightDp = 844) @Composable private fun ChromeSpacePreview()</ID>
+    <ID>UnusedPrivateMember:AppearancePreviews.kt$@Preview(name = "Chrome / companion", widthDp = 390, heightDp = 844) @Composable private fun ChromeCompanionPreview()</ID>
+    <ID>UnusedPrivateMember:AppearancePreviews.kt$@Preview(name = "Chrome / gallery", widthDp = 390, heightDp = 844) @Composable private fun ChromeGalleryPreview()</ID>
+    <ID>UnusedPrivateMember:AppearancePreviews.kt$@Preview(name = "Mock 1 / companion", widthDp = 390, heightDp = 844) @Composable private fun PaperCompanionPreview()</ID>
+    <ID>UnusedPrivateMember:AppearancePreviews.kt$@Preview(name = "Narrow / large text", widthDp = 320, heightDp = 740, fontScale = 2f) @Composable private fun LargeTextCompanionPreview()</ID>
+    <ID>UnusedPrivateMember:DemoOverlayPanel.kt$@Preview(name = "Chrome / demo panel", widthDp = 380, heightDp = 740) @Composable private fun DarkDemoPreview()</ID>
+    <ID>UnusedPrivateMember:DemoOverlayPanel.kt$@Preview(name = "Mock 1 / demo panel", widthDp = 380, heightDp = 740) @Composable private fun LightDemoPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Clear float · Seven states", group = "States · Quiet · Clear float", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun ClearFloatStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Cushion glass · Seven states", group = "States · Sculpted · Cushion glass", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun CushionGlassStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Domed glass · Seven states", group = "States · Sculpted · Domed glass", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun DomedGlassStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Floating rail · Seven states", group = "States · Quiet · Floating rail", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun FloatingRailStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Frosted veil · Seven states", group = "States · Soft · Frosted veil", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun FrostedVeilStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Hairline halo · Seven states", group = "States · Quiet · Hairline halo", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun HairlineHaloStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Interactive gallery · 15 designs", group = "Lab · Phone", showBackground = true, widthDp = 412, heightDp = 860, ) @Composable private fun GalleryScreenPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Liquid lens · Seven states", group = "States · Sculpted · Liquid lens", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun LiquidLensStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Milk glass · Seven states", group = "States · Soft · Milk glass", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun MilkGlassStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Optical rim · Seven states", group = "States · Sculpted · Optical rim", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun OpticalRimStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Prism edge · Seven states", group = "States · Sculpted · Prism edge", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun PrismEdgeStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Quiet · 320dp · 200% text · Provisional recording", group = "Stress · Quiet", showBackground = true, widthDp = 320, heightDp = 2000, fontScale = 2f, ) @Composable private fun QuietFamilyLargeTextPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Quiet · Five designs · Provisional recording", group = "Lab · Comparison", showBackground = true, widthDp = 412, heightDp = 900, ) @Composable private fun QuietFamilyComparisonPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Rimless air · Seven states", group = "States · Quiet · Rimless air", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun RimlessAirStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Satin capsule · Seven states", group = "States · Soft · Satin capsule", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun SatinCapsuleStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Sculpted · 320dp · 200% text · Provisional recording", group = "Stress · Sculpted", showBackground = true, widthDp = 320, heightDp = 2000, fontScale = 2f, ) @Composable private fun SculptedFamilyLargeTextPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Sculpted · Five designs · Provisional recording", group = "Compare · Sculpted", showBackground = true, widthDp = 412, heightDp = 900, ) @Composable private fun SculptedFamilyComparisonPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Smoked glass · Seven states", group = "States · Soft · Smoked glass", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun SmokedGlassStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Soft squircle · Seven states", group = "States · Soft · Soft squircle", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun SoftSquircleStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Soft · 320dp · 200% text · Provisional recording", group = "Stress · Soft", showBackground = true, widthDp = 320, heightDp = 2000, fontScale = 2f, ) @Composable private fun SoftFamilyLargeTextPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Soft · Five designs · Provisional recording", group = "Compare · Soft", showBackground = true, widthDp = 412, heightDp = 900, ) @Composable private fun SoftFamilyComparisonPreview()</ID>
+    <ID>UnusedPrivateMember:GalleryPreviews.kt$@Preview( name = "Split pebble · Seven states", group = "States · Quiet · Split pebble", showBackground = true, widthDp = 412, heightDp = 1100, ) @Composable private fun SplitPebbleStatesPreview()</ID>
+    <ID>UnusedPrivateMember:GlassOverlay.kt$@Preview(name = "Bounded 320 dp window, 200% text", widthDp = 320, heightDp = 300, fontScale = 2f) @Composable private fun NarrowWindowPreview()</ID>
+    <ID>UnusedPrivateMember:GlassOverlay.kt$@Preview(name = "Glass shell / sample backdrops", widthDp = 400, heightDp = 420) @Composable private fun GlassTranslucencyPreview()</ID>
+    <ID>UnusedPrivateMember:GlassOverlay.kt$@Preview(name = "Overlay controls / seven fixtures", widthDp = 400, heightDp = 860) @Composable private fun OverlayControlsPreview()</ID>
+    <ID>UseCheckOrError:AndroidVoiceAudio.kt$AndroidVoiceAudio$throw IllegalStateException()</ID>
+    <ID>UseCheckOrError:CaptureService.kt$CaptureService$throw IllegalStateException("The system did not grant a projection.")</ID>
+    <ID>UseCheckOrError:VoiceDiagnosticsTest.kt$VoiceDiagnosticsTest$throw IllegalStateException("private details")</ID>
+    <ID>VariableNaming:CompanionScreen.kt$val Coral = palette.error</ID>
+    <ID>VariableNaming:CompanionScreen.kt$val Graphite = palette.ink</ID>
+    <ID>WildcardImport:CaptureFilesTest.kt$import org.junit.Assert.*</ID>
+    <ID>WildcardImport:CaptureModelTest.kt$import org.junit.Assert.*</ID>
+    <ID>WildcardImport:SharePolicyTest.kt$import org.junit.Assert.*</ID>
+  </CurrentIssues>
+</SmellBaseline>

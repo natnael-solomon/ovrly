@@ -144,22 +144,33 @@ assertion rule is ignored under `tests/`. Two fixed test subprocess calls have
 line-specific, explained `S603` annotations; production code has no security-rule
 exemptions.
 
-The optional `quality` dependency group adds locked pre-commit, actionlint and
-zizmor tooling without changing runtime dependencies. From the repository root:
+The optional `quality` group adds locked pre-commit, actionlint, zizmor and
+pip-audit tooling without changing runtime dependencies. From the repository root:
 
 ```sh
 uv sync --project backend --frozen --group quality
 uv run --project backend --frozen --group quality pre-commit run --all-files
 ```
 
-This runs backend lint/format/types, workflow analysis and gate enforcement
-fixtures without PostgreSQL. The same command runs in the dedicated
-**Quality checks** job, including on docs-only PRs. It does not replace the
-PostgreSQL/migration/coverage checks below. See [WORKFLOW](../WORKFLOW.md#continuous-integration)
-for tool pins, optional hook installation and the narrowly documented workflow
-exceptions. REPO-03 (#7) still tracks Android tooling and broader scanning.
+This runs both stacks' quality gates, workflow analysis, dependency audits and
+enforcement fixtures without PostgreSQL. Full repository checks require the
+Android JDK/SDK too. The same command runs in **Quality checks**, including on
+docs-only PRs. It does not replace PostgreSQL/migration/coverage checks.
+See [WORKFLOW](../WORKFLOW.md#shared-quality-gates) for setup and tool pins.
 The shared hooks also scan reachable Git history and tracked changes for secrets,
 using a checksum-pinned native Gitleaks binary; no provider receives source code.
+
+To audit only backend dependencies:
+
+```sh
+uv run --project backend --frozen --group quality python .github/scripts/dependency_audit.py backend
+```
+
+pip-audit checks a hashed export of the frozen lockfile, including development and
+quality groups, without resolving or installing the audited packages. It queries
+PyPI with package names/versions. OSV additionally checks the universal lockfile
+alongside Android metadata. Findings, incomplete reports and service errors fail
+the gate; no advisories are currently ignored.
 
 ### CI and coverage
 

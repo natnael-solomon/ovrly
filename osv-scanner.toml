@@ -1,0 +1,2 @@
+# No vulnerability exceptions. Any future exception needs an advisory ID,
+# owner, reason and expiry reviewed in the PR.
