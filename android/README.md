@@ -8,7 +8,7 @@ Install JDK 21, Android SDK platform 37, Build Tools 36.0.0 and Platform Tools, 
 
 Open this directory in Android Studio and select JDK 21 for Gradle. For terminal builds, set `JAVA_HOME` and `ANDROID_HOME`. Keep `local.properties` uncommitted and pointed at the same SDK.
 
-From the repository root, build the debug APK, run unit tests and lint:
+From the repository root, build the debug APK and run unit tests, lint and quality gates:
 
 ### Windows
 
@@ -20,12 +20,34 @@ From the repository root, build the debug APK, run unit tests and lint:
 
 ```bash
 cd android
-sh gradlew --no-daemon --console=plain :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+sh gradlew --no-daemon --console=plain :app:assembleDebug :app:testDebugUnitTest :app:lintDebug qualityCheck
 ```
 
 Use a Linux JDK, SDK, checkout and Gradle cache in WSL.
 
 APK: `app/build/outputs/apk/debug/app-debug.apk`, relative to this directory. The build needs no backend or provider credentials.
+
+## Quality and dependencies
+
+`qualityCheck` runs detekt 1.23.8 with Compose rules 0.4.23 and ktlint 1.8.0
+through Gradle plugin 14.2.0. It checks application/test Kotlin and Gradle scripts.
+Detekt runs source analysis at the root, independent of AGP's variant API; it is
+not type-resolved analysis. Existing findings are recorded in `config/*baseline.xml`,
+not silently fixed or excluded. New findings fail; baseline changes need review.
+`app/lint.xml` documents the existing narrow lint annotations and disables no rules.
+`settings.gradle.kts` pins patched transitive build-tool dependencies; those
+overrides do not apply to the app's runtime dependencies.
+
+Gradle verifies dependency bytes against `gradle/verification-metadata.xml`.
+Never bypass a checksum failure. For an intentional dependency update, resolve
+the affected build/check tasks with
+`--refresh-dependencies --write-verification-metadata sha256`. Review the new
+coordinates and hashes against their publishers, then rerun without those flags.
+Include parent POMs/BOMs and Linux CI artifacts; a warm-cache pass alone does not
+prove complete metadata coverage. CI never regenerates baselines or verification metadata.
+
+Repository pre-commit checks also run these gates and audit dependencies; they
+require JDK 21, the SDK, uv and network access. See [shared checks](../WORKFLOW.md#shared-quality-gates).
 
 ## Gallery and demo
 

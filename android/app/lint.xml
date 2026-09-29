@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- No project-wide suppressions. Existing narrow source annotations:
+         MainActivity.hideOverlay: ImplicitSamInstance; stopService matches the component.
+         AndroidVoiceAudio.start: MissingPermission; runtime permission checked before capture.
+         OverlayService.params: RtlHardcoded; dragging uses physical screen coordinates.
+         DragSurface: ViewConstructor, ClickableViewAccessibility; service-only construction,
+         with Compose children owning taps and accessibility actions. -->
+</lint>

@@ -23,6 +23,7 @@ dev = [
 ]
 quality = [
     "actionlint-py==1.7.12.25",
+    "pip-audit==2.10.1",
     "pre-commit==4.6.2",
     "zizmor==1.30.1",
 ]

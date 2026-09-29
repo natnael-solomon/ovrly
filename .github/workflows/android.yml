@@ -74,7 +74,8 @@ jobs:
         working-directory: android
         run: >-
           sh gradlew --no-daemon --console=plain --build-cache --continue
-          :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+          --dependency-verification=strict
+          :app:assembleDebug :app:testDebugUnitTest :app:lintDebug qualityCheck
 
       - name: Build unsigned release fixture
         if: steps.changes.outputs.android == 'true'
@@ -134,5 +135,9 @@ jobs:
             android/app/build/reports/tests/testDebugUnitTest/
             android/app/build/test-results/testDebugUnitTest/*.xml
             android/app/build/reports/lint-results-debug.*
+            android/build/reports/detekt/
+            android/build/reports/dependency-verification/
+            android/build/reports/ktlint/
+            android/app/build/reports/ktlint/
           retention-days: 7
           if-no-files-found: warn
