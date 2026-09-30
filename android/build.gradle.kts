@@ -22,7 +22,7 @@ detekt {
 }
 
 dependencies {
-    detektPlugins("io.nlopez.compose.rules:detekt:0.4.23")
+    detektPlugins("io.nlopez.compose.rules:detekt:0.6.7")
 }
 
 ktlint {
