@@ -37,16 +37,18 @@ class SchemaTest(unittest.TestCase):
                     with self.subTest(path=path.name, field=name, suffix=repr(suffix)):
                         with self.assertRaisesRegex(Invalid, "pattern mismatch"):
                             validate_value("valid-id-1" + suffix, schema, name)
-        self.assertEqual(16, checked)
+        self.assertEqual(17, checked)
 
     def test_sha256_schemas_reject_trailing_whitespace(self):
         clip = read_json(ROOT / "schemas" / "clip.schema.json")
         dataset = read_json(ROOT / "schemas" / "dataset.schema.json")
         schemas = {
             "media.sha256": clip["properties"]["media"]["properties"]["sha256"],
+            "source.sha256": read_json(ROOT / "schemas" / "annotation.schema.json")[
+                "properties"]["occurrences"]["items"]["properties"]["source"]["properties"]["sha256"],
             **dataset["properties"]["files"]["properties"],
         }
-        self.assertEqual(4, len(schemas))
+        self.assertEqual(6, len(schemas))
         for name, schema in schemas.items():
             validate_value("a" * 64, schema, name)
             for suffix in (" ", "\t", "\n", "\r", "\r\n", "\u0085", "\u2028", "\u2029", "\u00a0"):
@@ -284,24 +286,88 @@ class DatasetTest(unittest.TestCase):
 
     def test_annotation_coverage_and_identity(self):
         self.rows["annotations"].pop()
-        self.check_invalid("exactly two")
+        self.check_invalid("exactly one")
         self.setUp()
-        self.rows["annotations"][1]["annotator_id"] = self.rows["annotations"][0]["annotator_id"]
-        self.check_invalid("distinct annotators")
-        self.setUp()
-        self.rows["annotations"][0]["blind_to_model_output"] = False
-        self.check_invalid("blind_to_model_output")
-        self.setUp()
-        self.rows["annotations"][0]["independent"] = False
-        self.check_invalid("independent")
+        duplicate = copy.deepcopy(self.rows["annotations"][0])
+        duplicate["annotation_id"] = "extra-pass"
+        self.rows["annotations"].append(duplicate)
+        self.check_invalid("exactly one")
         self.setUp()
         self.rows["annotations"][0]["clip_id"] = "unknown"
         self.check_invalid("unknown clip")
 
-    def test_trailing_newline_cannot_bypass_annotator_distinctness(self):
+    def test_annotation_provenance_and_ai_attestations(self):
+        for field in ("annotator_kind", "provenance", "blind_to_model_output", "independent"):
+            with self.subTest(missing=field):
+                self.setUp()
+                del self.rows["annotations"][0][field]
+                self.check_invalid("missing required")
+        for field in ("blind_to_model_output", "independent"):
+            with self.subTest(contradictory=field):
+                self.setUp()
+                self.rows["annotations"][0][field] = True
+                self.check_invalid("AI-assisted annotations cannot claim")
+        for change, message in [
+            ({"annotator_kind": "unknown"}, "not in enum"),
+            ({"provenance": " \t"}, "provenance must not be whitespace"),
+            ({"blind_to_model_output": "false"}, "boolean"),
+            ({"independent": 0}, "boolean"),
+        ]:
+            with self.subTest(change=change):
+                self.setUp()
+                self.rows["annotations"][0].update(change)
+                self.check_invalid(message)
+
+    def test_human_and_ai_assisted_passes_allow_same_person_adjudication(self):
+        for kind, independent, blind in (
+            ("ai-assisted", False, False),
+            ("human", False, False),
+            ("human", True, True),
+        ):
+            with self.subTest(kind=kind, independent=independent):
+                self.setUp()
+                annotation = self.rows["annotations"][0]
+                annotation.update(annotator_kind=kind, independent=independent,
+                                  blind_to_model_output=blind)
+                adjudication = self.rows["adjudications"][0]
+                adjudication.update(adjudicator_id=annotation["annotator_id"],
+                                    adjudicator_kind=kind)
+                self.write()
+                self.assertEqual(2, validate_dataset(self.directory))
+
+    def test_single_pass_adjudication_and_provenance_required(self):
+        for annotation_ids, message in [
+            ([], "too few items"),
+            (["example-a-pass-a", "another-pass"], "too many items"),
+            (["example-b-pass-a"], "sole annotation pass"),
+        ]:
+            with self.subTest(annotation_ids=annotation_ids):
+                self.setUp()
+                self.rows["adjudications"][0]["annotation_ids"] = annotation_ids
+                self.check_invalid(message)
+        self.setUp()
+        del self.rows["adjudications"][0]["adjudicator_kind"]
+        self.check_invalid("missing required")
+        self.setUp()
+        self.rows["adjudications"][0]["adjudicator_kind"] = "unknown"
+        self.check_invalid("not in enum")
+        self.setUp()
+        self.rows["adjudications"][0]["review_note"] = " "
+        self.check_invalid("review note")
+
+    def test_trailing_newline_in_annotator_id_is_rejected(self):
         self.rows["annotations"][1]["annotator_id"] = (
             self.rows["annotations"][0]["annotator_id"] + "\n")
         self.check_invalid("annotator_id: pattern mismatch")
+
+    def test_previous_or_mixed_schema_versions_are_rejected(self):
+        self.manifest["schema_version"] = 1
+        self.check_invalid("schema_version")
+        for table in TABLES:
+            with self.subTest(table=table):
+                self.setUp()
+                self.rows[table][0]["schema_version"] = 1
+                self.check_invalid("schema_version")
 
     def test_trailing_newline_cannot_bypass_split_isolation(self):
         for field in ("creator_ids", "topic_ids", "repost_group_id"):
@@ -325,11 +391,11 @@ class DatasetTest(unittest.TestCase):
         self.check_invalid("duplicate occurrence")
 
     def test_eligibility_and_gold_references(self):
-        self.rows["annotations"][0]["occurrences"][0]["eligible"] = False
+        self.rows["annotations"][0]["occurrences"][0]["eligible"] = True
         self.check_invalid("eligibility")
         self.setUp()
-        self.rows["adjudications"][0]["annotation_ids"][1] = "other-pass"
-        self.check_invalid("both passes")
+        self.rows["adjudications"][0]["annotation_ids"][0] = "other-pass"
+        self.check_invalid("sole annotation pass")
         self.setUp()
         self.rows["adjudications"][0]["decisions"][0]["references"][0]["occurrence_id"] = "unknown"
         self.check_invalid("unknown occurrence")
@@ -339,6 +405,14 @@ class DatasetTest(unittest.TestCase):
         self.setUp()
         self.rows["adjudications"].pop()
         self.check_invalid("every clip")
+
+    def test_single_pass_corrections_preserve_original_annotation(self):
+        annotation = copy.deepcopy(self.rows["annotations"][0])
+        self.assertFalse(annotation["occurrences"][0]["eligible"])
+        self.assertTrue(self.rows["adjudications"][0]["decisions"][0]["eligible"])
+        self.write()
+        self.assertEqual(2, validate_dataset(self.directory))
+        self.assertEqual(annotation, self.rows["annotations"][0])
 
     def test_duplicate_adjudication_and_empty_resolution(self):
         duplicate = copy.deepcopy(self.rows["adjudications"][0])
@@ -382,6 +456,24 @@ class DatasetTest(unittest.TestCase):
                 self.setUp()
                 self.frozen_fixture()
                 change(self.rows["clips"][0])
+                self.check_invalid(message, frozen=True)
+
+    def test_frozen_rejects_draft_only_fields(self):
+        for change, message in (
+            (lambda: self.rows["clips"][0]["rights"].update(basis="pending"), "pending rights"),
+            (lambda: self.rows["clips"][0]["rights"].update(clearance="pending"), "pending rights"),
+            (lambda: self.rows["clips"][0].update(language="unverified"), "unverified language"),
+            (lambda: self.rows["annotations"][0].update(review_status="provisional"), "provisional review"),
+            (lambda: self.rows["adjudications"][0].update(review_status="provisional"), "provisional review"),
+            (lambda: self.rows["annotations"][0]["occurrences"][0].update(modality="unverified"), "unverified modality"),
+            (lambda: self.rows["adjudications"][0]["decisions"][0].update(modality="unverified"), "unverified modality"),
+            (lambda: self.rows["annotations"][0]["occurrences"][0].update(timing_basis="caption-envelope"), "provisional timing"),
+            (lambda: self.rows["adjudications"][0]["decisions"][0].update(timing_basis="user-segment"), "provisional timing"),
+        ):
+            with self.subTest(message=message):
+                self.setUp()
+                self.frozen_fixture()
+                change()
                 self.check_invalid(message, frozen=True)
 
     def test_media_paths_and_cross_split_duplicates(self):

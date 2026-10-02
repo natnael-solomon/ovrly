@@ -1,9 +1,13 @@
 # Evaluation contract and review workflow
 
-**Status: infrastructure only.** [RES-05](https://github.com/natnael-solomon/ovrly/issues/48)
-prepares [RES-01](https://github.com/natnael-solomon/ovrly/issues/8); it does not
-complete it. `examples/` contains invented text, not clips, consent, independent
-human judgments, or measured results. Do not report accuracy or latency from it.
+**Status: contract plus a provisional eleven-clip draft.**
+[RES-06](https://github.com/natnael-solomon/ovrly/issues/65) adds
+[`draft/`](draft/README.md) to the infrastructure delivered by
+[RES-05](https://github.com/natnael-solomon/ovrly/issues/48). It does not complete
+[RES-01](https://github.com/natnael-solomon/ovrly/issues/8).
+`examples/` contains invented text, not clips, consent, independent human
+judgments, or measured results. Neither examples nor draft validation yields
+accuracy or latency measurements.
 
 The real set will contain **10-20 English clips**, with live-style clips at most
 180,000 ms and shared-style clips at most 600,000 ms. There is no training set
@@ -19,6 +23,8 @@ Run from the repository root (use `python3` if that is your Python executable):
 ```text
 python evaluation/validate.py
 python -m unittest discover -s evaluation/tests -p "test_*.py" -v
+python evaluation/validate.py evaluation/draft --draft
+python evaluation/validate.py evaluation/draft --draft --media-root evaluation/media
 python evaluation/validate.py evaluation/corpus --frozen
 python evaluation/validate.py evaluation/corpus --frozen --media-root evaluation/media
 ```
@@ -34,12 +40,13 @@ Each dataset directory contains:
 
 | File | Contract |
 | --- | --- |
-| `dataset.json` | Schema version, dataset version, `examples`/`frozen` kind, byte hashes of all three JSONL files |
-| `clips.jsonl` | One clip per line: provenance, rights, English language, duration/style, grouping, split, media identity, coverage |
-| `annotations.jsonl` | Exactly two independently completed whole-clip passes, each with its own occurrence IDs |
-| `adjudications.jsonl` | One final review per clip, references to both passes, original-to-gold mapping and resolution notes |
+| `dataset.json` | Schema version, dataset version, `examples`/`draft`/`frozen` kind, byte hashes of all included JSONL files; explicit limitations required for drafts |
+| `clips.jsonl` | One clip per line: provenance, rights, language, duration/style, grouping, split, media identity, coverage |
+| `annotations.jsonl` | Exactly one whole-clip occurrence annotation pass per clip, with occurrence IDs and explicit review provenance |
+| `adjudications.jsonl` | One final review per clip, referencing its sole pass, with reviewer provenance, original-to-reference mapping and resolution notes |
+| `main-arguments.jsonl` | Required for drafts, optional otherwise: exactly one separately attributed assessment per clip, original human note where present, evidence and source-reading limits |
 
-The version-1 JSON Schemas are in `schemas/`. The dependency-free validator
+The version-2 JSON Schemas are in `schemas/`. The dependency-free validator
 implements only the keywords used there: metadata (`$schema`, `title`,
 `description`), `type`, `const`, `enum`, object properties/required/boolean
 additionalProperties, array items/size/uniqueness, string length/pattern, and
@@ -118,17 +125,26 @@ paraphrases and topic identity manually: hashes and labels cannot detect them.
 The validator enforces declared group isolation; it cannot prove labels truthful.
 No split ratio is prescribed for this small set.
 
-## 3. Two independent annotation passes
+## 3. One provenance-labeled annotation pass
 
-Before either person sees the other's annotations **or any model output**,
-give each the same approved clip and these instructions. Use two different
-pseudonymous annotator IDs. Record `independent: true` and
-`blind_to_model_output: true` only when that process actually occurred.
-These attestations are workflow evidence, not proof supplied by software.
+Create exactly one whole-clip occurrence pass. A second annotator and a
+model-blind human pass are not required. Record a pseudonymous `annotator_id`,
+`annotator_kind` (`human` or `ai-assisted`), and nonempty `provenance` describing
+the actual source material, drafting method, model/tool where known, and human
+review performed or not performed. AI-generated drafts, including drafts later
+edited or accepted by a person, remain `ai-assisted`; selection is not human
+authorship or proof of whole-clip review.
 
-Each pass lists every candidate factual occurrence and relevant exclusions.
-An empty `occurrences` array means the person reviewed the whole clip and found
-none; a missing pass does not mean no claims. Keep repeated occurrences rather
+Retain truthful boolean `independent` and `blind_to_model_output` attestations.
+Here `independent` means independently human-produced, not merely a separate
+file or AI run. Both must be `false` for an AI-assisted pass. A human-authored
+pass may also use `false` when it was not independent or model-blind. Software
+checks declared consistency, not the truth of the review history.
+
+The pass lists every candidate factual occurrence and relevant exclusions.
+Outside draft mode, an empty `occurrences` array means the recorded workflow
+reviewed the whole clip and found none. A provisional empty draft does not
+certify this; a missing pass never means no claims. Keep repeated occurrences rather
 than deduplicating them before review. Use `[start_ms, end_ms)` relative to the
 exact media file, with `0 <= start < end <= duration`. Record speech and screen
 text independently when their intervals differ; use `both` only when the same
@@ -153,34 +169,107 @@ align eligibility decisions with AC03-AC06 and RFC section 17. RES-02 may extend
 this contract with verbatim ASR transcripts and OCR boxes; current normalized
 claim text is **not** a WER or full-screen OCR reference.
 
-## 4. Adjudicate without erasing disagreements
+Main-argument assessments may be retained as separately attributed
+companion notes. They are not another occurrence pass and do not establish
+that every occurrence was individually reviewed. Broad caption windows
+are useful in working drafts but must be labeled approximate; do not infer
+word-level timing or report unsupported timestamp accuracy from them.
 
-Preserve both original passes unchanged. The adjudicator may be a third reviewer
-or a documented consensus led by one original reviewer; the issue requires two
-independent initial passes, not a mandatory third person.
+## 4. Adjudicate the single pass without erasing corrections
 
-One adjudication references both passes, including empty ones. Each gold
+Preserve the original pass unchanged. One final adjudication is still required
+for each clip, including an empty pass. The same reviewer or workflow
+may perform it; another annotator is not required. Record `adjudicator_id`,
+`adjudicator_kind` (`human` or `ai-assisted`), and the actual review method and
+limitations in `review_note`. Adjudication does not change the original pass's
+authorship or independence.
+
+One adjudication references the sole pass in `annotation_ids`. Each final
 decision retains source references, a final interval/modality/proposition,
 eligibility/reason and a nonempty `resolution`. Retain excluded candidates as
 ineligible decisions rather than deleting them. Every original occurrence must
 be referenced. Different boundaries, missing occurrences, eligibility and text
-disagreements remain recoverable from the original rows and resolution.
+corrections remain recoverable from the original rows and resolution.
 
-A gold decision may have one reference for a missed occurrence or none for an
-adjudicator-discovered occurrence; explicitly explain discoveries. Merges may
+A final decision normally references its original occurrence, or has no
+reference for an adjudicator-discovered occurrence; explicitly explain discoveries. Merges may
 reference multiple occurrences; splits may reuse an original reference across
 gold decisions, with an explanation. Use a common `proposition_id` and identical
 normalized text for repeated occurrences of the same proposition in a clip.
-An empty `decisions` array plus `review_note` confirms reviewed no-claim gold.
+Outside a provisional draft, an empty `decisions` array plus `review_note`
+confirms reviewed no-claim gold.
 The `no-assessable-claims` tag must agree with the final eligible decisions.
+
+The historical `gold_id` field names identify final reference decisions; they
+do not certify human authorship or factual truth. Report reference-generation
+limitations with any evaluation results. A single-pass protocol cannot measure
+inter-annotator agreement.
+
+### Version-1 migration and reduced-scope work
+
+Version 2 intentionally replaces the two-pass protocol with one pass plus
+adjudication, tracked in [the RES-01 follow-up](https://github.com/natnael-solomon/ovrly/issues/65).
+The validator rejects version-1 or mixed-version snapshots rather than
+silently changing their meaning. To migrate an existing snapshot, preserve it,
+explicitly select the source pass, record actual provenance, regenerate final
+decisions/references and review notes, and publish a new dataset version with
+`schema_version: 2` on the manifest and all rows and new byte hashes. Do not
+just drop a reviewer, overwrite historical attestations or relabel AI output.
+There is no automatic migration or legacy-validation mode.
+
+This protocol change does not waive frozen-corpus rights, coverage, media or
+split safeguards. Missing-scenario acquisition and rights/credit completion
+are outside the reduced-scope follow-up, but remain required for the full
+RES-01 freeze. Keep incomplete exports in a separately labeled working draft;
+neither `examples` nor `frozen` is a valid status for incomplete real data.
+
+### Draft metadata, not freeze approval
+
+Use `kind: draft` and explicitly request `--draft`. A draft requires real source
+URLs, local media identities/hashes, one selected pass and one adjudication per
+clip, all original references, valid intervals and leakage-safe dev/test groups.
+It also requires nonempty manifest `limitations` and `main-arguments.jsonl`,
+whose byte hash, schema and exact clip coverage are checked.
+
+Declare `rights.clearance` as `pending` or `cleared`; `rights.basis: pending`
+is available when permission evidence is absent. Pending basis cannot claim
+clearance or redistribution. A known license with unfinished credit obligations
+can retain its license basis and pending clearance. These are not permissions.
+Draft coverage can be incomplete. An empty coverage array means unconfirmed,
+not that the clip has none of the listed scenarios.
+
+Both pass and adjudication require `review_status: provisional|complete`.
+Keep provisional status whenever whole-media review is incomplete, even after
+reconciling every supplied row. `language: unverified` and occurrence
+`modality: unverified` are draft-only values; a complete review cannot certify
+unknown modality or unknown clip language. A provisional pass or adjudication
+cannot use the `no-assessable-claims` coverage tag, even with zero decisions.
+The `user-reported-negative` main-argument basis is likewise unconfirmed.
+
+Every draft source occurrence requires a `source` object (opaque reference,
+SHA-256 and source units), and both originals and decisions require
+`timing_basis`: `caption-envelope`, `user-segment`, `subtitle-cue`,
+`user-card-interval`, or `media-reviewed`. Source hashes pin inputs but do not
+prove accurate transcription or visibility; the validator does not possess
+or verify those source files. Corrected input hashes belong in resolution
+notes while the original pass retains the input hash used to draft it.
+
+Frozen validation still rejects pending rights/credits, provisional review,
+unverified language/modality, provisional timing bases and an unconfirmed
+negative assessment. It still requires all coverage scenarios and 10-20 clips.
+Do not promote a draft by deleting limitations or changing flags: complete the
+underlying review, retain the historical draft, then create a new snapshot
+with documented corrections and approvals. Neither schema validation nor
+the word "complete" can attest that a person actually performed that work.
 
 ## 5. Freeze and hand off the real corpus
 
 1. Supply 10-20 real English rights-cleared clips, both route types as suitable,
    all coverage tags, and nonempty leakage-safe dev/test splits. Obtain human
    sign-off on provenance, coverage and near-duplicate isolation.
-2. Complete both independent passes and adjudication for every clip. Keep
-   disagreements; do not reuse these examples as supposed human annotations.
+2. Complete one provenance-labeled pass and final adjudication for every clip.
+   Keep original decisions and correction history; do not reuse these examples
+   as real annotations or claim review that did not occur.
 3. Store the approved JSONL metadata under `evaluation/corpus/`, set
    `synthetic: false` everywhere and `kind: frozen` in `dataset.json`. Use an
    immutable dataset version. Hash each media file and then each finalized
@@ -193,11 +282,11 @@ The `no-assessable-claims` tag must agree with the final eligible decisions.
    version and explicit change history/re-review; do not silently refresh hashes
    to hide edits. JSON hashes detect inconsistency, not deliberate rewrites.
 
-CI always runs validator tests and checks the examples. If `evaluation/corpus/`
+CI always runs validator tests and checks the examples and draft metadata. If `evaluation/corpus/`
 exists, it also validates frozen **metadata**, without fetching media or running
 models. Structural validation is not evaluation on the holdout. Keep test
 labels out of prompt-tuning and routine performance regression; RES-03 scores
 dev in CI, and formal held-out evaluation is a separately authorized run.
 There is no scoring harness, threshold, ASR/OCR benchmark or network service here.
-RES-01 remains open until the actual reviewed set is delivered; only RES-05 can
-be closed by this infrastructure.
+RES-01 remains open until the actual reviewed set is delivered. RES-06 delivers
+the reduced-scope draft, not the parent freeze or pipeline.

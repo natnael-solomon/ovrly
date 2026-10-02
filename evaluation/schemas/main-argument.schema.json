@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Main-argument assessment v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "clip_id", "basis", "proposition", "conclusion", "human_note", "supporting_evidence", "qualifying_evidence", "weighting", "sources", "provenance"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "clip_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
+    "basis": {"enum": ["human-note-with-assessment", "assessment", "user-reported-negative"]},
+    "proposition": {"type": "string"},
+    "conclusion": {"type": "string", "minLength": 1},
+    "human_note": {"type": ["string", "null"], "minLength": 1},
+    "supporting_evidence": {"type": "string"},
+    "qualifying_evidence": {"type": "string"},
+    "weighting": {"type": "string", "minLength": 1},
+    "provenance": {"type": "string", "minLength": 1},
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["title", "url", "read_scope", "limitations"],
+        "properties": {
+          "title": {"type": "string", "minLength": 1},
+          "url": {"type": "string", "pattern": "^https://[^\\s]+$"},
+          "read_scope": {"type": "string", "minLength": 1},
+          "limitations": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

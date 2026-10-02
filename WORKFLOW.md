@@ -103,7 +103,7 @@ invocation.
 
 **Evaluation contract checks** runs separately on every PR, push to `main` and
 manual dispatch, without workflow-level path filters. It tests the Python
-standard-library validator and synthetic examples; if a future
+standard-library validator, synthetic examples and explicit draft metadata; if a future
 `evaluation/corpus/` is present it also checks frozen metadata, not media bytes
 or pipeline performance. It uses no provider keys or downloads. This check is
 not the future RES-03 evaluation-regression gate and does not imply RES-01 is

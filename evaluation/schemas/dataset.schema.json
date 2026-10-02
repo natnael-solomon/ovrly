@@ -1,19 +1,21 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Evaluation snapshot v1",
+  "title": "Evaluation snapshot v2",
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "dataset_version", "kind", "files"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "dataset_version": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$"},
-    "kind": {"enum": ["examples", "frozen"]},
+    "kind": {"enum": ["examples", "draft", "frozen"]},
+    "limitations": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
     "files": {
       "type": "object", "additionalProperties": false,
       "required": ["clips.jsonl", "annotations.jsonl", "adjudications.jsonl"],
       "properties": {
         "clips.jsonl": {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"},
         "annotations.jsonl": {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"},
-        "adjudications.jsonl": {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"}
+        "adjudications.jsonl": {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"},
+        "main-arguments.jsonl": {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"}
       }
     }
   }
