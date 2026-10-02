@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Evaluation clip v1",
+  "title": "Evaluation clip v2",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "clip_id", "synthetic", "language", "style", "duration_ms", "provider", "source_url", "creator_ids", "topic_ids", "repost_group_id", "split", "rights", "media", "coverage"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "clip_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
     "synthetic": {"type": "boolean"},
-    "language": {"const": "en"},
+    "language": {"enum": ["en", "unverified"]},
     "style": {"enum": ["live", "shared"]},
     "duration_ms": {"type": "integer", "minimum": 1, "maximum": 600000},
     "provider": {"type": "string", "minLength": 1},
@@ -22,7 +22,8 @@
       "additionalProperties": false,
       "required": ["basis", "reference", "attribution", "allows_redistribution"],
       "properties": {
-        "basis": {"enum": ["synthetic", "consent", "license", "public-domain"]},
+        "basis": {"enum": ["synthetic", "consent", "license", "public-domain", "pending"]},
+        "clearance": {"enum": ["pending", "cleared"]},
         "reference": {"type": "string", "minLength": 1},
         "attribution": {"type": "string", "minLength": 1},
         "allows_redistribution": {"type": "boolean"}

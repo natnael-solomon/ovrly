@@ -1,17 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Independent whole-clip annotation pass v1",
+  "title": "Single provenance-labeled whole-clip annotation pass v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "annotation_id", "clip_id", "synthetic", "annotator_id", "blind_to_model_output", "independent", "occurrences"],
+  "required": ["schema_version", "annotation_id", "clip_id", "synthetic", "annotator_id", "annotator_kind", "provenance", "blind_to_model_output", "independent", "occurrences"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "annotation_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
     "clip_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
     "synthetic": {"type": "boolean"},
     "annotator_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
-    "blind_to_model_output": {"const": true},
-    "independent": {"const": true},
+    "annotator_kind": {"enum": ["human", "ai-assisted"]},
+    "provenance": {"type": "string", "minLength": 1},
+    "blind_to_model_output": {"type": "boolean"},
+    "independent": {"type": "boolean"},
+    "review_status": {"enum": ["provisional", "complete"]},
     "occurrences": {
       "type": "array",
       "items": {
@@ -21,7 +24,17 @@
           "occurrence_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"},
           "start_ms": {"type": "integer", "minimum": 0},
           "end_ms": {"type": "integer", "minimum": 1},
-          "modality": {"enum": ["speech", "on-screen-text", "both"]},
+          "modality": {"enum": ["speech", "on-screen-text", "both", "unverified"]},
+          "timing_basis": {"enum": ["caption-envelope", "user-segment", "subtitle-cue", "user-card-interval", "media-reviewed"]},
+          "source": {
+            "type": "object", "additionalProperties": false,
+            "required": ["reference", "sha256", "units"],
+            "properties": {
+              "reference": {"type": "string", "minLength": 1},
+              "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"},
+              "units": {"type": "string", "minLength": 1}
+            }
+          },
           "eligible": {"type": "boolean"},
           "proposition": {"type": "string", "minLength": 1},
           "reason": {"enum": ["factual-claim", "factual-premise", "opinion", "quoted-not-endorsed", "insufficient-context", "not-a-claim"]}

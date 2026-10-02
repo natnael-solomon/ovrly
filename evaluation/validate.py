@@ -181,12 +181,18 @@ def load_rows(path, schema, id_key):
     return rows, locations
 
 
-def check_occurrence(row, duration, location):
+def check_occurrence(row, duration, location, *, draft=False):
     require(0 <= row["start_ms"] < row["end_ms"] <= duration, location,
             "interval must satisfy 0 <= start_ms < end_ms <= clip duration")
     factual = row["reason"] in {"factual-claim", "factual-premise"}
     require(row["eligible"] == factual, location, "eligibility and reason disagree")
     require(bool(row["proposition"].strip()), location, "proposition must not be whitespace")
+    require(draft or row["modality"] != "unverified", location, "unverified modality is draft-only")
+    if draft:
+        require("timing_basis" in row, location, "draft occurrences require timing_basis")
+    elif "timing_basis" in row:
+        require(row["timing_basis"] == "media-reviewed", location,
+                "provisional timing is draft-only")
 
 
 def check_media_path(value, location):
@@ -197,15 +203,22 @@ def check_media_path(value, location):
     return path
 
 
-def validate_dataset(directory, *, frozen=False, media_root=None):
+def validate_dataset(directory, *, frozen=False, draft=False, media_root=None):
+    require(not (frozen and draft), directory, "draft and frozen modes are mutually exclusive")
     schemas = {}
-    for name in ("dataset", "clip", "annotation", "adjudication"):
+    for name in ("dataset", "clip", "annotation", "adjudication", "main-argument"):
         schemas[name] = read_json(ROOT / "schemas" / f"{name}.schema.json")
         check_schema(schemas[name], f"{name}.schema.json")
     manifest = read_json(directory / "dataset.json")
     validate_value(manifest, schemas["dataset"], str(directory / "dataset.json"))
-    require(manifest["kind"] == ("frozen" if frozen else "examples"), directory,
+    require(manifest["kind"] == ("frozen" if frozen else "draft" if draft else "examples"), directory,
             "dataset kind does not match requested mode")
+    if draft:
+        require(bool(manifest.get("limitations")), directory, "draft requires explicit limitations")
+        require(all(note.strip() for note in manifest["limitations"]), directory,
+                "draft limitations must not be whitespace")
+        require("main-arguments.jsonl" in manifest["files"], directory,
+                "draft requires main-arguments.jsonl")
     data, locations = {}, {}
     for table, (schema_name, id_key) in TABLES.items():
         path = directory / f"{table}.jsonl"
@@ -222,11 +235,23 @@ def validate_dataset(directory, *, frozen=False, media_root=None):
     media_paths = set()
     for clip_id, clip in clips.items():
         loc = locations["clips"][clip_id]
-        require(clip["synthetic"] is not frozen, loc, "synthetic status does not match dataset kind")
+        require(clip["synthetic"] is not (frozen or draft), loc, "synthetic status does not match dataset kind")
+        require(draft or clip["language"] == "en", loc + ".language",
+                "unverified language is draft-only")
         require(clip["duration_ms"] <= (180000 if clip["style"] == "live" else 600000),
                 loc + ".duration_ms", "clip exceeds style duration limit")
-        require((clip["rights"]["basis"] == "synthetic") is not frozen, loc + ".rights",
+        require((clip["rights"]["basis"] == "synthetic") is not (frozen or draft), loc + ".rights",
                 "rights basis does not match dataset kind")
+        if draft:
+            require("clearance" in clip["rights"], loc + ".rights", "draft requires explicit clearance")
+        else:
+            require(clip["rights"]["basis"] != "pending"
+                    and clip["rights"].get("clearance", "cleared") == "cleared", loc + ".rights",
+                    "pending rights or credits are draft-only")
+        require(clip["rights"]["basis"] != "pending"
+                or (clip["rights"].get("clearance") == "pending"
+                    and not clip["rights"]["allows_redistribution"]), loc + ".rights",
+                "pending rights cannot claim clearance or redistribution")
         for field in ("reference", "attribution"):
             require(bool(clip["rights"][field].strip()), loc + ".rights." + field,
                     "rights evidence must not be whitespace")
@@ -238,7 +263,7 @@ def validate_dataset(directory, *, frozen=False, media_root=None):
                         f"split leakage for {group}")
                 groups[key] = clip["split"]
         media = clip["media"]
-        if frozen:
+        if frozen or draft:
             require(clip["source_url"] is not None, loc + ".source_url", "real source URL required")
             require(media["path"] is not None and media["sha256"] is not None, loc + ".media",
                     "real media path and SHA-256 required")
@@ -274,18 +299,34 @@ def validate_dataset(directory, *, frozen=False, media_root=None):
         clip_id = annotation["clip_id"]
         require(clip_id in clips, loc + ".clip_id", "unknown clip")
         require(annotation["synthetic"] == clips[clip_id]["synthetic"], loc, "synthetic status mismatch")
+        require(bool(annotation["provenance"].strip()), loc + ".provenance",
+                "annotation provenance must not be whitespace")
+        if annotation["annotator_kind"] == "ai-assisted":
+            require(not annotation["blind_to_model_output"] and not annotation["independent"],
+                    loc, "AI-assisted annotations cannot claim model blindness or independent human authorship")
+        if draft:
+            require("review_status" in annotation, loc, "draft requires explicit review_status")
+        else:
+            require(annotation.get("review_status", "complete") == "complete", loc,
+                    "provisional review is draft-only")
         occurrences = {}
         for index, occurrence in enumerate(annotation["occurrences"]):
             occurrence_loc = f"{loc}.occurrences[{index}]"
             require(occurrence["occurrence_id"] not in occurrences, occurrence_loc, "duplicate occurrence ID")
-            check_occurrence(occurrence, clips[clip_id]["duration_ms"], occurrence_loc)
+            check_occurrence(occurrence, clips[clip_id]["duration_ms"], occurrence_loc, draft=draft)
+            if draft:
+                require("source" in occurrence, occurrence_loc, "draft occurrences require source provenance")
+                for field in ("reference", "units"):
+                    require(bool(occurrence["source"][field].strip()), occurrence_loc,
+                            "source provenance must not be whitespace")
+            if annotation.get("review_status") == "complete":
+                require(occurrence["modality"] != "unverified", occurrence_loc,
+                        "complete review cannot retain unverified modality")
             occurrences[occurrence["occurrence_id"]] = occurrence
         passes[clip_id][annotation_id] = occurrences
     for clip_id, reviews in passes.items():
         loc = locations["clips"][clip_id]
-        require(len(reviews) == 2, loc, "exactly two whole-clip annotation passes required")
-        require(len({data["annotations"][a]["annotator_id"] for a in reviews}) == 2,
-                loc, "two distinct annotators required")
+        require(len(reviews) == 1, loc, "exactly one whole-clip annotation pass required")
 
     adjudicated = set()
     for adjudication_id, adjudication in data["adjudications"].items():
@@ -296,15 +337,23 @@ def validate_dataset(directory, *, frozen=False, media_root=None):
         adjudicated.add(clip_id)
         require(adjudication["synthetic"] == clips[clip_id]["synthetic"], loc, "synthetic status mismatch")
         require(set(adjudication["annotation_ids"]) == set(passes[clip_id]), loc + ".annotation_ids",
-                "must reference both passes for this clip")
+                "must reference the sole annotation pass for this clip")
         require(bool(adjudication["review_note"].strip()), loc, "review note must not be whitespace")
+        if draft:
+            require("review_status" in adjudication, loc, "draft requires explicit review_status")
+        else:
+            require(adjudication.get("review_status", "complete") == "complete", loc,
+                    "provisional review is draft-only")
         expected = {(a, o) for a, occurrences in passes[clip_id].items() for o in occurrences}
         used, gold_ids, propositions = set(), set(), {}
         for index, decision in enumerate(adjudication["decisions"]):
             decision_loc = f"{loc}.decisions[{index}]"
             require(decision["gold_id"] not in gold_ids, decision_loc, "duplicate gold ID")
             gold_ids.add(decision["gold_id"])
-            check_occurrence(decision, clips[clip_id]["duration_ms"], decision_loc)
+            check_occurrence(decision, clips[clip_id]["duration_ms"], decision_loc, draft=draft)
+            if adjudication.get("review_status") == "complete":
+                require(decision["modality"] != "unverified", decision_loc,
+                        "complete review cannot retain unverified modality")
             require(bool(decision["resolution"].strip()), decision_loc, "resolution must not be whitespace")
             proposition_id = decision["proposition_id"]
             require(proposition_id not in propositions
@@ -317,24 +366,60 @@ def validate_dataset(directory, *, frozen=False, media_root=None):
                 used.add(key)
         require(used == expected, loc + ".decisions", "every original occurrence needs an adjudication reference")
         has_claims = any(d["eligible"] for d in adjudication["decisions"])
-        require(("no-assessable-claims" in clips[clip_id]["coverage"]) == (not has_claims), loc,
-                "no-assessable-claims tag must match adjudicated gold")
+        provisional = draft and (
+            adjudication["review_status"] == "provisional"
+            or any(data["annotations"][a]["review_status"] == "provisional" for a in passes[clip_id])
+        )
+        if provisional:
+            require("no-assessable-claims" not in clips[clip_id]["coverage"], loc,
+                    "provisional review cannot certify no-assessable-claims")
+        else:
+            require(clips[clip_id]["language"] != "unverified", loc,
+                    "complete review cannot retain unverified language")
+            require(("no-assessable-claims" in clips[clip_id]["coverage"]) == (not has_claims), loc,
+                    "no-assessable-claims tag must match adjudicated gold")
     require(adjudicated == set(clips), directory, "every clip requires adjudication")
+    if "main-arguments.jsonl" in manifest["files"]:
+        path = directory / "main-arguments.jsonl"
+        require(digest(path) == manifest["files"][path.name], path, "snapshot SHA-256 mismatch")
+        arguments, argument_locations = load_rows(path, schemas["main-argument"], "clip_id")
+        require(set(arguments) == set(clips), path, "main arguments must cover exactly all clips")
+        for clip_id, argument in arguments.items():
+            loc = argument_locations[clip_id]
+            for field in ("conclusion", "weighting", "provenance"):
+                require(bool(argument[field].strip()), loc, f"{field} must not be whitespace")
+            require((argument["human_note"] is not None)
+                    == (argument["basis"] == "human-note-with-assessment"), loc,
+                    "human note must match assessment basis")
+            if argument["human_note"] is not None:
+                require(bool(argument["human_note"].strip()), loc, "human note must not be whitespace")
+            if not draft:
+                require(argument["basis"] != "user-reported-negative", loc,
+                        "unconfirmed negative assessment is draft-only")
+            elif argument["basis"] == "user-reported-negative":
+                require("no-assessable-claims" not in clips[clip_id]["coverage"], loc,
+                        "unconfirmed negative assessment cannot certify no-assessable-claims")
     return len(clips)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path, nargs="?", default=ROOT / "examples")
-    parser.add_argument("--frozen", action="store_true", help="require the real 10-20-clip corpus")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--frozen", action="store_true", help="require the real 10-20-clip corpus")
+    mode.add_argument("--draft", action="store_true", help="check real working data without freeze approval")
     parser.add_argument("--media-root", type=Path, help="also verify local media bytes (never uploaded)")
     args = parser.parse_args(argv)
     try:
-        count = validate_dataset(args.directory, frozen=args.frozen, media_root=args.media_root)
+        count = validate_dataset(args.directory, frozen=args.frozen, draft=args.draft, media_root=args.media_root)
     except (Invalid, OSError, UnicodeError, RecursionError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    if args.frozen:
+    if args.draft:
+        print(f"Valid draft metadata: {count} clips. NOT frozen or benchmark-ready. "
+              + ("Media hashes verified." if args.media_root else "Media bytes NOT verified; supply --media-root.")
+              + " Rights, coverage and review limitations remain.")
+    elif args.frozen:
         print(f"Valid frozen metadata: {count} clips. "
               + ("Media hashes verified." if args.media_root else "Media bytes NOT verified; supply --media-root.")
               + " Human rights/review evidence still requires sign-off.")

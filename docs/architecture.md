@@ -67,9 +67,11 @@ Hosted model weights stay with the provider. Credentials stay on the server; pro
 
 ## Evaluation-data boundary
 
-[`evaluation/`](../evaluation/README.md) defines JSON Schema/JSONL contracts for provenance, two independent whole-clip annotation passes and adjudicated claim occurrences. The standard-library validator checks snapshot integrity, references, intervals and declared creator/topic/repost isolation across dev/test.
+[`evaluation/`](../evaluation/README.md) defines version-2 JSON Schema/JSONL contracts for provenance, one whole-clip occurrence pass and a final adjudication per clip. A second reviewer or model-blind human annotation is not required; actual authorship and review limitations remain explicit. The standard-library validator checks snapshot integrity, references, intervals and declared creator/topic/repost isolation across dev/test.
 
-Synthetic examples test the contract; RES-01 still requires the reviewed 10-20-clip corpus. Metadata-only CI never fetches media or calls providers. Local media verification additionally checks byte hashes. Rights, independent review, scenario coverage and undeclared leakage require human sign-off. Neither mode scores a pipeline; normalized claims are not ASR transcripts or OCR-box ground truth.
+The eleven-clip RES-06 `draft/` snapshot has explicit draft validation, per-review status, source/timing provenance and separate main-argument assessments. Pending rights, uncertain modality/language and incomplete coverage do not pass frozen validation. Synthetic examples only test the contract; RES-01 still requires the reviewed 10-20-clip corpus.
+
+Metadata-only CI never fetches media or calls providers. Local media verification additionally checks byte hashes. Rights, declared review provenance, scenario coverage and undeclared leakage require human sign-off. No validation mode scores a pipeline; normalized claims are not ASR transcripts or OCR-box ground truth.
 
 ## Development ownership
 

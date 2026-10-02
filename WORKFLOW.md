@@ -50,7 +50,7 @@ Record commands and outcomes, remaining limitations and, when applicable, device
 | Workflow | What it checks |
 | --- | --- |
 | **Android checks** | On PRs to any branch, pushes to `main` and manual runs: Ubuntu 24.04, JDK 21, wrapper-based debug build/tests/lint, detekt/Compose/ktlint, unsigned release build with a ledger-style code, and real `apksigner`/`aapt2` verification using a temporary fixture key. Dependencies are checksum-verified; no production key or APK upload. |
-| **Evaluation contract checks** | On PRs, pushes to `main` and manual runs: standard-library validator tests, synthetic examples and frozen metadata if `evaluation/corpus/` exists. No media downloads, provider keys or pipeline scoring. See [evaluation](evaluation/README.md). |
+| **Evaluation contract checks** | On PRs, pushes to `main` and manual runs: standard-library validator tests, synthetic examples, explicit draft metadata and frozen metadata if `evaluation/corpus/` exists. No media downloads, provider keys or pipeline scoring. See [evaluation](evaluation/README.md). |
 | **Backend checks** | On PRs to any branch, edits/retargeting, `main` pushes and manual runs: change-detection tests, frozen Python 3.11/uv environment, Ruff, strict MyPy, PostgreSQL 16, Alembic upgrade/drift checks and service coverage. Validation has a 15-minute timeout. |
 | **Quality checks** | On every PR target/edit, `main` push and manual run: shared pre-commit Android/backend gates, workflow analysis, secret and dependency scanning, and negative fixtures. Includes JDK/SDK setup; no path skips, PostgreSQL or product-provider calls. Thirty-minute timeout. |
 

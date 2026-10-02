@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "dataset_version": "res06-draft-2026-10-02",
+  "kind": "draft",
+  "limitations": [
+    "Reduced-scope RES-06 draft: not frozen, rights-cleared, exhaustive media gold or benchmark results.",
+    "One occurrence pass and one documented final reconciliation per clip; both stages are AI-assisted, not independent human review.",
+    "Four human main-argument notes are retained verbatim and distinguished from the evidence-weighted assessment.",
+    "Later self-correction, quoted misinformation and withdrawn/retracted-source acquisition are deferred to RES-01.",
+    "Coverage arrays are empty pending whole-media scenario sign-off, not a declaration that those scenarios are absent.",
+    "Social permission evidence, embedded credits and clip-m archival rights remain unresolved. No redistribution or hosted upload authorization is granted.",
+    "Speech timings use caption envelopes or supplied subtitle windows; card windows are user-reported. No word/frame precision is claimed.",
+    "Clip-m has an audio stream not semantically reviewed; an empty provisional record is not a certified no-claim clip.",
+    "Clip-i source modality and social-02 depicted identities remain unverified; tiny AP/EPI text remains unreadable.",
+    "User approved 7 dev / 4 test on 2026-10-02; creator/topic/repost groups are isolated as declared. No prompt-tuning isolation is inferred.",
+    "Original occurrence revision SHA-256: fc0b7e4403239d877c07ab7f214d97123ec1aae41d0a7f64b5fedda785577a90",
+    "Corrected racism timed-text SHA-256: 4f230e8053273b49f3872f9ed5b07ccf137cde7c7381a8e79354a94471a2b1b3",
+    "Human main-argument input SHA-256: 345be84e08cc6d94b74e00775ece11a6d251c0d67b4642786bb8a7d0cf089445"
+  ],
+  "files": {
+    "clips.jsonl": "3bc5291a74a55403f3047f2ebf1a86d9437083f40a64ea18c6826565c309cbaf",
+    "annotations.jsonl": "9cfcd5f15dde0f3854a26266426054bc2e6be6a5c2fb344dc2d5c40e32481a3a",
+    "adjudications.jsonl": "d6f9982d680b674ba55f6290bf27695a8b09024c0c08a9c151e806c9759f0cdc",
+    "main-arguments.jsonl": "94e33e3b1df1d660ec7513154ff0dd5ff08d2804d39197293ef90df113d2f974"
+  }
+}

@@ -33,6 +33,9 @@ jobs:
       - name: Validate synthetic examples
         run: python3 evaluation/validate.py
 
+      - name: Validate working draft metadata
+        run: python3 evaluation/validate.py evaluation/draft --draft
+
       - name: Validate frozen metadata if present
         shell: bash
         run: |
