@@ -1,0 +1,68 @@
+[project]
+name = "ovrly-backend"
+version = "0.1.0"
+description = "Ovrly API and worker foundation"
+requires-python = ">=3.11"
+dependencies = [
+    "alembic>=1.16,<2",
+    "fastapi>=0.115,<1",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic-settings>=2.8,<3",
+    "sqlalchemy[asyncio]>=2.0,<3",
+    "uvicorn>=0.34,<1",
+]
+
+[dependency-groups]
+dev = [
+    "coverage>=7.10,<8",
+    "httpx>=0.28,<1",
+    "mypy>=1.15,<3",
+    "pytest>=8,<10",
+    "pytest-asyncio>=1,<2",
+    "ruff>=0.11,<1",
+]
+quality = [
+    "actionlint-py==1.7.12.25",
+    "pip-audit==2.10.1",
+    "pre-commit==4.6.2",
+    "zizmor==1.30.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["services"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC", "PGH003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest assertions are test expectations, not production security checks.
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+enable_error_code = ["ignore-without-code"]
+
+[tool.coverage.run]
+source = ["services"]
+relative_files = true
+parallel = true
+patch = ["subprocess"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2

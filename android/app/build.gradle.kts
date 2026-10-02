@@ -3,6 +3,12 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jlleitschuh.gradle.ktlint")
+}
+
+ktlint {
+    version.set("1.8.0")
+    baseline.set(rootProject.file("config/ktlint-app-baseline.xml"))
 }
 
 val voiceConfig = Properties().apply {
@@ -51,6 +57,7 @@ android {
     lint {
         abortOnError = true
         warningsAsErrors = true
+        lintConfig = file("lint.xml")
     }
     testOptions { unitTests.isReturnDefaultValues = true }
 }

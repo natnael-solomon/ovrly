@@ -143,7 +143,7 @@ internal fun ExploreScreen(onOpen: (SampleReport) -> Unit) {
                 ChromeArtwork(report.artwork, Modifier.fillMaxWidth().aspectRatio(1.7f).clip(RoundedCornerShape(24.dp)))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(report.title, style = MaterialTheme.typography.titleLarge)
+                        Text(report.title, style = OvrlyEditorialTypography.title)
                         Text("${report.topic} / ${report.claims.size} sample claims",
                             style = MaterialTheme.typography.labelSmall, color = LocalOvrlyPalette.current.muted)
                     }
@@ -228,7 +228,7 @@ private fun FeatureSample(report: SampleReport, onClick: () -> Unit) {
                     color = p.muted)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(report.title, Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleLarge)
+                        style = OvrlyEditorialTypography.title)
                     Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(20.dp), tint = p.accent)
                 }
                 SampleTrace(report)
@@ -317,7 +317,7 @@ internal fun SampleReportScreen(
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(report.title, style = MaterialTheme.typography.titleLarge)
+                Text(report.title, style = OvrlyEditorialTypography.title)
                 Text("${report.topic} / ${report.claims.size} sample claims",
                     style = MaterialTheme.typography.labelSmall, color = p.muted)
                 Text("Illustrative content. No video analyzed or sources retrieved.",
