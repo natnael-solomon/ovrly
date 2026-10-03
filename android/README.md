@@ -53,7 +53,7 @@ require JDK 21, the SDK, uv and network access. See [shared checks](../WORKFLOW.
 
 Open `app/src/main/java/app/ovrly/ui/GalleryPreviews.kt` in Studio's Design or Split view. `GlassOverlay.kt` contains the live-control previews. Gallery selection does not change the live overlay.
 
-Your space, Explore and the larger overlay demo use labeled sample reports. Sample saves survive navigation and restored activity state, not a fresh session. Settings contains the actual capture, permissions, storage, share and voice controls.
+Your space, Explore and the larger overlay demo use labeled sample reports. Sample saves survive navigation and restored activity state, not a fresh session. Settings contains the actual capture, permissions, storage and share controls, plus voice status and Stop.
 
 Enable the larger demo from Settings or the gallery with display-over-other-apps permission. If capture or voice is active, confirm stopping it first. The demo never records or contacts a provider; closing it never restarts a session.
 
@@ -109,6 +109,14 @@ interrupt message and flushes playback) have not been tested live.
 
 `VoiceController` exposes `state` (with an interaction phase), a 0..1 `level`
 updated at most 20 times per second, and lossy orb `events` for presentation.
+
+Voice starts from the orb in the Your space and Explore headers. Tap the small
+orb to open it, then tap to start or stop, or hold for push-to-talk. While the
+assistant speaks, a tap interrupts it. Settings keeps the status and a Stop
+control. Starting voice is blocked during capture, closes the overlay demo and
+asks for microphone permission. If permission is permanently denied, the orb
+opens app settings. Haptic confirmation uses `CONFIRM` on Android 11+ and a
+plain click on Android 10. The orb has not been tested on a device.
 
 ### Buffers and diagnostics
 

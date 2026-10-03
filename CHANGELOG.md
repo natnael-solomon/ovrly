@@ -7,6 +7,7 @@
 - Eleven-clip RES-06 draft metadata with 259 traceable occurrences, single-pass adjudications, separate main-argument assessments and a 7 dev / 4 test split. Explicit draft validation and CI preserve unresolved rights, coverage and media-review limitations; this is not a frozen benchmark.
 - Voice session policy: 30-second setup timeout, five-minute input window from server ready, a bounded 30-second finishing reply with the microphone released, and a 15-second listening-silence stop. No automatic reconnection.
 - Voice orb engine interface: interaction phases, a rate-limited 0..1 level, lossy presentation events, push-to-talk hold and user barge-in (the last two untested live).
+- Voice orb in the Your space and Explore headers: tap to open, then tap to start, stop or interrupt, or hold for push-to-talk. Includes the microphone-permission flow and a gallery study. Settings keeps Stop. Not yet tested on a device.
 - Offline debug voice simulation and explicit live build opt-in. No local attempt cap; provider usage is tracked against the dashboard.
 - Offline five-action voice contract with strict target arguments and cancellation-only confirmation policy. Unconnected product commands return typed errors and remain absent from the live manifest.
 - Pinned Android detekt/Compose and ktlint gates with reviewed finding baselines, Gradle dependency verification, and backend/repository vulnerability audits in CI and local pre-commit.

@@ -66,7 +66,6 @@ fun CompanionScreen(
     onClearShare: () -> Unit,
     onGallery: () -> Unit,
     onNotificationPermission: () -> Unit,
-    onVoiceStart: () -> Unit,
     onVoiceStop: () -> Unit,
     dark: Boolean,
     onDark: (Boolean) -> Unit,
@@ -267,15 +266,11 @@ fun CompanionScreen(
                     Text(if (voiceMock) "Stop simulation" else "Stop microphone")
                 }
             } else {
-                OutlinedButton(
-                    onClick = onVoiceStart,
-                    enabled =
-                        voiceConfigured && !capture.busy && !storageBusy,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(if (voiceMock) "Run offline tab action" else "Start companion voice")
-                }
+                Text(
+                    "Voice is in the header: tap the orb on Your space or Explore.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.muted
+                )
             }
             if (voiceConfigured) {
                 Text(

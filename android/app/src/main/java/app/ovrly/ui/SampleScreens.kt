@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -41,8 +43,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,22 +65,39 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.ovrly.R
+import app.ovrly.ui.voice.OrbSpec
+import app.ovrly.ui.voice.VoiceOrbDock
+import app.ovrly.ui.voice.VoiceOrbDockState
 
 @Composable
 internal fun YourSpaceScreen(
     reports: List<SampleReport>,
     onOpen: (SampleReport) -> Unit,
     onExplore: () -> Unit,
+    voiceDock: VoiceOrbDockState? = null
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var searching by rememberSaveable { mutableStateOf(false) }
     val visible = filterSamples(reports, query)
+    val listState = rememberLazyListState()
     LazyColumn(
         Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        item { SampleHeader("Your space", searching, { searching = !searching; query = "" }) }
+        item {
+            SampleHeader(
+                "Your space",
+                searching,
+                {
+                    searching = !searching
+                    query = ""
+                },
+                voiceDock,
+                listState
+            )
+        }
         if (searching) item { SampleSearch(query, { query = it }) }
         if (visible.isEmpty()) {
             item {
@@ -110,18 +131,31 @@ internal fun YourSpaceScreen(
 }
 
 @Composable
-internal fun ExploreScreen(onOpen: (SampleReport) -> Unit) {
+internal fun ExploreScreen(onOpen: (SampleReport) -> Unit, voiceDock: VoiceOrbDockState? = null) {
     var topic by rememberSaveable { mutableStateOf("All") }
     var query by rememberSaveable { mutableStateOf("") }
     var searching by rememberSaveable { mutableStateOf(false) }
     val ordered = SampleReports.drop(1) + SampleReports.first()
     val visible = filterSamples(ordered, query, topic)
+    val listState = rememberLazyListState()
     LazyColumn(
         Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        item { SampleHeader("Explore", searching, { searching = !searching; query = "" }) }
+        item {
+            SampleHeader(
+                "Explore",
+                searching,
+                {
+                    searching = !searching
+                    query = ""
+                },
+                voiceDock,
+                listState
+            )
+        }
         if (searching) item { SampleSearch(query, { query = it }) }
         item {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -157,44 +191,29 @@ internal fun ExploreScreen(onOpen: (SampleReport) -> Unit) {
 }
 
 @Composable
-private fun SampleHeader(title: String, searching: Boolean, onSearch: () -> Unit) {
+private fun SampleHeader(
+    title: String,
+    searching: Boolean,
+    onSearch: () -> Unit,
+    voiceDock: VoiceOrbDockState?,
+    listState: LazyListState
+) {
     val p = LocalOvrlyPalette.current
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            val wordmark = painterResource(R.drawable.wordmark_ovrly)
-            Box {
-                if (!p.dark) {
-                    // Paper is close in value to the chrome. Chrome needs both a highlight and a shadow to
-                    // read: a soft ink drop-shadow below, a warm sheen halo around, and a crisp ink edge.
-                    Image(
-                        wordmark, contentDescription = null,
-                        modifier = Modifier.height(40.dp).offset(y = 3.dp)
-                            .blur(4.dp, BlurredEdgeTreatment.Unbounded),
-                        contentScale = ContentScale.FillHeight,
-                        colorFilter = ColorFilter.tint(p.ink.copy(alpha = 0.6f), BlendMode.SrcIn),
-                    )
-                    Image(
-                        wordmark, contentDescription = null,
-                        modifier = Modifier.height(40.dp).scale(1.06f)
-                            .blur(2.dp, BlurredEdgeTreatment.Unbounded),
-                        contentScale = ContentScale.FillHeight,
-                        colorFilter = ColorFilter.tint(p.sheen.copy(alpha = 0.9f), BlendMode.SrcIn),
-                    )
-                    Image(
-                        wordmark, contentDescription = null,
-                        modifier = Modifier.height(40.dp).scale(1.03f),
-                        contentScale = ContentScale.FillHeight,
-                        colorFilter = ColorFilter.tint(p.ink.copy(alpha = 0.85f), BlendMode.SrcIn),
-                    )
+        if (voiceDock != null) {
+            val scrolled by remember {
+                derivedStateOf {
+                    listState.firstVisibleItemIndex > 0 ||
+                        listState.firstVisibleItemScrollOffset > SCROLL_COLLAPSE_PX
                 }
-                Image(
-                    wordmark, contentDescription = "ovrly",
-                    modifier = Modifier.height(40.dp).chromeGlare(strength = if (p.dark) 0.6f else 0.34f),
-                    contentScale = ContentScale.FillHeight,
-                )
             }
-            Spacer(Modifier.weight(1f))
-            Text("PREVIEW", style = MaterialTheme.typography.labelSmall, color = p.muted)
+            VoiceOrbDock(voiceDock, scrolledPastTop = scrolled) { BrandLockup() }
+        } else {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                BrandLockup()
+                Spacer(Modifier.weight(1f))
+                Text("PREVIEW", style = MaterialTheme.typography.labelSmall, color = p.muted)
+            }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(title, Modifier.weight(1f).semantics { heading() },
@@ -206,6 +225,51 @@ private fun SampleHeader(title: String, searching: Boolean, onSearch: () -> Unit
         }
     }
 }
+
+/** The chrome wordmark at its header size, with the paper-theme shadow/sheen stack. */
+@Composable
+internal fun BrandLockup() {
+    val p = LocalOvrlyPalette.current
+    val h = OrbSpec.wordmarkHeight
+    val wordmark = painterResource(R.drawable.wordmark_ovrly)
+    Box {
+        if (!p.dark) {
+            // Paper is close in value to the chrome. Chrome needs both a highlight and a shadow to
+            // read: a soft ink drop-shadow below, a warm sheen halo around, and a crisp ink edge.
+            Image(
+                wordmark,
+                contentDescription = null,
+                modifier = Modifier.height(h).offset(y = 3.dp)
+                    .blur(4.dp, BlurredEdgeTreatment.Unbounded),
+                contentScale = ContentScale.FillHeight,
+                colorFilter = ColorFilter.tint(p.ink.copy(alpha = 0.6f), BlendMode.SrcIn)
+            )
+            Image(
+                wordmark,
+                contentDescription = null,
+                modifier = Modifier.height(h).scale(1.06f)
+                    .blur(2.dp, BlurredEdgeTreatment.Unbounded),
+                contentScale = ContentScale.FillHeight,
+                colorFilter = ColorFilter.tint(p.sheen.copy(alpha = 0.9f), BlendMode.SrcIn)
+            )
+            Image(
+                wordmark,
+                contentDescription = null,
+                modifier = Modifier.height(h).scale(1.03f),
+                contentScale = ContentScale.FillHeight,
+                colorFilter = ColorFilter.tint(p.ink.copy(alpha = 0.85f), BlendMode.SrcIn)
+            )
+        }
+        Image(
+            wordmark,
+            contentDescription = "ovrly",
+            modifier = Modifier.height(h).chromeGlare(strength = if (p.dark) 0.6f else 0.34f),
+            contentScale = ContentScale.FillHeight
+        )
+    }
+}
+
+private const val SCROLL_COLLAPSE_PX = 24
 
 @Composable
 private fun SampleSearch(query: String, onQuery: (String) -> Unit) {
