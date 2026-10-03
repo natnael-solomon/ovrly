@@ -11,6 +11,12 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
+ * Every build without the explicit live opt-in, debug or release, runs the in-process
+ * simulation: no microphone, network, credentials or provider sessions.
+ */
+internal fun voiceSimulated(live: Boolean): Boolean = !live
+
+/**
  * Foreground-only, explicit-start voice. The host must stop on Activity.onStop and
  * before starting playback capture. No permissions or services are started here.
  *
@@ -25,7 +31,7 @@ class VoiceController(context: Context, navigator: VoiceNavigator) : AutoCloseab
         BuildConfig.VOXIDE_ENABLED,
         BuildConfig.VOXIDE_BASE_URL,
         BuildConfig.VOXIDE_PUBLISHABLE_KEY,
-        mock = BuildConfig.DEBUG && !BuildConfig.VOXIDE_LIVE
+        mock = voiceSimulated(BuildConfig.VOXIDE_LIVE)
     )
     val requiresMicrophone: Boolean = !configuration.mock
     val configured: Boolean = configuration.unavailableState() == null

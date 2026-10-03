@@ -141,13 +141,13 @@ class VoiceOrbDockState(private val source: VoiceOrbSource) {
             .collectLatest { s ->
                 val muted = !source.configured || microphoneDenied
                 motion.transitionTo(s.phase.toOrbPhase(muted))
-                line = lineFor(motion.phase, s, source.configured, permanentlyDenied)
+                line = lineFor(motion.phase, s, source, permanentlyDenied)
                 if (motion.phase == OrbPhase.ERROR) {
                     // The engine stays in ERROR until the next start; the orb shows it briefly,
                     // then returns to plain idle with no lingering glyph.
                     delay(OrbSpec.ERROR_HERO_TIMEOUT_MS)
                     motion.transitionTo(OrbPhase.IDLE)
-                    line = lineFor(OrbPhase.IDLE, s, source.configured, permanentlyDenied)
+                    line = lineFor(OrbPhase.IDLE, s, source, permanentlyDenied)
                 }
             }
     }
@@ -262,32 +262,37 @@ class VoiceOrbDockState(private val source: VoiceOrbSource) {
     }
 }
 
+/** The hero's state line; simulated builds prefix every line with "Demo". */
 private fun lineFor(
     phase: OrbPhase,
     state: VoiceOrbState,
-    configured: Boolean,
+    source: VoiceOrbSource,
     permanentlyDenied: Boolean
-) = when (phase) {
-    OrbPhase.IDLE -> "Tap to talk"
+): String {
+    val configured = source.configured
+    val line = when (phase) {
+        OrbPhase.IDLE -> "Tap to talk"
 
-    OrbPhase.CONNECTING -> "Connecting…"
+        OrbPhase.CONNECTING -> "Connecting…"
 
-    OrbPhase.LISTENING -> "Listening · tap to stop"
+        OrbPhase.LISTENING -> "Listening · tap to stop"
 
-    OrbPhase.THINKING -> "Thinking"
+        OrbPhase.THINKING -> "Thinking"
 
-    OrbPhase.SPEAKING -> "Speaking · tap to interrupt"
+        OrbPhase.SPEAKING -> "Speaking · tap to interrupt"
 
-    OrbPhase.FINISHING -> "Finishing reply · microphone off"
+        OrbPhase.FINISHING -> "Finishing reply · microphone off"
 
-    OrbPhase.MUTED -> when {
-        !configured -> "Not configured"
-        permanentlyDenied -> "Microphone blocked · open Settings"
-        else -> "Microphone needed · tap to allow"
+        OrbPhase.MUTED -> when {
+            !configured -> "Not configured"
+            permanentlyDenied -> "Microphone blocked · open Settings"
+            else -> "Microphone needed · tap to allow"
+        }
+
+        // Short and plain on the orb; the full diagnostic stays in Settings and the log.
+        OrbPhase.ERROR -> "${errorTitle(state.status)} \u00b7 tap to retry"
     }
-
-    // Short and plain on the orb; the full diagnostic stays in Settings and the log.
-    OrbPhase.ERROR -> "${errorTitle(state.status)} \u00b7 tap to retry"
+    return if (source.requiresMicrophone) line else "Demo \u00b7 $line"
 }
 
 private fun errorTitle(status: String) = when (status) {

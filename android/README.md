@@ -69,12 +69,13 @@ See [UI maintenance](../docs/android-ui.md) for artwork, splash behavior and ass
 
 ## Optional voice experiment
 
-Live Voxide is disabled by default. Debug builds run an explicitly labeled
-in-process protocol fixture: Start switches to Explore once without a key,
-microphone permission, audio recording or network traffic. This is a mock
-transport, not speech recognition or evidence of provider compatibility.
-Release builds without live opt-in keep voice disabled. Unit tests use fakes
-and synthetic HTTP responses; no provider sessions are used.
+Live Voxide is disabled by default. Every build without the live opt-in, debug
+and release (including Telegram APKs), runs an in-process simulation. Tapping
+the orb connects instantly, listens without a key, microphone permission, audio
+recording or network traffic, and ends after 15 seconds of silence. It never
+triggers an app action, and the orb labels every state "Demo". This is a mock
+transport, not speech recognition or evidence of provider compatibility. Unit
+tests use fakes and synthetic HTTP responses; no provider sessions are used.
 
 For an authorized native-device experiment, configure the ignored
 `voxide.local.properties` from its example with `enabled=true` and only a
