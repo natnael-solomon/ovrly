@@ -246,18 +246,8 @@ class MainActivity : ComponentActivity() {
                             destination = destination,
                             onDestination = { destination = it },
                             voiceDock = orbDock,
-                            activeSession = when {
-                                capture.busy -> "Capture active"
-
-                                voiceState.active ->
-                                    if (voice.requiresMicrophone) {
-                                        "Microphone active"
-                                    } else {
-                                        "Offline voice simulation"
-                                    }
-
-                                else -> null
-                            }
+                            // Voice shows its state on the header orb; only capture needs this bar.
+                            activeSession = if (capture.busy) "Capture active" else null
                         ) {
                             CompanionScreen(
                                 capture = capture, share = share, storageBusy = storageBusy,

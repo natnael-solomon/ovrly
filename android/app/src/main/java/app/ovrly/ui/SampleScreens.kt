@@ -2,6 +2,7 @@ package app.ovrly.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -20,9 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -45,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -66,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.ovrly.R
 import app.ovrly.ui.voice.OrbSpec
+import app.ovrly.ui.voice.VoiceDockColumn
 import app.ovrly.ui.voice.VoiceOrbDock
 import app.ovrly.ui.voice.VoiceOrbDockState
 
@@ -79,43 +80,33 @@ internal fun YourSpaceScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var searching by rememberSaveable { mutableStateOf(false) }
     val visible = filterSamples(reports, query)
-    val listState = rememberLazyListState()
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        state = listState,
-        contentPadding = PaddingValues(24.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
-    ) {
-        item {
-            SampleHeader(
-                "Your space",
-                searching,
-                {
-                    searching = !searching
-                    query = ""
-                },
-                voiceDock,
-                listState
-            )
-        }
-        if (searching) item { SampleSearch(query, { query = it }) }
+    val scrollState = rememberScrollState()
+    // A handful of samples: compose them all once so a fast fling never builds cards mid-motion.
+    VoiceDockColumn(scrollState, voiceDock) {
+        SampleHeader(
+            "Your space",
+            searching,
+            {
+                searching = !searching
+                query = ""
+            },
+            voiceDock,
+            scrollState
+        )
+        if (searching) SampleSearch(query, { query = it })
         if (visible.isEmpty()) {
-            item {
-                EmptySamples(
-                    title = if (query.isBlank()) "No samples saved" else "No matches",
-                    action = if (query.isBlank()) "Explore samples" else "Clear search",
-                    onAction = { if (query.isBlank()) onExplore() else query = "" },
-                )
-            }
+            EmptySamples(
+                title = if (query.isBlank()) "No samples saved" else "No matches",
+                action = if (query.isBlank()) "Explore samples" else "Clear search",
+                onAction = { if (query.isBlank()) onExplore() else query = "" }
+            )
         } else {
-            item {
-                FeatureSample(visible.first(), onClick = { onOpen(visible.first()) })
-            }
-            items(visible.drop(1), key = { it.id }) { report ->
-                SampleRow(report, onClick = { onOpen(report) })
+            FeatureSample(visible.first(), onClick = { onOpen(visible.first()) })
+            visible.drop(1).forEach { report ->
+                key(report.id) { SampleRow(report, onClick = { onOpen(report) }) }
             }
         }
-        item {
+        run {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Sample collection", style = MaterialTheme.typography.labelSmall,
@@ -137,27 +128,20 @@ internal fun ExploreScreen(onOpen: (SampleReport) -> Unit, voiceDock: VoiceOrbDo
     var searching by rememberSaveable { mutableStateOf(false) }
     val ordered = SampleReports.drop(1) + SampleReports.first()
     val visible = filterSamples(ordered, query, topic)
-    val listState = rememberLazyListState()
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        state = listState,
-        contentPadding = PaddingValues(24.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
-    ) {
-        item {
-            SampleHeader(
-                "Explore",
-                searching,
-                {
-                    searching = !searching
-                    query = ""
-                },
-                voiceDock,
-                listState
-            )
-        }
-        if (searching) item { SampleSearch(query, { query = it }) }
-        item {
+    val scrollState = rememberScrollState()
+    VoiceDockColumn(scrollState, voiceDock) {
+        SampleHeader(
+            "Explore",
+            searching,
+            {
+                searching = !searching
+                query = ""
+            },
+            voiceDock,
+            scrollState
+        )
+        if (searching) SampleSearch(query, { query = it })
+        run {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SampleTopics.forEach {
@@ -165,10 +149,10 @@ internal fun ExploreScreen(onOpen: (SampleReport) -> Unit, voiceDock: VoiceOrbDo
                 }
             }
         }
-        if (visible.isEmpty()) item {
+        if (visible.isEmpty()) {
             EmptySamples("No matches", "Reset filters") { query = ""; topic = "All" }
         }
-        items(visible, key = { it.id }) { report ->
+        visible.forEach { report ->
             Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                     .clickable(role = Role.Button, onClick = { onOpen(report) }),
@@ -196,16 +180,13 @@ private fun SampleHeader(
     searching: Boolean,
     onSearch: () -> Unit,
     voiceDock: VoiceOrbDockState?,
-    listState: LazyListState
+    scrollState: ScrollState
 ) {
     val p = LocalOvrlyPalette.current
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         if (voiceDock != null) {
             val scrolled by remember {
-                derivedStateOf {
-                    listState.firstVisibleItemIndex > 0 ||
-                        listState.firstVisibleItemScrollOffset > SCROLL_COLLAPSE_PX
-                }
+                derivedStateOf { scrollState.value > SCROLL_COLLAPSE_PX }
             }
             VoiceOrbDock(voiceDock, scrolledPastTop = scrolled) { BrandLockup() }
         } else {

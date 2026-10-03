@@ -29,8 +29,17 @@ private const val RED_ARGB = 0xFFFF7A7A
  */
 internal object OrbSpec {
     // ---- sizes ----
-    val dockSize = 48.dp // collapsed orb body in the brand row
-    val heroSize = 240.dp // expanded orb body
+    val dockSize = 46.dp // collapsed orb body in the brand row
+
+    /** Touch target kept at the 48 dp accessibility minimum when the drawn orb is smaller. */
+    val minTouch = 48.dp
+    val heroSize = 176.dp // expanded orb body, upper bound
+
+    /** On narrow screens the hero body is capped to this share of the screen width. */
+    const val HERO_WIDTH_FRACTION = .48f
+
+    /** Steady ring overhang (hold ring) as a multiple of the body radius; layout clears it. */
+    const val HERO_REACH = 1.26f
     val wordmarkHeight = 44.dp
 
     /** Below this body size the renderer switches to the compact ring styles. */
@@ -77,7 +86,7 @@ internal object OrbSpec {
     const val LISTEN_ARC_OUTER = 1.42f
     const val GLOW_RADIUS = 1.35f
     const val GLYPH_FRACTION_HERO = 0.28f
-    const val GLYPH_FRACTION_COMPACT = 0.36f
+    const val GLYPH_FRACTION_COMPACT = 0.46f
     const val STROKE_COMPACT_MULTIPLIER = 2.2f
     const val LISTEN_TICKS_HERO = 36
 

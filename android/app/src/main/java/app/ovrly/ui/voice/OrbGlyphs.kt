@@ -8,17 +8,18 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
 
 /**
- * Phosphor Icons (Regular weight, MIT) rendered as vectors so the orb has no icon dependency.
- * Paths are verbatim from phosphor-icons/core `assets/regular/<name>.svg` (viewBox 0 0 256 256).
+ * Phosphor Icons (MIT) rendered as vectors so the orb has no icon dependency. The microphone is
+ * the Bold weight for legibility at dock size; the mic-slash is Regular. Paths are verbatim from
+ * phosphor-icons/core `assets/<weight>/<name>.svg` (viewBox 0 0 256 256).
  */
 internal object OrbGlyphs {
     val microphone: ImageVector by lazy {
         glyph(
             "Microphone",
-            "M128,176a48.05,48.05,0,0,0,48-48V64a48,48,0,0,0-96,0v64A48.05,48.05,0,0,0,128,17" +
-                "6ZM96,64a32,32,0,0,1,64,0v64a32,32,0,0,1-64,0Zm40,143.6V240a8,8,0,0,1-16,0V207.6" +
-                "A80.11,80.11,0,0,1,48,128a8,8,0,0,1,16,0,64,64,0,0,0,128,0,8,8,0,0,1,16,0A80.11," +
-                "80.11,0,0,1,136,207.6Z"
+            "M128,180a52.06,52.06,0,0,0,52-52V64A52,52,0,0,0,76,64v64A52.06,52.06,0,0,0,128,1" +
+                "80ZM100,64a28,28,0,0,1,56,0v64a28,28,0,0,1-56,0Zm40,155.22V240a12,12,0,0,1-24,0V" +
+                "219.22A92.14,92.14,0,0,1,36,128a12,12,0,0,1,24,0,68,68,0,0,0,136,0,12,12,0,0,1,2" +
+                "4,0A92.14,92.14,0,0,1,140,219.22Z"
         )
     }
 
@@ -37,19 +38,9 @@ internal object OrbGlyphs {
         )
     }
 
-    val warningCircle: ImageVector by lazy {
-        glyph(
-            "WarningCircle",
-            "M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-8" +
-                "8A88.1,88.1,0,0,1,128,216Zm-8-80V80a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm20,36a12,1" +
-                "2,0,1,1-12-12A12,12,0,0,1,140,172Z"
-        )
-    }
-
     fun forPhase(phase: OrbPhase): ImageVector? = when (phase) {
         OrbPhase.IDLE, OrbPhase.CONNECTING, OrbPhase.LISTENING -> microphone
-        OrbPhase.MUTED -> microphoneSlash
-        OrbPhase.ERROR -> warningCircle
+        OrbPhase.MUTED, OrbPhase.ERROR -> microphoneSlash
         OrbPhase.THINKING, OrbPhase.SPEAKING, OrbPhase.FINISHING -> null
     }
 

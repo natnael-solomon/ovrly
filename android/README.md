@@ -111,12 +111,20 @@ interrupt message and flushes playback) have not been tested live.
 updated at most 20 times per second, and lossy orb `events` for presentation.
 
 Voice starts from the orb in the Your space and Explore headers. Tap the small
-orb to open it, then tap to start or stop, or hold for push-to-talk. While the
-assistant speaks, a tap interrupts it. Settings keeps the status and a Stop
-control. Starting voice is blocked during capture, closes the overlay demo and
-asks for microphone permission. If permission is permanently denied, the orb
-opens app settings. Haptic confirmation uses `CONFIRM` on Android 11+ and a
-plain click on Android 10. The orb has not been tested on a device.
+orb (46 dp, 48 dp touch target) to open it, then tap to start or stop, or hold
+for push-to-talk. While the assistant speaks, a tap interrupts it. Scrolling
+the list collapses the open orb with the swipe; a fling docks it first. Settings
+keeps the status and a Stop control. Starting voice is blocked during capture,
+closes the overlay demo and asks for microphone permission. If permission is
+permanently denied, the orb opens app settings. An unconfigured build shows a
+muted orb that does nothing on tap. Errors show a short reason and return to
+idle. Haptic confirmation uses `CONFIRM` on Android 11+ and a plain click on
+Android 10.
+
+Checked on a Samsung SM-A217F (Android 12) with the offline simulation and with
+unconfigured and unreachable debug builds: open, collapse, scroll, permission
+prompt, denial, the settings route and a connection failure. Live Voxide use of
+the orb, push-to-talk and barge-in have not been tested.
 
 ### Buffers and diagnostics
 

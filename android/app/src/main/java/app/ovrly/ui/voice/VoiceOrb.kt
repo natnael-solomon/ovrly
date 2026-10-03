@@ -1,5 +1,6 @@
 package app.ovrly.ui.voice
 
+import android.graphics.Bitmap
 import android.provider.Settings
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
@@ -9,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -19,9 +21,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -37,6 +42,7 @@ import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import app.ovrly.R
 import kotlin.math.PI
 import kotlin.math.cos
@@ -79,12 +85,15 @@ private const val GLOW_CORE_STOP = .6f
 private const val GLOW_LEVEL_GAIN = .35f
 private const val GLOW_LIGHT_BOOST = 1.5f
 private const val GLOW_RADIUS_LEVEL_GAIN = .35f
-private const val GLYPH_DARK = 0xFF1C1E26
+private const val GLYPH_DARK = 0xFF3B3748 // deep platinum ink (orb lavender-shadow tone)
+private const val GLYPH_INK_ALPHA = .90f
+private const val GLYPH_INK_LIGHT_ARGB = 0xFFFFF8F0
+private const val GLYPH_INK_LIGHT_ALPHA = .40f
 private const val GLYPH_IN_START = .85f
-private const val GLYPH_LEVEL_GAIN = .45f
-private const val GLYPH_LEVEL_MIN = .55f
-private const val GLYPH_LIGHT_RGB = 0xEBEDF5
-private const val GLYPH_SHADOW_OFFSET = 1.6f
+private const val GLYPH_LEVEL_GAIN = .35f
+private const val GLYPH_MUTED_ARGB = 0xFF5E5A57 // muted: flatter grey, reads inactive
+private const val GLYPH_LISTENING_ARGB = 0xFF4E4380 // listening: deep lavender
+private const val GLYPH_GROOVE_ALPHA = .92f
 private const val GLYPH_SHRINK = .15f
 private const val HAIRLINE_EXTRA = 2.4f
 private const val HALF_CIRCLE = 180f
@@ -256,6 +265,15 @@ internal class OrbMotion {
     internal fun transition(): Float =
         easeInOut(min(1f, (time - transitionStart) / (OrbSpec.PHASE_TRANSITION_MS / MS_PER_S)))
 
+    /**
+     * True when nothing on a docked orb would move: idle, transition done, no transients or
+     * decaying feedback. The frame loop then stops advancing time so the canvas isn't redrawn.
+     */
+    internal fun settled(docked: Boolean): Boolean =
+        docked && phase.isQuiet() && transition() >= 1f &&
+            transients.isEmpty() && holdFill == 0f && silenceFade == 0f &&
+            maxOf(settle, press, shake, tilt, smoothLevel) < SETTLED_EPSILON
+
     internal fun step(dt: Float) {
         val k = { x: Float -> 1f - (1f - x).pow(dt * FRAME_RATE) }
         val target = if (phase == OrbPhase.LISTENING || phase == OrbPhase.SPEAKING) level else 0f
@@ -269,23 +287,27 @@ internal class OrbMotion {
 }
 
 /**
- * Draws one orb at the given body size. The ring/glow/glyph overhang the body, so callers should
+ * Draws one orb at the given body diameter in px, read at draw time so size animation never
+ * recomposes. The ring/glow/glyph overhang the body, so callers should
  * give the composable ~1.5× the body as its layout size; the orb is centred in whatever it gets.
  */
 @Composable
 internal fun VoiceOrb(
     motion: OrbMotion,
-    bodySize: Dp,
+    bodyPx: () -> Float,
     light: Boolean,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val currentBodyPx by rememberUpdatedState(bodyPx)
     val chrome = ImageBitmap.imageResource(R.drawable.orb_chrome)
+    // The 768 px chrome shrinks ~8x in the dock; on-the-fly sampling leaves a jagged rim, so the
+    // dock draws a copy pre-shrunk by repeated halving to its exact pixel size.
+    val dockPx = with(LocalDensity.current) { OrbSpec.dockSize.roundToPx() }
+    val dockChrome = remember(chrome, dockPx) { downscale(chrome, dockPx) }
     val mic = rememberVectorPainter(OrbGlyphs.microphone)
     val micSlash = rememberVectorPainter(OrbGlyphs.microphoneSlash)
-    val warning = rememberVectorPainter(OrbGlyphs.warningCircle)
-    val bodyPx = with(LocalDensity.current) { bodySize.toPx() }
-    val compact = bodySize < OrbSpec.compactBelow
+    val compactBelowPx = with(LocalDensity.current) { OrbSpec.compactBelow.toPx() }
 
     LaunchedEffect(motion) {
         // Mirror chromeGlare: a zero animator scale freezes continuous loops but keeps transitions.
@@ -300,8 +322,11 @@ internal fun VoiceOrb(
                 if (last == 0L) last = now
                 val dt = min(MAX_FRAME_S, (now - last) / NS_PER_S)
                 last = now
-                motion.time += dt
-                motion.step(dt)
+                // A still, docked orb costs no redraws; any event or phase change resumes it.
+                if (!motion.settled(docked = currentBodyPx() <= dockPx + 1f)) {
+                    motion.time += dt
+                    motion.step(dt)
+                }
             }
         }
     }
@@ -311,15 +336,26 @@ internal fun VoiceOrb(
             when (OrbGlyphs.forPhase(p)) {
                 OrbGlyphs.microphone -> mic
                 OrbGlyphs.microphoneSlash -> micSlash
-                OrbGlyphs.warningCircle -> warning
                 else -> null
             }
         }
-        OrbPainter(this, motion, OrbMetrics(bodyPx / 2f, compact, light), chrome, painterFor).draw()
+        val body = bodyPx()
+        OrbPainter(
+            this,
+            motion,
+            // 0 at hero sizes, 1 at the dock: compact styling blends in as the orb shrinks.
+            OrbMetrics(
+                body / 2f,
+                ((compactBelowPx - body) / (compactBelowPx - dockPx)).coerceIn(0f, 1f),
+                light
+            ),
+            if (body <= dockPx + 1f) dockChrome else chrome,
+            painterFor
+        ).draw()
     }
 }
 
-private class OrbMetrics(val radius: Float, val compact: Boolean, val light: Boolean)
+private class OrbMetrics(val radius: Float, val compactness: Float, val light: Boolean)
 
 /** Shared geometry and stroke helpers; the ring and body layers draw on top of it. */
 private abstract class OrbLayer(
@@ -328,17 +364,20 @@ private abstract class OrbLayer(
     metrics: OrbMetrics
 ) {
     protected val r = metrics.radius
-    protected val compact = metrics.compact
+
+    /** 0 = hero, 1 = docked. Sizes blend with it; only discrete styles switch at the midpoint. */
+    protected val compactness = metrics.compactness
+    protected val compact = compactness > HALF
     protected val light = metrics.light
     protected val cx = scope.size.width / 2f
     protected val cy = scope.size.height / 2f
     protected val c = Offset(cx, cy)
-    protected val k = if (compact) OrbSpec.STROKE_COMPACT_MULTIPLIER else 1f
+    protected val k = mix(1f, OrbSpec.STROKE_COMPACT_MULTIPLIER, compactness)
 
     // orb.js draws at R=280 canvas px; scale stroke widths to match
     protected val px = r / REFERENCE_RADIUS_PX
     protected val ring =
-        r * if (compact) OrbSpec.RING_RADIUS_COMPACT else OrbSpec.RING_RADIUS_HERO
+        r * mix(OrbSpec.RING_RADIUS_HERO, OrbSpec.RING_RADIUS_COMPACT, compactness)
     protected val t = m.time
     protected val p = m.transition()
     protected val lvl = m.smoothLevel
@@ -407,7 +446,11 @@ private class OrbRings(scope: DrawScope, m: OrbMotion, metrics: OrbMetrics) :
 
     private fun phaseRing(phase: OrbPhase, alpha: Float, a: (Float) -> Color) {
         when (phase) {
-            OrbPhase.IDLE -> idleRing(alpha, a)
+            // The docked idle orb has no ring: just the chrome body and its mic.
+            OrbPhase.IDLE -> {
+                val fade = 1f - compactness
+                if (fade > 0f) idleRing(alpha * fade) { v -> a(v * fade) }
+            }
 
             OrbPhase.CONNECTING -> connectingRing(a)
 
@@ -426,7 +469,11 @@ private class OrbRings(scope: DrawScope, m: OrbMotion, metrics: OrbMetrics) :
             // Speaking's ring without level: steady weight, dimmed; the mic is off, the reply lands.
             OrbPhase.FINISHING -> ringArc(ring, 0f, FULL_CIRCLE, RING_STROKE, a(FINISHING_ALPHA))
 
-            OrbPhase.MUTED -> mutedRing(a)
+            // Like idle, the docked muted orb has no ring: dimmed chrome and the mic-slash only.
+            OrbPhase.MUTED -> {
+                val fade = 1f - compactness
+                if (fade > 0f) mutedRing { v -> a(v * fade) }
+            }
 
             OrbPhase.ERROR -> errorRing(a)
         }
@@ -594,7 +641,11 @@ private class OrbPainter(
 
     private fun glow() {
         val col = lerp(OrbSpec.tint(m.previousPhase), OrbSpec.tint(m.phase), p)
-        val base = OrbSpec.glowBase(m.previousPhase) * (1 - p) + OrbSpec.glowBase(m.phase) * p
+        // The docked orb has no halo at idle; it fades in with the live phases.
+        val glowBase = { phase: OrbPhase ->
+            OrbSpec.glowBase(phase) * if (phase.isQuiet()) 1f - compactness else 1f
+        }
+        val base = glowBase(m.previousPhase) * (1 - p) + glowBase(m.phase) * p
         val alpha = ((base + lvl * GLOW_LEVEL_GAIN) * if (light) GLOW_LIGHT_BOOST else 1f).coerceIn(
             0f,
             1f
@@ -658,10 +709,9 @@ private class OrbPainter(
     }
 
     private fun body() {
-        val breathe = if (m.phase == OrbPhase.IDLE &&
-            !still
-        ) {
-            1f + IDLE_BREATHE * sin(t * IDLE_BREATHE_HZ)
+        // The docked orb sits still at idle; only the hero breathes.
+        val breathe = if (m.phase == OrbPhase.IDLE && !still) {
+            1f + IDLE_BREATHE * (1f - compactness) * sin(t * IDLE_BREATHE_HZ)
         } else {
             1f
         }
@@ -695,7 +745,8 @@ private class OrbPainter(
                 chrome,
                 dstOffset = IntOffset((cx - r).toInt(), (cy - r).toInt()),
                 dstSize = IntSize((2 * r).toInt(), (2 * r).toInt()),
-                colorFilter = filter
+                colorFilter = filter,
+                filterQuality = FilterQuality.High
             )
         }
     }
@@ -758,7 +809,7 @@ private class OrbPainter(
     private fun glyphStyled(phase: OrbPhase, alpha: Float, scale: Float) {
         if (alpha < MIN_VISIBLE_ALPHA) return
         val painter = glyphFor(phase) ?: return
-        val fraction = if (compact) OrbSpec.GLYPH_FRACTION_COMPACT else OrbSpec.GLYPH_FRACTION_HERO
+        val fraction = mix(OrbSpec.GLYPH_FRACTION_HERO, OrbSpec.GLYPH_FRACTION_COMPACT, compactness)
         val size = r * 2f * fraction * scale
         val dx = if (still) 0f else sin(t * SHAKE_RATE) * m.shake * SHAKE_PX * px
         fun draw(color: Color, dy: Float) {
@@ -768,28 +819,33 @@ private class OrbPainter(
                 }
             }
         }
+        fun engraved(
+            groove: Color,
+            grooveAlpha: Float = GLYPH_GROOVE_ALPHA,
+            light: Color = Color.White.copy(alpha = ENGRAVE_LIGHT_ALPHA)
+        ) {
+            draw(light, ENGRAVE_OFFSET)
+            draw(groove.copy(alpha = grooveAlpha), 0f)
+        }
         when (phase) {
-            OrbPhase.LISTENING -> {
-                // lit from within: lavender bloom follows the mic level, white-hot core
-                val kk = GLYPH_LEVEL_MIN + GLYPH_LEVEL_GAIN * lvl
-                draw(OrbSpec.lavender.copy(alpha = kk), 0f)
-                draw(Color.White.copy(alpha = .75f + .25f * lvl), 0f)
-            }
+            // Every glyph is engraved into the platinum: a light catch-light on the lower lip, then
+            // a deep groove whose colour is a dark shade of the state's ring tint.
+            // live: the lavender groove brightens a little as the user speaks
+            OrbPhase.LISTENING -> engraved(
+                lerp(Color(GLYPH_LISTENING_ARGB), OrbSpec.lavender, GLYPH_LEVEL_GAIN * lvl)
+            )
 
-            OrbPhase.ERROR -> {
-                draw(Color.Black.copy(alpha = .55f), GLYPH_SHADOW_OFFSET)
-                draw(OrbSpec.red.copy(alpha = .95f), 0f)
-            }
+            OrbPhase.ERROR -> engraved(Color(ERROR_GLYPH_ARGB))
 
-            OrbPhase.MUTED -> {
-                draw(Color.Black.copy(alpha = .55f), GLYPH_SHADOW_OFFSET)
-                draw(Color(GLYPH_LIGHT_RGB).copy(alpha = .92f), 0f)
-            }
+            OrbPhase.MUTED -> engraved(Color(GLYPH_MUTED_ARGB))
 
-            else -> {
-                draw(Color.White.copy(alpha = .45f), GLYPH_SHADOW_OFFSET)
-                draw(Color(GLYPH_DARK).copy(alpha = .92f), 0f)
-            }
+            // Idle and connecting: deep platinum ink, the orb's own lavender-shadow tone, with a
+            // warm catch-light, so it reads as a groove in the same metal.
+            else -> engraved(
+                Color(GLYPH_DARK),
+                GLYPH_INK_ALPHA,
+                Color(GLYPH_INK_LIGHT_ARGB).copy(alpha = GLYPH_INK_LIGHT_ALPHA)
+            )
         }
     }
 }
@@ -803,6 +859,27 @@ private fun easeInOut(x: Float) = if (x < EASE_MID) {
 private const val EASE_MID = .5f
 private const val EASE_IN_GAIN = 4
 private const val EASE_EXPONENT = 3
+
+private fun mix(a: Float, b: Float, t: Float) = a + (b - a) * t
+
+/** Phases whose docked orb is drawn bare and still: no ring, no halo, no motion. */
+private fun OrbPhase.isQuiet() = this == OrbPhase.IDLE || this == OrbPhase.MUTED
+
+private const val HALF = .5f
+private const val SETTLED_EPSILON = .002f
+
+private const val ERROR_GLYPH_ARGB = 0xFF7A3E42 // error: deep muted red
+private const val ENGRAVE_OFFSET = 1.2f // px at R=280, scaled like strokes
+private const val ENGRAVE_LIGHT_ALPHA = .45f
+
+/** Box-filtered shrink: halve with filtering until near [target], then one final filtered step. */
+private fun downscale(source: ImageBitmap, target: Int): ImageBitmap {
+    var bitmap = source.asAndroidBitmap()
+    while (bitmap.width / 2 >= target) {
+        bitmap = Bitmap.createScaledBitmap(bitmap, bitmap.width / 2, bitmap.height / 2, true)
+    }
+    return Bitmap.createScaledBitmap(bitmap, target, target, true).asImageBitmap()
+}
 
 /** Hit test helper for the dock: is [point] inside the orb body (with a little slack)? */
 internal fun orbHit(point: Offset, center: Offset, bodyRadius: Float) =
