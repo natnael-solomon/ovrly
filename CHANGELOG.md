@@ -5,6 +5,10 @@
 ### Added
 
 - Eleven-clip RES-06 draft metadata with 259 traceable occurrences, single-pass adjudications, separate main-argument assessments and a 7 dev / 4 test split. Explicit draft validation and CI preserve unresolved rights, coverage and media-review limitations; this is not a frozen benchmark.
+- Voice session policy: 30-second setup timeout, five-minute input window from server ready, a bounded 30-second finishing reply with the microphone released, and a 15-second listening-silence stop. No automatic reconnection.
+- Voice orb engine interface: interaction phases, a rate-limited 0..1 level, lossy presentation events, push-to-talk hold and user barge-in (the last two untested live).
+- Offline debug voice simulation and explicit live build opt-in. No local attempt cap; provider usage is tracked against the dashboard.
+- Offline five-action voice contract with strict target arguments and cancellation-only confirmation policy. Unconnected product commands return typed errors and remain absent from the live manifest.
 - Pinned Android detekt/Compose and ktlint gates with reviewed finding baselines, Gradle dependency verification, and backend/repository vulnerability audits in CI and local pre-commit.
 - Checksum-pinned Gitleaks scans of reachable history and tracked changes, with full redaction, a private Voxide configuration guard and synthetic enforcement tests.
 - Shared backend/workflow quality gates with Ruff security rules, coded type ignores, pinned actionlint and offline zizmor.
@@ -13,7 +17,7 @@
 - Native Kotlin/Compose Android companion with manually activated floating controls, consented playback-audio and sampled-screen capture, and temporary-media retention/deletion. Capture is limited to three minutes and 32 MiB.
 - Share validation for supported video content URIs and web URL references, without downloading or analysis.
 - Design gallery with 15 glass treatments, seven states per design, synthetic backdrops and higher-opacity comparisons.
-- Configuration-gated Voxide experiment that opens the design gallery.
+- Configuration-gated Voxide experiment whose only action switches between Your space and Explore and reports when that tab is already open.
 - Saved Light/Dark appearance, labeled Your space and Explore sample reports, search, topic filters and session-local sample saves.
 - Larger sample overlay with simulated evidence interactions and confirmation before stopping a real session.
 - Android 10+ native launch splash with a chrome ring, a 900 ms handoff and no artificial delay. Android 12+ follows the saved Light/Dark appearance.
@@ -33,6 +37,10 @@
 - Added public-window background blur on supported Android 12+ devices, with opaque fallbacks.
 
 ### Fixed
+
+- Accept bounded incoming voice bursts without a 16-message UI backlog cutoff; decode off the UI thread and deliver ordered, fair batches with explicit memory limits.
+- Make voice playback buffering independent of audio chunk count with a fixed 10 MB ring buffer, add a stalled-speaker watchdog, and show the current voice status in Settings.
+- Move voice socket cancellation and pooled TLS cleanup off the UI thread to prevent a stop-time Android crash. Add bounded, payload-free connection and traffic diagnostics.
 
 - Reject database-test URL and inherited routing overrides before connecting, keeping migration tests on their disposable database.
 - Reject whitespace-suffixed evaluation IDs and SHA-256 values, including hashes used for cross-split isolation. Preserve Unicode separators inside JSON strings when reading physical JSONL lines.

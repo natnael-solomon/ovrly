@@ -69,6 +69,96 @@ See [UI maintenance](../docs/android-ui.md) for artwork, splash behavior and ass
 
 ## Optional voice experiment
 
-Voxide is disabled by default. Native authorization and compatibility remain unresolved. After provider approval, configure `voxide.local.properties` from the example using only a publishable key. Values are embedded in the APK; never use a secret key.
+Live Voxide is disabled by default. Debug builds run an explicitly labeled
+in-process protocol fixture: Start switches to Explore once without a key,
+microphone permission, audio recording or network traffic. This is a mock
+transport, not speech recognition or evidence of provider compatibility.
+Release builds without live opt-in keep voice disabled. Unit tests use fakes
+and synthetic HTTP responses; no provider sessions are used.
 
-Starting voice sends microphone audio to Voxide for gallery navigation only. It stops when the companion leaves the foreground or capture starts.
+For an authorized native-device experiment, configure the ignored
+`voxide.local.properties` from its example with `enabled=true` and only a
+publishable key, then build with `VOXIDE_LIVE=1`. This is a build-time
+environment variable, not a runtime switch; rebuild without it to return to
+offline mode. CI rejects live opt-in. Only live builds embed the publishable
+key; never use a secret key or distribute a live-configured APK casually.
+There is no local attempt cap: whoever runs live tests tracks provider usage
+against the dashboard.
+
+Live voice sends microphone audio for tab switching only and never
+reconnects automatically. Native authorization, device compatibility and
+billing semantics remain unverified; one connection was charged as one session
+in device testing. Product voice actions remain separate work (#33, #35).
+
+### Session policy
+
+| Rule | Behavior |
+| --- | --- |
+| Setup | Ends with an error if Voxide is not ready within 30 seconds. |
+| Input window | Five minutes from server ready. |
+| Finishing | Microphone released, new actions rejected; the current reply may finish for up to 30 seconds. Shows "Finishing reply · microphone off". |
+| Silence | 15 seconds of continuous listening with no speech ends the session. Speech, assistant replies, pending actions and push-to-talk pause the timer. |
+| Interruptions | Backgrounding, capture start, Stop and failures end the session. Restart is explicit. |
+
+Transmission is half-duplex: the microphone is not sent while the assistant
+speaks, plus a 250 ms echo guard. Speech detection uses a fixed loudness
+threshold that has not been tuned on devices. "Thinking" is a visual hint shown
+after speech followed by 600 ms of quiet; it does not affect control flow.
+Push-to-talk and the user barge-in control (`interrupt`, which sends Voxide's
+interrupt message and flushes playback) have not been tested live.
+
+`VoiceController` exposes `state` (with an interaction phase), a 0..1 `level`
+updated at most 20 times per second, and lossy orb `events` for presentation.
+
+### Buffers and diagnostics
+
+Incoming events are parsed and decoded on the transport thread into a bounded,
+ordered inbox (16 MB conservative accounting and 8,192 events), drained four
+events at a time so UI work and Stop are not starved. Assistant PCM goes to a
+fixed 10 MB ring buffer (about 3.5 minutes at 24 kHz). Both limits held during
+a 5¾-minute device session. Overflow, invalid input and five seconds of pending
+audio without speaker progress stop the session explicitly.
+
+Diagnostics use the `OvrlyVoice` log tag and contain only setup stages, status
+codes, event categories, counts and byte measurements: no keys, URLs,
+transcripts, audio or target IDs. Socket and TLS cleanup run off the UI thread.
+
+### Planned voice command contract
+
+The offline contract defines these exact, case-sensitive names. Every command
+takes only `{"id":"target-id"}`; extra arguments (including `confirmed` or
+`owner`) are rejected. The tool-call envelope's `id` identifies the call and is
+separate from `args.id`, which identifies the target.
+
+| Command | Target | On-screen confirmation |
+| --- | --- | --- |
+| `open_check` | Investigation/check | No |
+| `save_report` | Report | No |
+| `queue_cancel` | Job | Required |
+| `queue_retry` | Job | No |
+| `queue_continue` | Job | No |
+
+The current client ID syntax is 1-128 ASCII characters, starting with a letter
+or digit and otherwise containing letters, digits, `_` or `-`. IDs are opaque
+and case-sensitive: no trimming, coercion, URL interpretation or guessing a
+missing ID from the selected screen. Reconcile this syntax with the shared
+schemas in #15 before wiring #33/#35; it is not an implemented backend schema.
+Valid syntax does not prove the target exists or belongs to the caller.
+
+Only cancellation requires confirmation. Future integration must bind approval
+to the exact call and target, reject a remote `confirmed` flag, and discard
+pending approval on stop/backgrounding. Retry and continue remain subject to
+backend job-state and resource limits even without a confirmation dialog.
+None of these confirmations or product handlers is wired yet.
+
+The active manifest advertises only `open_tab`, which takes exactly
+`{"tab":"space"}` or `{"tab":"explore"}`. Settings is not a voice target. If
+that tab is already showing, the result says so and nothing changes; otherwise
+the app switches tabs (closing the gallery or an open report). Product requests
+return `status: error` with
+`VOICE_ACTION_UNAVAILABLE` when valid or `VOICE_ACTION_INVALID_ARGUMENTS` when
+invalid. All other actions, including delete/publish/settings, return
+`VOICE_ACTION_UNSUPPORTED`. No unfinished action returns success. Exact duplicate
+call IDs replay their prior result; changing a target under the same call ID
+stops the session as a protocol error. Malformed JSON fails protocol parsing.
+Tests exercise these paths with fakes and consume no provider sessions.

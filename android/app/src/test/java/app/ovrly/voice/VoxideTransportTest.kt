@@ -35,7 +35,7 @@ class VoxideTransportTest {
             assertEquals("https", request.url.scheme)
         }
         val body = Buffer().also { requests[1].body!!.writeTo(it) }.readUtf8()
-        assertEquals("open_design_gallery",
+        assertEquals("open_tab",
             JSONObject(body).getJSONArray("actions").getJSONObject(0).getString("name"))
     }
 
