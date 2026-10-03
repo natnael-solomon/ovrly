@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.ovrly.ui.voice.VoiceOrbDockState
 
 enum class AppDestination(val label: String) {
     SPACE("Your space"), EXPLORE("Explore"), SETTINGS("Settings"),
@@ -51,6 +52,7 @@ fun AppShell(
     destination: AppDestination,
     onDestination: (AppDestination) -> Unit,
     activeSession: String?,
+    voiceDock: VoiceOrbDockState? = null,
     settings: @Composable () -> Unit,
 ) {
     val p = LocalOvrlyPalette.current
@@ -135,8 +137,14 @@ fun AppShell(
                         reports = SampleReports.filter { it.id in savedIds },
                         onOpen = { selectedReport = it.id },
                         onExplore = { navigate(AppDestination.EXPLORE) },
+                        voiceDock = voiceDock
                     )
-                    AppDestination.EXPLORE -> ExploreScreen(onOpen = { selectedReport = it.id })
+
+                    AppDestination.EXPLORE -> ExploreScreen(
+                        onOpen = { selectedReport = it.id },
+                        voiceDock = voiceDock
+                    )
+
                     AppDestination.SETTINGS -> settings()
                 }
             }

@@ -59,6 +59,8 @@ import app.ovrly.ui.AppearanceStore
 import app.ovrly.ui.CompanionScreen
 import app.ovrly.ui.GalleryScreen
 import app.ovrly.ui.OvrlyTheme
+import app.ovrly.ui.voice.VoiceOrbAdapter
+import app.ovrly.ui.voice.VoiceOrbDockState
 import app.ovrly.voice.VoiceController
 import app.ovrly.voice.VoiceTab
 import kotlinx.coroutines.delay
@@ -69,6 +71,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 class MainActivity : ComponentActivity() {
     private val model: CompanionViewModel by viewModels()
     private lateinit var voice: VoiceController
+    private lateinit var orbDock: VoiceOrbDockState
     private var gallery by mutableStateOf(false)
     private var revealed by mutableStateOf(false)
     private var destination by mutableStateOf(AppDestination.SPACE)
@@ -111,6 +114,9 @@ class MainActivity : ComponentActivity() {
         }
     private val voicePermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            orbDock.microphoneDenied = !granted
+            orbDock.permanentlyDenied = !granted &&
+                !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
             if (granted && !model.capture.value.busy &&
                 lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
             ) {
@@ -184,6 +190,17 @@ class MainActivity : ComponentActivity() {
             destination = target
             changed
         }
+        orbDock = VoiceOrbDockState(VoiceOrbAdapter(voice, lifecycleScope, ::beginVoice)).apply {
+            requestPermission = { voicePermission.launch(Manifest.permission.RECORD_AUDIO) }
+            openAppSettings = {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        "package:$packageName".toUri()
+                    )
+                )
+            }
+        }
         enableEdgeToEdge()
         handleIntent(intent, initial = savedInstanceState == null)
         setContent {
@@ -228,18 +245,9 @@ class MainActivity : ComponentActivity() {
                         AppShell(
                             destination = destination,
                             onDestination = { destination = it },
-                            activeSession = when {
-                                capture.busy -> "Capture active"
-
-                                voiceState.active ->
-                                    if (voice.requiresMicrophone) {
-                                        "Microphone active"
-                                    } else {
-                                        "Offline voice simulation"
-                                    }
-
-                                else -> null
-                            }
+                            voiceDock = orbDock,
+                            // Voice shows its state on the header orb; only capture needs this bar.
+                            activeSession = if (capture.busy) "Capture active" else null
                         ) {
                             CompanionScreen(
                                 capture = capture, share = share, storageBusy = storageBusy,
@@ -287,22 +295,6 @@ class MainActivity : ComponentActivity() {
                                         notificationPermission.launch(
                                             Manifest.permission.POST_NOTIFICATIONS
                                         )
-                                    }
-                                },
-                                onVoiceStart = {
-                                    if (!capture.busy) {
-                                        closeDemoBeforeRealSession()
-                                        if (!voice.requiresMicrophone ||
-                                            ContextCompat.checkSelfPermission(
-                                                this@MainActivity,
-                                                Manifest.permission.RECORD_AUDIO
-                                            ) ==
-                                            PackageManager.PERMISSION_GRANTED
-                                        ) {
-                                            voice.start()
-                                        } else {
-                                            voicePermission.launch(Manifest.permission.RECORD_AUDIO)
-                                        }
                                     }
                                 },
                                 onVoiceStop = { voice.stop("Voice stopped by you.") },
@@ -476,6 +468,21 @@ class MainActivity : ComponentActivity() {
             } finally {
                 openingDemo = false
             }
+        }
+    }
+
+    /** Single entry for user-initiated voice starts: keeps capture, demo and permission guards. */
+    private fun beginVoice(hold: Boolean) {
+        val live = voice.state.value.active
+        if (!live && model.capture.value.busy) return
+        if (!live) closeDemoBeforeRealSession()
+        val allowed = !voice.requiresMicrophone ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        when {
+            !allowed -> voicePermission.launch(Manifest.permission.RECORD_AUDIO)
+            hold -> voice.holdStart()
+            else -> voice.start()
         }
     }
 

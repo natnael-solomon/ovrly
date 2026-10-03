@@ -2,7 +2,8 @@ package app.ovrly.voice
 
 /**
  * In-process protocol fixture: no sockets, credentials, microphone or speech recognition.
- * The tab action runs once (switch to Explore) after the mock handshake.
+ * It completes the handshake and one empty turn, then listens until the silence stop; it never
+ * calls an app action.
  */
 internal class MockVoiceTransport : VoiceTransport {
     private var closed = false
@@ -10,11 +11,6 @@ internal class MockVoiceTransport : VoiceTransport {
     override fun start(listener: VoiceTransport.Listener) {
         check(!closed)
         listener.message("""{"type":"ready","sessionId":"offline-fixture"}""")
-        if (!closed) {
-            listener.message(
-                """{"type":"tool_call","id":"mock-tab","name":"open_tab","args":{"tab":"explore"}}"""
-            )
-        }
         if (!closed) listener.message("""{"type":"turn_complete"}""")
     }
 

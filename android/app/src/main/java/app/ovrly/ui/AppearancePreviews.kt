@@ -49,7 +49,7 @@ private fun CompanionPreview(dark: Boolean) {
             onDismissSetup = {}, onConfirmSetup = {}, onStart = {}, onStop = {},
             onOverlayPermission = {}, onShowOverlay = {}, onHideOverlay = {}, onResetOverlay = {},
             onOpacity = {}, onDeleteCapture = {}, onClearShare = {}, onGallery = {},
-            onNotificationPermission = {}, onVoiceStart = {}, onVoiceStop = {},
+            onNotificationPermission = {}, onVoiceStop = {},
             dark = dark, onDark = {}, overlayStatus = "Solid glass / preview",
             demoActive = false, onDemo = {},
         )

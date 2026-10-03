@@ -57,7 +57,7 @@ internal class VoiceSession(
         configuration.unavailableState() ?: VoiceState(
             if (configuration.mock) "Offline voice simulation" else "Experimental voice",
             if (configuration.mock) {
-                "Offline fixture: Start switches to Explore. No microphone, network or session usage."
+                "Offline simulation: no microphone, network or session usage."
             } else {
                 "Ready to try Voxide. Native Android support is unverified; " +
                     "starting sends microphone audio to Voxide."

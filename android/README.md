@@ -53,7 +53,7 @@ require JDK 21, the SDK, uv and network access. See [shared checks](../WORKFLOW.
 
 Open `app/src/main/java/app/ovrly/ui/GalleryPreviews.kt` in Studio's Design or Split view. `GlassOverlay.kt` contains the live-control previews. Gallery selection does not change the live overlay.
 
-Your space, Explore and the larger overlay demo use labeled sample reports. Sample saves survive navigation and restored activity state, not a fresh session. Settings contains the actual capture, permissions, storage, share and voice controls.
+Your space, Explore and the larger overlay demo use labeled sample reports. Sample saves survive navigation and restored activity state, not a fresh session. Settings contains the actual capture, permissions, storage and share controls, plus voice status and Stop.
 
 Enable the larger demo from Settings or the gallery with display-over-other-apps permission. If capture or voice is active, confirm stopping it first. The demo never records or contacts a provider; closing it never restarts a session.
 
@@ -69,12 +69,13 @@ See [UI maintenance](../docs/android-ui.md) for artwork, splash behavior and ass
 
 ## Optional voice experiment
 
-Live Voxide is disabled by default. Debug builds run an explicitly labeled
-in-process protocol fixture: Start switches to Explore once without a key,
-microphone permission, audio recording or network traffic. This is a mock
-transport, not speech recognition or evidence of provider compatibility.
-Release builds without live opt-in keep voice disabled. Unit tests use fakes
-and synthetic HTTP responses; no provider sessions are used.
+Live Voxide is disabled by default. Every build without the live opt-in, debug
+and release (including Telegram APKs), runs an in-process simulation. Tapping
+the orb connects instantly, listens without a key, microphone permission, audio
+recording or network traffic, and ends after 15 seconds of silence. It never
+triggers an app action, and the orb labels every state "Demo". This is a mock
+transport, not speech recognition or evidence of provider compatibility. Unit
+tests use fakes and synthetic HTTP responses; no provider sessions are used.
 
 For an authorized native-device experiment, configure the ignored
 `voxide.local.properties` from its example with `enabled=true` and only a
@@ -109,6 +110,22 @@ interrupt message and flushes playback) have not been tested live.
 
 `VoiceController` exposes `state` (with an interaction phase), a 0..1 `level`
 updated at most 20 times per second, and lossy orb `events` for presentation.
+
+Voice starts from the orb in the Your space and Explore headers. Tap the small
+orb (46 dp, 48 dp touch target) to open it, then tap to start or stop, or hold
+for push-to-talk. While the assistant speaks, a tap interrupts it. Scrolling
+the list collapses the open orb with the swipe; a fling docks it first. Settings
+keeps the status and a Stop control. Starting voice is blocked during capture,
+closes the overlay demo and asks for microphone permission. If permission is
+permanently denied, the orb opens app settings. An unconfigured build shows a
+muted orb that does nothing on tap. Errors show a short reason and return to
+idle. Haptic confirmation uses `CONFIRM` on Android 11+ and a plain click on
+Android 10.
+
+Checked on a Samsung SM-A217F (Android 12) with the offline simulation and with
+unconfigured and unreachable debug builds: open, collapse, scroll, permission
+prompt, denial, the settings route and a connection failure. Live Voxide use of
+the orb, push-to-talk and barge-in have not been tested.
 
 ### Buffers and diagnostics
 
