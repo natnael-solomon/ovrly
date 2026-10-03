@@ -16,8 +16,6 @@ import android.media.audiofx.AudioEffect
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import kotlin.math.max
@@ -30,28 +28,36 @@ import kotlin.math.max
 internal class AndroidVoiceAudio(
     context: Context,
     private val diagnostics: VoiceDiagnostics,
+    playbackCapacity: Int = VoicePlaybackBuffer.CAPACITY
 ) : VoiceAudio {
     private val context = context.applicationContext
     private val manager = this.context.getSystemService(AudioManager::class.java)
     private val lock = Any()
     private val running = AtomicBoolean(false)
-    private val queue = ArrayBlockingQueue<Chunk>(8)
+    private val inputOpen = AtomicBoolean(false)
+    private val queue = VoicePlaybackBuffer(playbackCapacity)
+    private val progress = VoicePlaybackProgress()
+    private var nextProgressLogAt = 0L
     private var recorder: AudioRecord? = null
     private var speaker: AudioTrack? = null
     private var echoCanceler: AcousticEchoCanceler? = null
     private var focus: AudioFocusRequest? = null
     private var captureThread: Thread? = null
     private var playbackThread: Thread? = null
-    private var bufferedBytes = 0
-    private var epoch = 0
     private var writtenFrames = 0L
     private var resumeInputAt = 0L
     private var playbackPending = false
+    private var playbackWriteLogged = false
+    private var playbackAdvanceLogged = false
     private var failed: (String) -> Unit = {}
-    private data class Chunk(val epoch: Int, val bytes: ByteArray)
 
     @SuppressLint("MissingPermission")
-    override fun start(input: (ByteArray) -> Unit, drained: () -> Unit, failed: (String) -> Unit) {
+    override fun start(
+        input: (ByteArray) -> Unit,
+        drained: () -> Unit,
+        failed: (String) -> Unit,
+        output: (Float) -> Unit
+    ) {
         check(!running.get())
         this.failed = failed
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -99,11 +105,12 @@ internal class AndroidVoiceAudio(
             record.startRecording()
             check(record.recordingState == AudioRecord.RECORDSTATE_RECORDING)
             running.set(true)
+            inputOpen.set(true)
             captureThread = thread(name = "ovrly-voice-capture", isDaemon = true) {
                 capture(record, input)
             }
             playbackThread = thread(name = "ovrly-voice-playback", isDaemon = true) {
-                play(track, drained)
+                play(track, drained, output)
             }
             startupComplete = true
         } catch (cause: SecurityException) {
@@ -145,18 +152,24 @@ internal class AndroidVoiceAudio(
 
     private fun capture(record: AudioRecord, input: (ByteArray) -> Unit) {
         val samples = ShortArray(320)
-        while (running.get()) {
+        while (running.get() && inputOpen.get()) {
             val count = try {
                 record.read(samples, 0, samples.size, AudioRecord.READ_BLOCKING)
             } catch (cause: IllegalStateException) {
-                if (running.get()) reportFailure("The microphone is no longer in a recording state. Voice stopped.", cause)
-                else diagnostics.warning("Microphone read ended during requested cleanup", cause)
+                if (running.get() && inputOpen.get()) {
+                    reportFailure(
+                        "The microphone is no longer in a recording state. Voice stopped.",
+                        cause
+                    )
+                } else {
+                    diagnostics.warning("Microphone read ended during requested cleanup", cause)
+                }
                 return
             } catch (cause: SecurityException) {
                 reportFailure("Android revoked microphone access. Voice stopped.", cause)
                 return
             }
-            if (!running.get()) return
+            if (!running.get() || !inputOpen.get()) return
             if (count <= 0) {
                 reportFailure("Microphone read failed (audio error $count). Voice stopped.")
                 return
@@ -175,45 +188,59 @@ internal class AndroidVoiceAudio(
     }
 
     override fun enqueue(pcm: ByteArray): Boolean = synchronized(lock) {
-        if (!running.get() || pcm.isEmpty() || pcm.size % 2 != 0 ||
-            pcm.size > VoiceProtocol.MAX_AUDIO_BYTES || bufferedBytes + pcm.size > 96_000
-        ) return false
-        if (!queue.offer(Chunk(epoch, pcm))) return false
-        bufferedBytes += pcm.size
+        if (!running.get()) return false
+        if (pcm.isEmpty() || pcm.size % 2 != 0 ||
+            pcm.size > VoiceProtocol.MAX_AUDIO_BYTES
+        ) {
+            diagnostics.warning("Voice playback rejected invalid PCM length=${pcm.size}")
+            return false
+        }
+        if (!queue.offer(pcm)) {
+            diagnostics.warning(
+                "Voice playback byte limit: incoming=${pcm.size}, queued=${queue.size}, " +
+                    "capacity=${queue.capacity}"
+            )
+            return false
+        }
         playbackPending = true
         true
     }
 
-    private fun play(track: AudioTrack, drained: () -> Unit) {
+    private fun play(track: AudioTrack, drained: () -> Unit, output: (Float) -> Unit) {
+        var peak = 0f
+        var writes = 0
         while (running.get()) {
             val finished = try {
-                val chunk = queue.poll(20, TimeUnit.MILLISECONDS)
-                if (chunk != null) {
-                    var offset = 0
-                    while (running.get() && offset < chunk.bytes.size) {
-                        val count = synchronized(lock) {
-                            if (chunk.epoch != epoch || !running.get()) -1
-                            else track.write(
-                                chunk.bytes, offset, minOf(960, chunk.bytes.size - offset),
-                                AudioTrack.WRITE_NON_BLOCKING,
-                            )
+                val count = synchronized(lock) {
+                    if (!running.get()) return
+                    queue.write(960) { data, offset, length ->
+                        track.write(data, offset, length, AudioTrack.WRITE_NON_BLOCKING).also {
+                            if (it > 0) peak = max(peak, VoiceLevel.rms(data, offset, it))
                         }
-                        if (count == -1 && synchronized(lock) { chunk.epoch != epoch || !running.get() }) break
-                        if (count < 0 || count % 2 != 0) throw IllegalStateException()
-                        synchronized(lock) {
-                            if (chunk.epoch == epoch) writtenFrames += count / 2
+                    }.also {
+                        writtenFrames += it / 2
+                        if (it > 0 && !playbackWriteLogged) {
+                            playbackWriteLogged = true
+                            diagnostics.warning("Voice first PCM write accepted by AudioTrack")
                         }
-                        offset += count
-                        if (count == 0) Thread.sleep(10)
-                    }
-                    synchronized(lock) {
-                        if (chunk.epoch == epoch) bufferedBytes -= chunk.bytes.size
                     }
                 }
+                if (count == 0) Thread.sleep(10)
+                if (count > 0 && ++writes >= LEVEL_WRITES) {
+                    output(peak)
+                    peak = 0f
+                    writes = 0
+                }
                 synchronized(lock) {
-                    if (running.get() && playbackPending && bufferedBytes == 0 &&
-                        (track.playbackHeadPosition.toLong() and 0xffffffffL) >= writtenFrames
-                    ) {
+                    if (!running.get()) return
+                    val playedFrames = track.playbackHeadPosition.toLong() and 0xffffffffL
+                    if (!checkProgress(playedFrames)) return
+                    if (playedFrames > 0 && !playbackAdvanceLogged) {
+                        playbackAdvanceLogged = true
+                        diagnostics.warning("Voice AudioTrack playback head advanced")
+                    }
+                    val fullyWritten = playbackPending && queue.size == 0
+                    if (running.get() && fullyWritten && playedFrames >= writtenFrames) {
                         playbackPending = false
                         resumeInputAt = SystemClock.elapsedRealtime() + 250
                         true
@@ -236,12 +263,27 @@ internal class AndroidVoiceAudio(
         }
     }
 
+    private fun checkProgress(playedFrames: Long): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        val sample = progress.sample(queue.size, writtenFrames, playedFrames, now)
+        if (sample.queuedMillis > 0 && (now >= nextProgressLogAt || sample.stalled)) {
+            diagnostics.warning(
+                "Voice playback queuedMs=${sample.queuedMillis}, " +
+                    "noProgressMs=${sample.noProgressMillis}, stagedBytes=${queue.size}"
+            )
+            nextProgressLogAt = now + VoicePlaybackProgress.STALL_MILLIS
+        }
+        if (sample.stalled) {
+            reportFailure("Speaker made no playback progress for five seconds. Voice stopped.")
+        }
+        return !sample.stalled
+    }
+
     override fun interrupt() {
         try {
             synchronized(lock) {
-                epoch++
                 queue.clear()
-                bufferedBytes = 0
+                progress.reset()
                 writtenFrames = 0
                 playbackPending = false
                 resumeInputAt = SystemClock.elapsedRealtime() + 250
@@ -258,16 +300,27 @@ internal class AndroidVoiceAudio(
         }
     }
 
+    override fun stopInput() {
+        if (!inputOpen.compareAndSet(true, false)) return
+        try {
+            recorder?.let {
+                if (it.recordingState == AudioRecord.RECORDSTATE_RECORDING) it.stop()
+            }
+        } catch (cause: IllegalStateException) {
+            diagnostics.warning("Microphone could not stop before the final reply", cause)
+        }
+    }
+
     override fun close() {
         running.set(false)
+        inputOpen.set(false)
         val oldCaptureThread = captureThread
         val oldPlaybackThread = playbackThread
         captureThread = null
         playbackThread = null
         val oldSpeaker = synchronized(lock) {
-            epoch++
             queue.clear()
-            bufferedBytes = 0
+            progress.reset()
             playbackPending = false
             speaker.also { speaker = null }
         }
@@ -297,7 +350,12 @@ internal class AndroidVoiceAudio(
         if (failures.isNotEmpty()) throw VoiceCleanupException(failures)
     }
 
-    private fun format(rate: Int, channel: Int) = AudioFormat.Builder()
-        .setSampleRate(rate).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-        .setChannelMask(channel).build()
+    private companion object {
+        // Report playback level about every 60 ms of written 20 ms chunks.
+        const val LEVEL_WRITES = 3
+    }
 }
+
+private fun format(rate: Int, channel: Int) = AudioFormat.Builder()
+    .setSampleRate(rate).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+    .setChannelMask(channel).build()

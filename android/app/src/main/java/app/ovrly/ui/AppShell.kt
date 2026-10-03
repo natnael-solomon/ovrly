@@ -56,6 +56,12 @@ fun AppShell(
     val p = LocalOvrlyPalette.current
     val pages = rememberSaveableStateHolder()
     var selectedReport by rememberSaveable { mutableStateOf<String?>(null) }
+    // Destination can also change from outside (voice); an open report belongs to the old tab.
+    var shownDestination by rememberSaveable { mutableStateOf(destination) }
+    if (shownDestination != destination) {
+        shownDestination = destination
+        selectedReport = null
+    }
     var savedIds by rememberSaveable { mutableStateOf(SampleReports.take(3).map { it.id }) }
     val report = SampleReports.firstOrNull { it.id == selectedReport }
     val showingReport = destination != AppDestination.SETTINGS && report != null

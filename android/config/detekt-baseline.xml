@@ -10,11 +10,11 @@
     <ID>ComplexCondition:VoiceProtocol.kt$VoiceProtocol$pcm.isEmpty() || pcm.size &gt; MAX_AUDIO_BYTES || pcm.size % 2 != 0 || Base64.getEncoder().encodeToString(pcm) != encoded</ID>
     <ID>CompositionLocalAllowlist:OvrlyTheme.kt$LocalOvrlyPalette</ID>
     <ID>CompositionLocalAllowlist:OvrlyTheme.kt$LocalWindowBlur</ID>
-    <ID>CyclomaticComplexMethod:AndroidVoiceAudio.kt$AndroidVoiceAudio$private fun play(track: AudioTrack, drained: () -&gt; Unit)</ID>
+    <ID>CyclomaticComplexMethod:AndroidVoiceAudio.kt$AndroidVoiceAudio$private fun play(track: AudioTrack, drained: () -&gt; Unit, output: (Float) -&gt; Unit)</ID>
     <ID>CyclomaticComplexMethod:AppShell.kt$@Composable fun AppShell( destination: AppDestination, onDestination: (AppDestination) -&gt; Unit, activeSession: String?, settings: @Composable () -&gt; Unit, )</ID>
     <ID>CyclomaticComplexMethod:CaptureService.kt$CaptureService$override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int</ID>
     <ID>CyclomaticComplexMethod:CaptureService.kt$CaptureService$private fun finish(reason: String, failed: Boolean = false)</ID>
-    <ID>CyclomaticComplexMethod:CompanionScreen.kt$@Composable @OptIn(ExperimentalLayoutApi::class) fun CompanionScreen( capture: CaptureState, share: SharedInput?, storageBusy: Boolean, overlayAllowed: Boolean, overlayVisible: Boolean, notificationsAllowed: Boolean, higherOpacity: Boolean, voiceActive: Boolean, voiceMessage: String, voiceConfigured: Boolean, showSetup: Boolean, onDismissSetup: () -&gt; Unit, onConfirmSetup: () -&gt; Unit, onStart: () -&gt; Unit, onStop: () -&gt; Unit, onOverlayPermission: () -&gt; Unit, onShowOverlay: () -&gt; Unit, onHideOverlay: () -&gt; Unit, onResetOverlay: () -&gt; Unit, onOpacity: (Boolean) -&gt; Unit, onDeleteCapture: () -&gt; Unit, onClearShare: () -&gt; Unit, onGallery: () -&gt; Unit, onNotificationPermission: () -&gt; Unit, onVoiceStart: () -&gt; Unit, onVoiceStop: () -&gt; Unit, dark: Boolean, onDark: (Boolean) -&gt; Unit, overlayStatus: String, demoActive: Boolean, onDemo: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:CompanionScreen.kt$@Composable @OptIn(ExperimentalLayoutApi::class) fun CompanionScreen( capture: CaptureState, share: SharedInput?, storageBusy: Boolean, overlayAllowed: Boolean, overlayVisible: Boolean, notificationsAllowed: Boolean, higherOpacity: Boolean, voiceActive: Boolean, voiceMessage: String, voiceConfigured: Boolean, showSetup: Boolean, onDismissSetup: () -&gt; Unit, onConfirmSetup: () -&gt; Unit, onStart: () -&gt; Unit, onStop: () -&gt; Unit, onOverlayPermission: () -&gt; Unit, onShowOverlay: () -&gt; Unit, onHideOverlay: () -&gt; Unit, onResetOverlay: () -&gt; Unit, onOpacity: (Boolean) -&gt; Unit, onDeleteCapture: () -&gt; Unit, onClearShare: () -&gt; Unit, onGallery: () -&gt; Unit, onNotificationPermission: () -&gt; Unit, onVoiceStart: () -&gt; Unit, onVoiceStop: () -&gt; Unit, dark: Boolean, onDark: (Boolean) -&gt; Unit, overlayStatus: String, demoActive: Boolean, voiceMock: Boolean = false, onDemo: () -&gt; Unit )</ID>
     <ID>CyclomaticComplexMethod:GalleryBackdrop.kt$@Composable internal fun GalleryBackdrop( backdrop: StudyBackdrop, compact: Boolean, modifier: Modifier = Modifier, onMockBackgroundTap: (() -&gt; Unit)? = null, minimal: Boolean = false, content: @Composable () -&gt; Unit, )</ID>
     <ID>CyclomaticComplexMethod:GalleryMaterial.kt$internal fun Modifier.studySurface( design: StudyDesign, palette: StudyPalette, circular: Boolean = false, ): Modifier</ID>
     <ID>CyclomaticComplexMethod:GalleryOverlay.kt$@Composable private fun StudyControl( state: OverlayVisual, action: StudyAction, design: StudyDesign, palette: StudyPalette, onAction: (StudyAction) -&gt; Unit, )</ID>
@@ -24,12 +24,11 @@
     <ID>CyclomaticComplexMethod:VoiceProtocol.kt$StrictJson$private fun value(depth: Int)</ID>
     <ID>CyclomaticComplexMethod:VoiceProtocol.kt$VoiceConfiguration$fun unavailableState(): VoiceState?</ID>
     <ID>CyclomaticComplexMethod:VoiceProtocol.kt$VoiceProtocol$fun parse(text: String): VoiceEvent</ID>
-    <ID>CyclomaticComplexMethod:VoiceSession.kt$VoiceSession$private fun receive(event: VoiceEvent, token: Int)</ID>
-    <ID>LongMethod:AndroidVoiceAudio.kt$AndroidVoiceAudio$@SuppressLint("MissingPermission") override fun start(input: (ByteArray) -&gt; Unit, drained: () -&gt; Unit, failed: (String) -&gt; Unit)</ID>
+    <ID>LongMethod:AndroidVoiceAudio.kt$AndroidVoiceAudio$@SuppressLint("MissingPermission") override fun start( input: (ByteArray) -&gt; Unit, drained: () -&gt; Unit, failed: (String) -&gt; Unit, output: (Float) -&gt; Unit )</ID>
     <ID>LongMethod:AppShell.kt$@Composable fun AppShell( destination: AppDestination, onDestination: (AppDestination) -&gt; Unit, activeSession: String?, settings: @Composable () -&gt; Unit, )</ID>
     <ID>LongMethod:CaptureService.kt$CaptureService$override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int</ID>
     <ID>LongMethod:ChromeArtwork.kt$@Composable internal fun ChromeArtwork(variant: Int, modifier: Modifier = Modifier)</ID>
-    <ID>LongMethod:CompanionScreen.kt$@Composable @OptIn(ExperimentalLayoutApi::class) fun CompanionScreen( capture: CaptureState, share: SharedInput?, storageBusy: Boolean, overlayAllowed: Boolean, overlayVisible: Boolean, notificationsAllowed: Boolean, higherOpacity: Boolean, voiceActive: Boolean, voiceMessage: String, voiceConfigured: Boolean, showSetup: Boolean, onDismissSetup: () -&gt; Unit, onConfirmSetup: () -&gt; Unit, onStart: () -&gt; Unit, onStop: () -&gt; Unit, onOverlayPermission: () -&gt; Unit, onShowOverlay: () -&gt; Unit, onHideOverlay: () -&gt; Unit, onResetOverlay: () -&gt; Unit, onOpacity: (Boolean) -&gt; Unit, onDeleteCapture: () -&gt; Unit, onClearShare: () -&gt; Unit, onGallery: () -&gt; Unit, onNotificationPermission: () -&gt; Unit, onVoiceStart: () -&gt; Unit, onVoiceStop: () -&gt; Unit, dark: Boolean, onDark: (Boolean) -&gt; Unit, overlayStatus: String, demoActive: Boolean, onDemo: () -&gt; Unit, )</ID>
+    <ID>LongMethod:CompanionScreen.kt$@Composable @OptIn(ExperimentalLayoutApi::class) fun CompanionScreen( capture: CaptureState, share: SharedInput?, storageBusy: Boolean, overlayAllowed: Boolean, overlayVisible: Boolean, notificationsAllowed: Boolean, higherOpacity: Boolean, voiceActive: Boolean, voiceMessage: String, voiceConfigured: Boolean, showSetup: Boolean, onDismissSetup: () -&gt; Unit, onConfirmSetup: () -&gt; Unit, onStart: () -&gt; Unit, onStop: () -&gt; Unit, onOverlayPermission: () -&gt; Unit, onShowOverlay: () -&gt; Unit, onHideOverlay: () -&gt; Unit, onResetOverlay: () -&gt; Unit, onOpacity: (Boolean) -&gt; Unit, onDeleteCapture: () -&gt; Unit, onClearShare: () -&gt; Unit, onGallery: () -&gt; Unit, onNotificationPermission: () -&gt; Unit, onVoiceStart: () -&gt; Unit, onVoiceStop: () -&gt; Unit, dark: Boolean, onDark: (Boolean) -&gt; Unit, overlayStatus: String, demoActive: Boolean, voiceMock: Boolean = false, onDemo: () -&gt; Unit )</ID>
     <ID>LongMethod:DemoOverlayPanel.kt$@Composable internal fun DemoOverlayPanel( blurLabel: String, onClose: () -&gt; Unit, modifier: Modifier = Modifier, panelWidth: Dp = 340.dp, maxHeight: Dp = 360.dp, onHeaderHeight: (Int) -&gt; Unit = {}, )</ID>
     <ID>LongMethod:GalleryBackdrop.kt$@Composable internal fun GalleryBackdrop( backdrop: StudyBackdrop, compact: Boolean, modifier: Modifier = Modifier, onMockBackgroundTap: (() -&gt; Unit)? = null, minimal: Boolean = false, content: @Composable () -&gt; Unit, )</ID>
     <ID>LongMethod:GalleryMaterial.kt$internal fun Modifier.studySurface( design: StudyDesign, palette: StudyPalette, circular: Boolean = false, ): Modifier</ID>
@@ -41,15 +40,14 @@
     <ID>LongMethod:MainActivity.kt$MainActivity$override fun onCreate(savedInstanceState: Bundle?)</ID>
     <ID>LongMethod:OpticalGlass.kt$internal fun Modifier.opticalGlass(higherOpacity: Boolean): Modifier</ID>
     <ID>LongMethod:OverlayService.kt$OverlayService$private fun attachOverlay()</ID>
-    <ID>LongMethod:VoiceSession.kt$VoiceSession$private fun receive(event: VoiceEvent, token: Int)</ID>
     <ID>LongParameterList:AppNotifications.kt$AppNotifications$(context: Context, title: String, text: String, action: String, target: Class&lt;out Service&gt;, actionLabel: String = if (action == "hide") "Hide overlay (capture continues)" else "Stop capture", )</ID>
-    <ID>LongParameterList:CompanionScreen.kt$( capture: CaptureState, share: SharedInput?, storageBusy: Boolean, overlayAllowed: Boolean, overlayVisible: Boolean, notificationsAllowed: Boolean, higherOpacity: Boolean, voiceActive: Boolean, voiceMessage: String, voiceConfigured: Boolean, showSetup: Boolean, onDismissSetup: () -&gt; Unit, onConfirmSetup: () -&gt; Unit, onStart: () -&gt; Unit, onStop: () -&gt; Unit, onOverlayPermission: () -&gt; Unit, onShowOverlay: () -&gt; Unit, onHideOverlay: () -&gt; Unit, onResetOverlay: () -&gt; Unit, onOpacity: (Boolean) -&gt; Unit, onDeleteCapture: () -&gt; Unit, onClearShare: () -&gt; Unit, onGallery: () -&gt; Unit, onNotificationPermission: () -&gt; Unit, onVoiceStart: () -&gt; Unit, onVoiceStop: () -&gt; Unit, dark: Boolean, onDark: (Boolean) -&gt; Unit, overlayStatus: String, demoActive: Boolean, onDemo: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:CompanionScreen.kt$( capture: CaptureState, share: SharedInput?, storageBusy: Boolean, overlayAllowed: Boolean, overlayVisible: Boolean, notificationsAllowed: Boolean, higherOpacity: Boolean, voiceActive: Boolean, voiceMessage: String, voiceConfigured: Boolean, showSetup: Boolean, onDismissSetup: () -&gt; Unit, onConfirmSetup: () -&gt; Unit, onStart: () -&gt; Unit, onStop: () -&gt; Unit, onOverlayPermission: () -&gt; Unit, onShowOverlay: () -&gt; Unit, onHideOverlay: () -&gt; Unit, onResetOverlay: () -&gt; Unit, onOpacity: (Boolean) -&gt; Unit, onDeleteCapture: () -&gt; Unit, onClearShare: () -&gt; Unit, onGallery: () -&gt; Unit, onNotificationPermission: () -&gt; Unit, onVoiceStart: () -&gt; Unit, onVoiceStop: () -&gt; Unit, dark: Boolean, onDark: (Boolean) -&gt; Unit, overlayStatus: String, demoActive: Boolean, voiceMock: Boolean = false, onDemo: () -&gt; Unit )</ID>
     <ID>LongParameterList:DemoOverlayPanel.kt$( blurLabel: String, onClose: () -&gt; Unit, modifier: Modifier = Modifier, panelWidth: Dp = 340.dp, maxHeight: Dp = 360.dp, onHeaderHeight: (Int) -&gt; Unit = {}, )</ID>
     <ID>LongParameterList:GalleryBackdrop.kt$( backdrop: StudyBackdrop, compact: Boolean, modifier: Modifier = Modifier, onMockBackgroundTap: (() -&gt; Unit)? = null, minimal: Boolean = false, content: @Composable () -&gt; Unit, )</ID>
     <ID>LongParameterList:GalleryOverlay.kt$( state: OverlayVisual, design: StudyDesign, darkBackdrop: Boolean, higherOpacity: Boolean, onAction: (StudyAction) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>LongParameterList:GalleryScreen.kt$( fixture: GalleryFixture, design: StudyDesign, backdrop: StudyBackdrop, higherOpacity: Boolean, compact: Boolean = true, countBackgroundTaps: Boolean = false, minimalBackdrop: Boolean = false, )</ID>
     <ID>LongParameterList:GlassOverlay.kt$( state: OverlayVisual, higherOpacity: Boolean, onSetup: () -&gt; Unit, onStopCapture: () -&gt; Unit, onCancelResearch: () -&gt; Unit, onDetails: () -&gt; Unit, modifier: Modifier = Modifier, referenceMaterial: Boolean = false, )</ID>
-    <ID>LongParameterList:VoiceSession.kt$VoiceSession$( private val configuration: VoiceConfiguration, private val transportFactory: () -&gt; VoiceTransport, private val audioFactory: () -&gt; VoiceAudio, private val permissionGranted: () -&gt; Boolean, private val dispatch: (() -&gt; Unit) -&gt; Unit, private val schedule: (Long, () -&gt; Unit) -&gt; VoiceCancellation, private val openGallery: () -&gt; Unit, private val diagnostics: VoiceDiagnostics, )</ID>
+    <ID>LongParameterList:VoiceSession.kt$VoiceSession$( private val configuration: VoiceConfiguration, private val transportFactory: () -&gt; VoiceTransport, private val audioFactory: () -&gt; VoiceAudio, private val permissionGranted: () -&gt; Boolean, private val dispatch: (() -&gt; Unit) -&gt; Unit, private val schedule: (Long, () -&gt; Unit) -&gt; VoiceCancellation, private val navigator: VoiceNavigator, private val diagnostics: VoiceDiagnostics, private val presentation: VoicePresentation = VoicePresentation { TimeUnit.NANOSECONDS.toMillis(System.nanoTime()) } )</ID>
     <ID>LoopWithTooManyJumpStatements:CaptureService.kt$CaptureService$while</ID>
     <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$0xffffffffL</ID>
     <ID>MagicNumber:AndroidVoiceAudio.kt$AndroidVoiceAudio$10</ID>
@@ -389,10 +387,7 @@
     <ID>MagicNumber:VoiceProtocol.kt$VoiceProtocol$4</ID>
     <ID>MagicNumber:VoiceProtocol.kt$VoiceProtocol$64</ID>
     <ID>MagicNumber:VoiceProtocol.kt$VoiceProtocol$8192</ID>
-    <ID>MagicNumber:VoiceSession.kt$VoiceSession$180_000</ID>
     <ID>MagicNumber:VoiceSession.kt$VoiceSession$240</ID>
-    <ID>MagicNumber:VoiceSession.kt$VoiceSession$30_000</ID>
-    <ID>MagicNumber:VoiceSession.kt$VoiceSession$32</ID>
     <ID>MagicNumber:VoiceSession.kt$VoiceSession.&lt;no name provided&gt;$16</ID>
     <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$10</ID>
     <ID>MagicNumber:VoxideTransport.kt$VoxideTransport$1024</ID>
@@ -428,7 +423,7 @@
     <ID>MaxLineLength:CaptureService.kt$CaptureService$if (elapsed &gt;= CaptureLimits.LIVE_MS || elapsed - lastFrameMs &lt; CaptureLimits.FRAME_INTERVAL_MS) return@use</ID>
     <ID>MaxLineLength:CaptureService.kt$CaptureService$release("playback recorder stop") { if (audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) audio.stop() }</ID>
     <ID>MaxLineLength:CaptureService.kt$CaptureService$val duration = if (startedMs == 0L) 0 else (SystemClock.elapsedRealtime() - startedMs).coerceIn(0, CaptureLimits.LIVE_MS)</ID>
-    <ID>MaxLineLength:CompanionScreen.kt$"Native authorization is unverified. Voice can open the gallery only; it cannot start capture or the overlay, or discuss evidence. Playback capture is separate."</ID>
+    <ID>MaxLineLength:CompanionScreen.kt$"Native authorization is unverified. Voice can only switch between Your space and Explore; it cannot start capture or the overlay, or discuss evidence. Playback capture is separate."</ID>
     <ID>MaxLineLength:CompanionScreen.kt$"One capture at a time, up to 32 MiB. A new capture replaces it. Interrupted data and captures older than 24 hours are removed next time the app opens. No upload or account sync."</ID>
     <ID>MaxLineLength:CompanionScreen.kt$"Playback audio and a screen image about every 5 seconds. No microphone fallback, transcription, research or upload. Android consent is required each time."</ID>
     <ID>MaxLineLength:CompanionScreen.kt$CapturePhase.RECORDING -&gt; "REC %d:%02d / 3:00".format(capture.seconds / 60, capture.seconds % 60)</ID>
@@ -530,12 +525,12 @@
     <ID>ModifierMissing:GalleryScreen.kt$GalleryScreen</ID>
     <ID>ModifierWithoutDefault:GlassOverlay.kt$modifier</ID>
     <ID>MutableStateAutoboxing:SampleScreens.kt$mutableStateOf&lt;Int?&gt;(0)</ID>
-    <ID>NestedBlockDepth:AndroidVoiceAudio.kt$AndroidVoiceAudio$private fun play(track: AudioTrack, drained: () -&gt; Unit)</ID>
+    <ID>NestedBlockDepth:AndroidVoiceAudio.kt$AndroidVoiceAudio$private fun play(track: AudioTrack, drained: () -&gt; Unit, output: (Float) -&gt; Unit)</ID>
     <ID>NestedBlockDepth:OverlayAppearanceTest.kt$OverlayAppearanceTest$@Test fun foregroundContrastSurvivesDarkestBackingAcrossGradient()</ID>
     <ID>NestedBlockDepth:OvrlyThemeTest.kt$OvrlyThemeTest$@Test fun overlayReadableOnExtremeBackdropsWithOrWithoutBlur()</ID>
     <ID>NestedBlockDepth:ShareInput.kt$ShareInputReader$private fun readChecked(context: Context, intent: Intent): SharedInput</ID>
     <ID>ReturnCount:AndroidVoiceAudio.kt$AndroidVoiceAudio$private fun capture(record: AudioRecord, input: (ByteArray) -&gt; Unit)</ID>
-    <ID>ReturnCount:AndroidVoiceAudio.kt$AndroidVoiceAudio$private fun play(track: AudioTrack, drained: () -&gt; Unit)</ID>
+    <ID>ReturnCount:AndroidVoiceAudio.kt$AndroidVoiceAudio$private fun play(track: AudioTrack, drained: () -&gt; Unit, output: (Float) -&gt; Unit)</ID>
     <ID>ReturnCount:CaptureFiles.kt$CaptureFiles$@Synchronized fun expireIfNeeded(nowMs: Long): Boolean</ID>
     <ID>ReturnCount:CaptureFiles.kt$CaptureFiles$@Synchronized fun restoreOrExpire(nowMs: Long): CaptureState?</ID>
     <ID>ReturnCount:CaptureService.kt$CaptureService$override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int</ID>
@@ -545,7 +540,6 @@
     <ID>ReturnCount:ShareInput.kt$SharePolicy$fun webReference(text: String): String?</ID>
     <ID>ReturnCount:VoiceProtocol.kt$StrictJson$private fun value(depth: Int)</ID>
     <ID>ReturnCount:VoiceProtocol.kt$VoiceConfiguration$fun unavailableState(): VoiceState?</ID>
-    <ID>ReturnCount:VoiceSession.kt$VoiceSession$private fun receive(event: VoiceEvent, token: Int)</ID>
     <ID>ThrowingExceptionFromFinally:VoxideTransport.kt$VoxideTransport.&lt;no name provided&gt;$throw t</ID>
     <ID>ThrowingExceptionsWithoutMessageOrCause:AndroidVoiceAudio.kt$AndroidVoiceAudio$IllegalStateException()</ID>
     <ID>ThrowsCount:VoiceProtocol.kt$VoiceProtocol$fun parse(text: String): VoiceEvent</ID>
