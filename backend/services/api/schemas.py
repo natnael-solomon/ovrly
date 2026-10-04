@@ -94,3 +94,24 @@ class InvestigationResponse(BaseModel):
 
 class InvestigationListResponse(BaseModel):
     items: list[InvestigationResponse]
+
+
+# ---- Account link (BC-D07, BE-05 part 2) ---------------------------------------------
+# Kept at the end of the file so the #15 read-model additions above merge cleanly.
+
+
+class AccountLinkRequest(StrictModel):
+    provider: Literal["google"]
+    id_token: str = Field(min_length=1, max_length=4096)
+
+
+class AccountLinkResponse(BaseModel):
+    principal_id: uuid.UUID
+    kind: Literal["account"]
+    linked: Literal[True]
+    merged_saved_reports: int
+    # Only present when the device continues as an existing account (second device).
+    credential: Credential | None
+
+
+# ---- End account link ------------------------------------------------------------------

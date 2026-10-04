@@ -22,6 +22,12 @@ principals = Table(
     Column("id", UUID(as_uuid=True), primary_key=True),
     Column("kind", String(16), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # Stable Google subject once linked (BC-D07); one account per subject.
+    Column("google_sub", String(255), nullable=True),
+    # Set on a guest whose device continued as an existing account; its credentials are revoked.
+    Column("merged_into", UUID(as_uuid=True), ForeignKey("principals.id"), nullable=True),
+    Column("merged_at", DateTime(timezone=True), nullable=True),
+    UniqueConstraint("google_sub", name="uq_principals_google_sub"),
 )
 
 credentials = Table(

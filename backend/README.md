@@ -2,12 +2,12 @@
 
 Python 3.11 / uv / FastAPI foundation with PostgreSQL, Alembic, a shared worker
 lifecycle and a durable PostgreSQL job queue with typed retry classes. The API
-mints guest principals, accepts uploads and records investigations behind
-bearer authentication (see [Identity and intake API](#identity-and-intake-api)).
-No research processing or account linking is implemented, recorded
-investigations are not yet handed to the queue, and no pipeline stage handlers
-exist, so the worker claims nothing in production; it proves startup,
-supervision, lease draining, retries and shutdown. See
+mints guest principals, links them to a Google account (BC-D07), accepts
+uploads and records investigations behind bearer authentication (see
+[Identity and intake API](#identity-and-intake-api)). Each recorded
+investigation is handed to the queue as an `intake` job in the same
+transaction; the worker's `intake` stage only confirms the record today, so no
+research processing happens yet (BE-07, #20). See
 [Durable jobs and recovery](#durable-jobs-and-recovery).
 
 ## Local setup (Linux / WSL)
@@ -87,6 +87,7 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_JOB_RETRY_UNKNOWN_OUTCOME_ATTEMPTS` | 3; 0 to 10. Reconciliation attempts for the `unknown_outcome` class |
 | `OVRLY_JOB_RETRY_BACKOFF_SECONDS` | 1; positive, at most 60. Base of the exponential backoff |
 | `OVRLY_JOB_RETRY_MAX_BACKOFF_SECONDS` | 60; positive, at most 3600 and at least the base. Caps backoff and provider retry-after hints |
+| `OVRLY_GOOGLE_CLIENT_ID` | Empty; Google Web client ID that linked ID tokens must be issued for (BC-D07). Configuration, not a secret. Empty leaves `POST /v1/principals/link` unavailable with 503 `ACCOUNT_LINK_UNAVAILABLE` |
 
 The helper checks for at least 2 GiB free on the checkout filesystem before and
 after dependency/image setup and after database startup. It stops further work if
@@ -124,10 +125,11 @@ owned database resources and drain their lease on shutdown. Worker failures are
 visible and are not automatically restarted. Migration `0001` only establishes
 Alembic history; `0002_jobs` creates the `jobs` and `job_results` tables,
 `0003_identity_intake` creates the principal, credential, upload, investigation
-and idempotency tables defined in `services/models.py`, and `0004_job_retries`
+and idempotency tables defined in `services/models.py`, `0004_job_retries`
 adds the retry class, per-class retry counters and the provider request id to
-`jobs`. Future schema changes require a reviewed migration and
-upgrade/downgrade coverage, not `create_all()` during API startup.
+`jobs`, and `0005_account_link` adds `google_sub` (unique), `merged_into` and
+`merged_at` to `principals`. Future schema changes require a reviewed migration
+and upgrade/downgrade coverage, not `create_all()` during API startup.
 
 ### Durable jobs and recovery
 
@@ -158,8 +160,12 @@ fault-injection hooks used only by tests.
 | `invalid_model_schema` | `InvalidModelSchema` | Backoff; `OVRLY_JOB_RETRY_SCHEMA_REPAIR_ATTEMPTS` repair attempts, visible to the handler through `retry_counts` |
 | `unknown_outcome` | `UnknownOutcome` (provider timeout) | Backoff only when a request id was recorded; `OVRLY_JOB_RETRY_UNKNOWN_OUTCOME_ATTEMPTS` reconciliation attempts; never a silent re-call |
 
-Workers execute only the stages they have handlers for; `default_handlers()` is
-empty until pipeline tasks register stages. Handlers receive a `JobContext`
+Workers execute only the stages they have handlers for. `default_handlers()`
+registers the `intake` stage from `services/pipeline/intake.py`: it checks that
+the investigation still exists and belongs to the owner in the job payload,
+confirms `queued` at stage `intake` with the coverage placeholder and publishes
+a result row; a missing or foreign investigation is `NonRetriableInput`. Media
+stages arrive with BE-07 (#20). Handlers receive a `JobContext`
 whose `heartbeat()` must be called by long stages. Other handler exceptions
 mark the job `failed` with the exception type only; messages are never
 persisted or logged. `POST /v1/jobs/{id}/cancel`, `DELETE /v1/jobs/{id}` and
@@ -167,6 +173,16 @@ the cross-owner-read invariant are
 [BE-04 part 3 / #75](https://github.com/natnael-solomon/ovrly/issues/75), built
 on the BE-05 (#19) error shape and identity; the queue primitives they call
 (`request_cancel`, `delete`) are already here.
+
+`services/api/intake.py` hands each new investigation to the queue.
+`QueueDispatcher` runs inside the transaction that writes the investigation and
+idempotency rows and calls `JobQueue.enqueue` with stage key
+`(1, "intake", sha256("investigation:<id>"))` and payload
+`{investigation_id, owner_id}`. A dispatcher failure rolls back the
+investigation, the key and the job together; a replayed `Idempotency-Key`
+never reaches the dispatcher, and the stage-key uniqueness would reject a
+second job anyway. `RecordOnlyDispatcher` remains for tests that isolate the
+API from the queue (`create_app(dispatcher=...)`).
 
 `tests/recovery/` holds the in-process API + worker harness with
 `ScriptedFaults` checkpoints (`claimed`, `before_publish`, `after_publish`,
@@ -197,6 +213,13 @@ integrated yet, so those stages are stubs registered only in tests. Covered:
 - Duplicate provider callback with the same request id (`test_idempotency.py`):
   concurrent and late duplicates publish once; a callback for a deleted job is
   dropped.
+- Intake hand-off (`test_intake_handoff.py`): a dispatcher failure rolls back
+  the investigation and the job together; sequential and concurrent replays of
+  one `Idempotency-Key` yield exactly one job; the embedded worker killed
+  before publishing the `intake` result is re-leased by a standalone worker
+  with the production stage table and the investigation is published once,
+  reporting `running` meanwhile; a job for a missing or foreign investigation
+  fails as `non_retriable_input`.
 - Negative invariants: duplicate publish, publish after cancel, publish after
   delete, stale fencing token, stale lease retry or request-id write.
 
@@ -212,8 +235,9 @@ OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0
 ```
 
 Not covered here: the cancel/delete endpoints and cross-owner reads (#75), and
-the idempotency tests for chunk `(session, seq)` and investigation POSTs, which
-belong to the intake endpoints that introduce those resources.
+the chunk `(session, seq)` idempotency test, which belongs to the capture
+intake endpoint that introduces that resource. Investigation POST idempotency
+is covered by `test_intake_handoff.py` and `tests/test_intake_api.py`.
 
 ## Identity and intake API
 
@@ -234,16 +258,18 @@ schema with the contracts validator.
 | Route | Behavior |
 | --- | --- |
 | `POST /v1/principals/guest` | Mints a guest principal and an opaque bearer token (`ovk_` prefix, 256 random bits). Only a SHA-256 digest is stored; the token is returned once and never logged. 201. |
+| `POST /v1/principals/link` | Body `{"provider": "google", "id_token": ...}`, bearer-authenticated as the calling guest ([BC-D07](../docs/decisions/BC-D07-account-link.md)). The token is verified against `OVRLY_GOOGLE_CLIENT_ID`. Unknown subject: the caller is upgraded in place (`kind` becomes `account`, credential stays valid, every object keeps its owner) and the response is `200 {principal_id, kind, linked: true, merged_saved_reports, credential: null}`; repeating it is the same 200. Subject already owned by another principal A: in one transaction the caller's explicitly saved reports move to A (`transfer_saved_reports`, zero until #33 adds the table), the caller's credentials are revoked, `merged_into` is recorded, and the response carries `principal_id = A` plus a new `credential` for A. Investigations, uploads and idempotency keys stay with the revoked guest. Already linked to a different subject: 409 `ACCOUNT_ALREADY_LINKED`. Bad token: 401 `INVALID_ID_TOKEN`. No client ID configured: 503 `ACCOUNT_LINK_UNAVAILABLE`. |
 | `POST /v1/uploads` | Declares `size_bytes`, `sha256` and optional `content_type`; returns a scoped `target`, `max_bytes` and `expires_at`. Over the byte limit: 413 `UPLOAD_TOO_LARGE`. |
 | `PUT /v1/uploads/{id}/content` | Streams raw bytes to the target while holding the upload row lock, so a concurrent completion waits for the whole body. Exceeding the smaller of the limit and the declared size discards the partial content with 413. Expired: 410 `UPLOAD_EXPIRED`. |
 | `POST /v1/uploads/{id}/complete` | Re-reads the stored bytes and compares size and SHA-256 with the declaration. Mismatch deletes the bytes and returns 409 `UPLOAD_MISMATCH`; missing bytes return 409 `UPLOAD_CONTENT_MISSING`. Completing twice returns the same 200. |
-| `POST /v1/investigations` | Requires `Idempotency-Key` (400 if missing or longer than 200 characters). Body: `{"source": {"kind": "url", "url": ...}}` or `{"source": {"kind": "upload", "upload_id": ...}}`, each with optional `duration_ms`. Writes the investigation and the key in one transaction before answering 202. Same key and body replays the original 202 body; same key with a different body is 409 `IDEMPOTENCY_KEY_REUSED`. Keys are scoped per owner. |
+| `POST /v1/investigations` | Requires `Idempotency-Key` (400 if missing or longer than 200 characters). Body: `{"source": {"kind": "url", "url": ...}}` or `{"source": {"kind": "upload", "upload_id": ...}}`, each with optional `duration_ms`. Writes the investigation, the key and the `intake` job in one transaction before answering 202. Same key and body replays the original 202 body; same key with a different body is 409 `IDEMPOTENCY_KEY_REUSED`. Keys are scoped per owner. |
 | `GET /v1/investigations` | Newest-first list of the caller's investigations (at most 100). |
-| `GET /v1/investigations/{id}` | `state`, `stage`, a coverage placeholder, `version` and a safe `error` object or `null`. |
+| `GET /v1/investigations/{id}` | `state`, `stage`, a coverage placeholder, `version` and a safe `error` object or `null`. `state` reflects the intake job: `queued` or `leased` read as `queued`, `running` as `running`, `failed` as `failed` with a `PROCESSING_FAILED` error unless a specific code was recorded, `cancelled` or `deleted` as `cancelled`; a published job leaves the stored state. Lease owners, fencing tokens, retry classes and failure types are never exposed. |
 
 Every route except guest minting requires `Authorization: Bearer <token>`.
 Missing credentials return 401 `AUTHENTICATION_REQUIRED`; malformed, unknown or
-revoked ones return 401 `INVALID_CREDENTIAL`, both with `WWW-Authenticate`.
+revoked ones (including a guest credential revoked by a second-device link)
+return 401 `INVALID_CREDENTIAL`, both with `WWW-Authenticate`.
 Identity comes only from the credential: `user_id`, `owner_id` or `principal_id`
 in a body, query string or `X-User-Id`-style header is rejected with
 `CLIENT_IDENTITY_REJECTED`. Object routes load rows through the owner-scoped
@@ -258,14 +284,19 @@ to `OVRLY_STORAGE_DIR` through the `UploadStore` interface in
 decided. Uploaded media is development data on the local disk, not a retention
 policy or consent record.
 
-Recorded investigations stay `queued` at stage `intake`. Handing them to the
-job engine (#16), account linking (BC-D07), quotas beyond the two limits and
-deletion are the second BE-05 PR. `services/api/intake.py` defines the
-`InvestigationDispatcher` hook that runs inside the creating transaction; the
-default records nothing beyond the investigation row. `packages/contracts`
-holds the shared error shape and the draft voice-actions schemas; the intake
-request and response models in `services/api/schemas.py` remain backend-owned
-Pydantic until #15 exports them there.
+Recorded investigations are handed to the queue as described under
+[Durable jobs and recovery](#durable-jobs-and-recovery); until BE-07 (#20)
+adds media stages they stay `queued` at stage `intake` after the intake job
+publishes. Account linking follows
+[BC-D07](../docs/decisions/BC-D07-account-link.md): identity is verified
+server-side from the Google ID token (`services/api/auth/google.py`), and
+`services/api/auth/linking.py` performs the upgrade or second-device merge in
+one transaction, with every write restricted to the calling principal. Quotas
+beyond the two limits and deletion remain open (#77 retention, #75 user
+deletion). `packages/contracts` holds the shared error shape and the draft
+voice-actions schemas; the intake and account-link request and response models
+in `services/api/schemas.py` remain backend-owned Pydantic until #15 exports
+them there.
 
 ## Local checks
 
@@ -297,10 +328,14 @@ safe failure responses, both worker modes, signal shutdown, cancellation and
 resource cleanup, the job queue invariants, the recovery harness,
 startup-helper negative paths, and the intake API: guest credentials, rejected
 client identity, cross-owner 404s, idempotent replay and 409, upload limits,
-expiry and hash mismatch, and the shared error shape validated against
-`packages/contracts/schemas/error.schema.json`. The test database is migrated
-to `head` once per session. No provider keys or personal media are needed;
-upload tests use synthetic bytes in a temporary directory.
+expiry and hash mismatch, the job-state view of investigations, account
+linking with an injected token verifier (in-place upgrade, idempotent repeat,
+second-device merge, the owner invariant and the Google verifier's outcome
+mapping with a patched library call), and the shared error shape validated
+against `packages/contracts/schemas/error.schema.json`. The test database is
+migrated to `head` once per session. No provider keys, Google calls or
+personal media are needed; upload tests use synthetic bytes in a temporary
+directory.
 
 Ruff includes security rules (`S`) and rejects bare `type: ignore` comments
 (`PGH003`); MyPy also enables `ignore-without-code`. Only pytest's `S101`

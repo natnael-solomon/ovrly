@@ -4,11 +4,12 @@ import asyncio
 import uuid
 from contextlib import suppress
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from services.api.main import create_app
 from services.database import Database
 from services.jobs.faults import Checkpoint, SimulatedCrash
+from services.jobs.models import jobs
 from services.jobs.queue import JobQueue, StageKey
 from services.jobs.retries import UnknownOutcome
 from services.settings import Settings
@@ -101,12 +102,14 @@ class Harness:
         self.databases.append(database)
         return database
 
-    def worker(self, handler, *, faults=None, worker_id=None, retry_policy=None, **overrides):
+    def worker(
+        self, handler, *, faults=None, worker_id=None, retry_policy=None, stages=None, **overrides
+    ):
         settings = self.settings(**overrides)
         worker = Worker(
             self.database(**overrides),
             settings.worker_shutdown_seconds,
-            handlers={self.stage: handler},
+            handlers=stages if stages is not None else {self.stage: handler},
             faults=faults,
             lease_seconds=settings.job_lease_seconds,
             poll_seconds=settings.job_poll_seconds,
@@ -116,10 +119,11 @@ class Harness:
         self.workers.append(worker)
         return worker
 
-    def app(self, handler, *, faults=None, **overrides):
+    def app(self, handler, *, faults=None, stages=None, **overrides):
+        """Embedded-worker app; ``stages`` replaces the test stage with real handlers."""
         return create_app(
             self.settings(embed_worker=True, **overrides),
-            handlers={self.stage: handler},
+            handlers=stages if stages is not None else {self.stage: handler},
             faults=faults,
         )
 
@@ -170,6 +174,22 @@ class Harness:
                 if record is not None and record.status.state in states:
                     return record
                 await asyncio.sleep(0.02)
+
+    async def job_id_for(self, key):
+        """The job created under a stage key by production code, such as the intake hand-off."""
+        async with self.control.engine.connect() as connection:
+            return await connection.scalar(
+                select(jobs.c.id).where(
+                    jobs.c.version == key.version,
+                    jobs.c.stage == key.stage,
+                    jobs.c.input_hash == key.input_hash,
+                )
+            )
+
+    async def wait_for_state_by_key(self, key, *states, seconds=5):
+        job_id = await self.job_id_for(key)
+        assert job_id is not None, f"No job exists for stage key {key}"
+        return await self.wait_for_state(job_id, *states, seconds=seconds)
 
     async def wait_until(self, predicate, seconds=5):
         async with asyncio.timeout(seconds):

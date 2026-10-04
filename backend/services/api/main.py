@@ -7,9 +7,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from services.api import routes
+from services.api.auth.google import IdTokenVerifier
+from services.api.intake import InvestigationDispatcher, QueueDispatcher
 from services.database import Database
 from services.jobs.faults import FaultInjector
 from services.jobs.handlers import JobHandler, default_handlers
+from services.jobs.queue import JobQueue
 from services.jobs.retries import RetryPolicy
 from services.settings import Settings, load_settings
 from services.worker.runtime import Worker
@@ -22,6 +25,8 @@ def create_app(
     *,
     handlers: Mapping[str, JobHandler] | None = None,
     faults: FaultInjector | None = None,
+    dispatcher: InvestigationDispatcher | None = None,
+    id_token_verifier: IdTokenVerifier | None = None,
 ) -> FastAPI:
     config = settings if settings is not None else load_settings()
     stage_handlers = handlers if handlers is not None else default_handlers()
@@ -44,6 +49,8 @@ def create_app(
         )
         app.state.database = database
         app.state.worker = worker
+        if dispatcher is None:
+            app.state.dispatcher = QueueDispatcher(JobQueue(database))
         try:
             if worker is not None:
                 await worker.start()
@@ -56,7 +63,7 @@ def create_app(
                 await database.close()
 
     app = FastAPI(title="Ovrly backend", lifespan=lifespan)
-    routes.register(app, config)
+    routes.register(app, config, dispatcher=dispatcher, id_token_verifier=id_token_verifier)
 
     @app.get("/healthz")
     async def health() -> JSONResponse:
