@@ -41,10 +41,14 @@ async def counts(harness, headers):
             )
         )
         ids = (
-            await connection.execute(
-                select(investigations.c.id).where(investigations.c.owner_id == owner)
+            (
+                await connection.execute(
+                    select(investigations.c.id).where(investigations.c.owner_id == owner)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         hashes = [intake_stage_key(identifier).input_hash for identifier in ids]
         job_count = await connection.scalar(
             select(func.count())

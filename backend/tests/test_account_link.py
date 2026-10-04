@@ -213,9 +213,7 @@ async def test_second_device_continues_as_the_existing_account(client, app, veri
             await connection.execute(
                 select(idempotency_keys.c.owner_id, idempotency_keys.c.key)
                 .where(
-                    idempotency_keys.c.owner_id.in_(
-                        [uuid.UUID(account_id), uuid.UUID(guest_id)]
-                    )
+                    idempotency_keys.c.owner_id.in_([uuid.UUID(account_id), uuid.UUID(guest_id)])
                 )
                 .order_by(idempotency_keys.c.key)
             )
