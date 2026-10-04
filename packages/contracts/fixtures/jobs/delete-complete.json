@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "description": "Synthetic job tombstoned with database payload/result removed.",
+  "operation": "delete",
+  "status": 200,
+  "request": {"job_id": "00000000-0000-4000-8000-000000000075"},
+  "response": {
+    "job_id": "00000000-0000-4000-8000-000000000075",
+    "state": "deleted",
+    "access_revoked": true,
+    "cleanup_status": "complete",
+    "cleanup_scope": "job_payload_and_result"
+  }
+}

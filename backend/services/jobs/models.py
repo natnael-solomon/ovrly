@@ -21,6 +21,8 @@ jobs = Table(
     "jobs",
     metadata,
     Column("id", Uuid, primary_key=True),
+    Column("owner_id", Uuid, ForeignKey("principals.id")),
+    Column("cancel_outcome", Text),
     Column("version", Integer, nullable=False),
     Column("stage", Text, nullable=False),
     Column("input_hash", Text, nullable=False),

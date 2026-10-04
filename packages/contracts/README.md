@@ -6,7 +6,8 @@ started by BE-13 ([#67](https://github.com/natnael-solomon/ovrly/issues/67)) wit
 the voice-actions slice only. BE-03 ([#15](https://github.com/natnael-solomon/ovrly/issues/15))
 owns the package as a whole and will add uploads, investigations, capture
 sessions, reports, claims, evidence, assessments, OpenAPI and the Contract
-checks CI gate. Nothing here implements an endpoint or Android wiring.
+checks CI gate. BE-04 part 3 (#75) adds job action schemas and receipts, exercised
+by the backend endpoints. The schemas alone do not implement Android wiring.
 
 ## Layout and namespaces
 
@@ -17,6 +18,7 @@ checks CI gate. Nothing here implements an endpoint or Android wiring.
 | `schemas/voice-action-request.schema.json` | Request body for `POST /v1/voice/actions`. |
 | `schemas/voice-action-response.schema.json` | Response body for `POST /v1/voice/actions`. |
 | `fixtures/voice-actions/*.json` | Synthetic request/response scenarios with explicit expectations. |
+| `schemas/job-*.schema.json`, `fixtures/jobs/*.json` | Job action path parameters, cancellation/deletion receipts and safe error examples. |
 | `validate.py` | Standard-library validator for the schemas and fixtures. |
 | `tests/` | pytest suite, run from the backend uv project. |
 | `ruff.toml` | Extends the backend Ruff configuration so the Python here meets the same gates. |
@@ -28,6 +30,38 @@ follow the same layout. The error shape is the one fixed in BE-05 (#19), so
 there is exactly one error shape contract-wide; #15
 inherits it unchanged, and every error any endpoint returns must use it (the
 planned spectral rule "all errors use the error shape").
+
+## Job actions
+
+`POST /v1/jobs/{job_id}/cancel` and `DELETE /v1/jobs/{job_id}` require bearer
+authentication and **no HTTP body**. `job-action-request.schema.json` describes
+the path parameters, not a JSON body. IDs in fixtures/responses use canonical
+UUID strings, matching the queue. Job owners come only from authenticated
+enqueue callers, never client body fields or payload contents.
+
+Cancellation returns `job_id` and `cancellation`: `effective` (200) or
+`requested` (202). Its first outcome is persisted and replayed unchanged, even
+after the worker acknowledges or the API restarts; this is a receipt, not a
+progress snapshot. A published/failed job is 409 `JOB_NOT_CANCELLABLE`.
+Cancellation makes no promise about provider interruption or billing.
+
+Deletion returns `job_id`, `state: deleted`, `access_revoked: true`,
+`cleanup_status: complete` and `cleanup_scope: job_payload_and_result` (200).
+Cleanup is limited to the database payload/result: uploads, external artifacts,
+provider copies and backup expiry are **not** covered. The tombstone retains
+ownership/fencing metadata. The owner can repeat DELETE without mutation,
+but cancellation receipts become inaccessible after deletion (404).
+
+Missing, legacy ownerless and other-owner jobs return the identical shared
+404 `NOT_FOUND` shape. No owner-specific error distinguishes them.
+
+`fixtures/jobs` uses `synthetic`, `description`, `operation`, `status`,
+`request` (path parameters) and `response`. The validator checks schema,
+status/outcome and ID consistency. Backend recovery tests compare these
+fixtures with the real endpoints, round-trip the response models, reject
+invalid payloads and prove unauthorized requests cannot alter a job.
+The addition leaves existing voice schemas and version unchanged; both Android
+and backend review are required under #15. Android job parsing remains #62.
 
 ## Voice actions
 

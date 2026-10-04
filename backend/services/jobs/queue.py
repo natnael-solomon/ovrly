@@ -139,7 +139,12 @@ class JobQueue:
         return {"lease_owner": None, "lease_expires_at": None, "updated_at": func.now()}
 
     async def enqueue(
-        self, connection: AsyncConnection, key: StageKey, payload: dict[str, Any]
+        self,
+        connection: AsyncConnection,
+        key: StageKey,
+        payload: dict[str, Any],
+        *,
+        owner_id: UUID | None = None,
     ) -> Enqueued:
         """Insert a queued job inside the caller's transaction.
 
@@ -151,6 +156,7 @@ class JobQueue:
             insert(jobs)
             .values(
                 id=uuid4(),
+                owner_id=owner_id,
                 version=key.version,
                 stage=key.stage,
                 input_hash=key.input_hash,
@@ -164,13 +170,16 @@ class JobQueue:
         if job_id is not None:
             return Enqueued(job_id, created=True)
         existing = await connection.execute(
-            select(jobs.c.id).where(
+            select(jobs.c.id, jobs.c.owner_id).where(
                 jobs.c.version == key.version,
                 jobs.c.stage == key.stage,
                 jobs.c.input_hash == key.input_hash,
             )
         )
-        return Enqueued(existing.scalar_one(), created=False)
+        row = existing.one()
+        if row.owner_id != owner_id:
+            raise ValueError("A stage key cannot be reused across job owners")
+        return Enqueued(row.id, created=False)
 
     async def claim(
         self, worker_id: str, stages: Sequence[str], lease_seconds: float
@@ -418,49 +427,62 @@ class JobQueue:
             **self._cleared(),
         )
 
-    async def request_cancel(self, job_id: UUID) -> CancelOutcome:
+    async def request_cancel(
+        self, job_id: UUID, *, connection: AsyncConnection | None = None
+    ) -> CancelOutcome:
         """Cancel a queued job immediately or flag a leased one for its worker."""
-        async with self.database.engine.begin() as connection:
-            state = await connection.scalar(
-                select(jobs.c.state).where(jobs.c.id == job_id).with_for_update()
+        if connection is None:
+            async with self.database.engine.begin() as transaction:
+                return await self.request_cancel(job_id, connection=transaction)
+        row = (
+            await connection.execute(
+                select(jobs.c.state, jobs.c.cancel_requested)
+                .where(jobs.c.id == job_id)
+                .with_for_update()
             )
-            if state == JobState.QUEUED.value:
-                await connection.execute(
-                    update(jobs)
-                    .where(jobs.c.id == job_id)
-                    .values(
-                        state=JobState.CANCELLED.value,
-                        cancel_requested=True,
-                        generation=jobs.c.generation + 1,
-                        **self._cleared(),
-                    )
+        ).first()
+        if row is None:
+            return CancelOutcome.NOT_CANCELLABLE
+        if row.state == JobState.QUEUED.value:
+            await connection.execute(
+                update(jobs)
+                .where(jobs.c.id == job_id)
+                .values(
+                    state=JobState.CANCELLED.value,
+                    cancel_requested=True,
+                    generation=jobs.c.generation + 1,
+                    **self._cleared(),
                 )
-                return CancelOutcome.EFFECTIVE
-            if state in _LEASED:
+            )
+            return CancelOutcome.EFFECTIVE
+        if row.state in _LEASED:
+            if not row.cancel_requested:
                 await connection.execute(
                     update(jobs)
                     .where(jobs.c.id == job_id)
                     .values(cancel_requested=True, updated_at=func.now())
                 )
-                return CancelOutcome.REQUESTED
+            return CancelOutcome.REQUESTED
         return CancelOutcome.NOT_CANCELLABLE
 
-    async def delete(self, job_id: UUID) -> bool:
+    async def delete(self, job_id: UUID, *, connection: AsyncConnection | None = None) -> bool:
         """Tombstone a job, bump its generation and remove any published result."""
-        async with self.database.engine.begin() as connection:
-            result = await connection.execute(
-                update(jobs)
-                .where(jobs.c.id == job_id, jobs.c.state != JobState.DELETED.value)
-                .values(
-                    state=JobState.DELETED.value,
-                    generation=jobs.c.generation + 1,
-                    payload={},
-                    **self._cleared(),
-                )
+        if connection is None:
+            async with self.database.engine.begin() as transaction:
+                return await self.delete(job_id, connection=transaction)
+        result = await connection.execute(
+            update(jobs)
+            .where(jobs.c.id == job_id, jobs.c.state != JobState.DELETED.value)
+            .values(
+                state=JobState.DELETED.value,
+                generation=jobs.c.generation + 1,
+                payload={},
+                **self._cleared(),
             )
-            if result.rowcount != 1:
-                return False
-            await connection.execute(delete(job_results).where(job_results.c.job_id == job_id))
+        )
+        if result.rowcount != 1:
+            return False
+        await connection.execute(delete(job_results).where(job_results.c.job_id == job_id))
         return True
 
     async def get(self, job_id: UUID) -> JobRecord | None:

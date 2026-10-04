@@ -409,6 +409,38 @@ def check_version(path: Path = VERSION_FILE) -> str:
     return version
 
 
+def check_job_fixture(validator: Validator, path: Path) -> None:
+    fixture = read_json(path)
+    location = str(path)
+    require(isinstance(fixture, dict), location, "expected a fixture object")
+    require(
+        set(fixture) == {"synthetic", "description", "operation", "status", "request", "response"},
+        location,
+        "unexpected fixture fields",
+    )
+    require(fixture["synthetic"] is True, location, "fixture must be synthetic")
+    require(
+        isinstance(fixture["description"], str) and "synthetic" in fixture["description"].lower(),
+        location,
+        "description must identify synthetic data",
+    )
+    operation, status = fixture["operation"], fixture["status"]
+    require(operation in ("cancel", "delete"), location, "unknown operation")
+    require(type(status) is int and status in (200, 202, 404, 409), location, "unknown status")
+    validator.validate(fixture["request"], "job-action-request.schema.json")
+    response = fixture["response"]
+    if status in (404, 409):
+        validator.validate(response, ERROR_SCHEMA)
+        code = "NOT_FOUND" if status == 404 else "JOB_NOT_CANCELLABLE"
+        require(response["code"] == code, location, "error code/status mismatch")
+        require(status != 409 or operation == "cancel", location, "only cancel can conflict")
+    else:
+        validator.validate(response, f"job-{operation}-response.schema.json")
+        require(response["job_id"] == fixture["request"]["job_id"], location, "job id mismatch")
+        expected = 202 if response.get("cancellation") == "requested" else 200
+        require(status == expected, location, "outcome/status mismatch")
+
+
 def check_all() -> Iterator[str]:
     """Yield one line per checked artifact; raise Invalid on the first problem."""
     yield f"version {check_version()}"
@@ -424,6 +456,11 @@ def check_all() -> Iterator[str]:
         p.name for p in paths
     }
     require(not accepted, str(FIXTURES), f"missing accepted fixtures: {sorted(accepted)}")
+    job_paths = fixture_paths(FIXTURES / "jobs")
+    require(bool(job_paths), str(FIXTURES), "no job fixtures found")
+    for path in job_paths:
+        check_job_fixture(validator, path)
+        yield f"fixture {path.relative_to(ROOT).as_posix()}"
 
 
 def main() -> int:

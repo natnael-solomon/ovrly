@@ -18,7 +18,7 @@ import pytest
 PACKAGE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PACKAGE))
 
-import validate  # noqa: E402
+import validate as validate  # noqa: E402
 
 FIXTURES = PACKAGE / "fixtures" / "voice-actions"
 ANDROID_CONTRACT = (
@@ -66,7 +66,9 @@ def error(code: str = "VOICE_TARGET_NOT_FOUND", **overrides: Any) -> dict[str, A
 def test_every_schema_and_fixture_passes_the_validator() -> None:
     lines = list(validate.check_all())
     assert any(line.startswith("version 0.") for line in lines)
-    assert sum(line.startswith("fixture ") for line in lines) == len(validate.fixture_paths())
+    assert sum(line.startswith("fixture ") for line in lines) == len(
+        list(validate.FIXTURES.glob("*/*.json"))
+    )
 
 
 def test_cli_exit_code_is_zero(capsys: pytest.CaptureFixture[str]) -> None:
