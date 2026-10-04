@@ -7,7 +7,7 @@
 | Package | Responsibility |
 | --- | --- |
 | `capture` | Projection/playback capture, bounded temporary output and lifecycle |
-| `contract` | Typed models and the production parser for the shared `packages/contracts` schemas (voice-actions slice today) |
+| `contract` | Typed models and the production parsers for the shared `packages/contracts` schemas: voice actions, uploads, investigations with jobs and report versions, claims, evidence, assessments, capture sessions and chunks |
 | `overlay` | Floating-window lifecycle, movement and controls |
 | `share` | Validation of video URIs and URL references |
 | `ui` | Companion screens, production controls and isolated sample/gallery content |
@@ -68,7 +68,7 @@ Backend CI checks the frozen environment, lint/types, PostgreSQL/migrations and 
 
 Before connecting Android, agree a versioned API contract with validated schemas and compatibility tests: captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors. FastAPI exposes bootstrap OpenAPI, health and the `/v1` identity and intake endpoints. That contract lives in [`packages/contracts`](../packages/contracts/README.md): the voice-actions slice, the shared error shape, the upload, investigation, job, capture-session, report-version, claim, evidence and assessment schemas with one `$def` per enum, six result fixtures generated from the backend read models, intake samples, and a hand-maintained OpenAPI 3.1 document whose schemas reference those files. The required **Contract checks** workflow validates all of it (spectral, oasdiff against the base, server round trip, Android contract tests) on every PR.
 
-`packages/contracts` is the single source for that contract. The Android `contract` package parses the voice-actions slice with the production parser and reads the committed fixtures directly through Gradle test resources; see the [Android README](../android/README.md#contract-models-and-fixtures). Models and parsing for the investigation, job, report, claim, evidence and assessment schemas are #62 part 2, built from that handoff; no endpoint is called.
+`packages/contracts` is the single source for that contract. The Android `contract` package parses every schema in it with production parsers (`VoiceActionCodec`, `InvestigationCodec`, `UploadCodec`, `CaptureCodec`), one Kotlin enum per contract enum with an `UNKNOWN` fallback that is never a success state, and constructors that enforce the schema rules, including the investigation `oneOf` branches so a failure is never read as a finding; its unit tests read the committed fixtures and schemas directly through Gradle test resources and cross-check the enums and model members against them, see the [Android README](../android/README.md#contract-models-and-fixtures). This is the #62 deliverable of #15; no endpoint is called, and networking, Room and reconciliation are #18.
 
 Hosted model weights stay with the provider. Credentials stay on the server; prompts and adapters belong in the backend. Evaluation fixtures live in root `evaluation/`, independently of backend implementation. Voxide remains a separate companion-navigation path. The directory layout enables no capture upload.
 

@@ -1,0 +1,39 @@
+{
+  "synthetic": true,
+  "description": "A running investigation at version 1 whose published report says version 2. The report must echo the investigation version. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "investigation.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "report.version"
+  },
+  "payload": {
+    "id": "00000000-0000-4000-8000-000000000901",
+    "state": "running",
+    "stage": "retrieval",
+    "coverage": {
+      "status": "not_started"
+    },
+    "version": 1,
+    "error": null,
+    "source": {
+      "kind": "url",
+      "url": "https://video.example/synthetic/clip-0001"
+    },
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:00:00Z",
+    "processing_status": "partial",
+    "job": null,
+    "report": {
+      "id": "rpt_synthetic_0900_v1",
+      "investigation_id": "00000000-0000-4000-8000-000000000901",
+      "version": 2,
+      "created_at": "2026-10-04T12:00:00Z",
+      "provisional": true,
+      "change_summary": "No assessable factual claims were found in the checked media. Synthetic.",
+      "supersedes": null,
+      "claims": [],
+      "evidence": [],
+      "assessments": []
+    }
+  }
+}

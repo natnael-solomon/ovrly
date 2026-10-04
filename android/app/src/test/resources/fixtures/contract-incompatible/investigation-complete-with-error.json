@@ -1,0 +1,32 @@
+{
+  "synthetic": true,
+  "description": "A complete investigation that carries an error object and no report. Only the failed branch may carry an error. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "investigation.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "error"
+  },
+  "payload": {
+    "id": "00000000-0000-4000-8000-000000000901",
+    "state": "completed",
+    "stage": "publication",
+    "coverage": {
+      "status": "not_started"
+    },
+    "version": 1,
+    "error": {
+      "code": "MEDIA_UNSUPPORTED",
+      "message": "Processing failed",
+      "retryable": false
+    },
+    "source": {
+      "kind": "url",
+      "url": "https://video.example/synthetic/clip-0001"
+    },
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:00:00Z",
+    "processing_status": "complete",
+    "job": null,
+    "report": null
+  }
+}

@@ -43,7 +43,7 @@ The wrong key password must fail; `keytool -list` alone does not test it. Delete
 
 ## 3. Protect `main`
 
-Require PRs, one approval, stale-approval dismissal, `Android checks`, `Device evidence`, linear history and resolved threads. Block deletion/force pushes and allow no bypass actors.
+Require PRs, one approval, stale-approval dismissal, `Android checks`, `Device evidence`, `Backend checks`, `Backend recovery`, `Contract checks`, `Quality checks`, linear history and resolved threads. Block deletion/force pushes and allow no bypass actors.
 
 ## 4. Create the `production-signing` environment
 
