@@ -75,6 +75,6 @@ Metadata-only CI never fetches media or calls providers. Local media verificatio
 
 ## Development ownership
 
-Android builds independently of backend dependencies. Backend platform and research work share one Python project; client/server contract changes need both sides' review.
+Android builds independently of backend dependencies. Backend platform and research work share one Python project; client/server contract changes need both sides' review. Product scope, task tracking, hackathon dates and the Voxide route are recorded in [docs/decisions](decisions/README.md).
 
 Generated builds, caches, APKs and machine configuration stay out of Git. Use ignored root `.local` for personal tooling/media and `.scratch` for disposable experiments. Version shared configuration and approved test fixtures; keep evaluation media outside version control by default.
