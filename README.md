@@ -13,6 +13,7 @@ For the backend, run `sh scripts/backend.sh` on Linux/WSL with uv and Docker Com
 - [Backend](backend/README.md)
 - [Evaluation](evaluation/README.md) (synthetic examples and an eleven-clip draft; frozen corpus pending)
 - [Architecture](docs/architecture.md)
+- [Decision records](docs/decisions/README.md) (scope, tracking, dates, Voxide route)
 - [Changelog](CHANGELOG.md)
 
 Team references are shared privately.

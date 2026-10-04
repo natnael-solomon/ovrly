@@ -12,6 +12,8 @@ Board stages are Backlog, Ready, In progress, In review and Done. Ready means th
 
 The issue is the task card; link its PR without creating a duplicate card. Move it to Done after merge. Close cancelled work as not planned and archive it.
 
+Cross-cutting product, scope and date decisions are recorded in [docs/decisions](docs/decisions/README.md) using the RFC section 22 template. Issues cite them by ID (`BC-D..`, `RFC-D..`, `AC..`).
+
 ## 2. Branch and implement
 
 Start from up-to-date `main` on a short-lived task branch, such as `feat/share-intake`, `fix/capture-stop`, `docs/setup-guide` or `chore/build-config`. Do not use permanent developer branches.

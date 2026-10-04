@@ -4,6 +4,7 @@
 
 ### Added
 
+- Decision log under `docs/decisions`: RFC section 22 template, confirmed product scope (0001), task tracking and reference namespaces (0002), the open CP2 scope review (0003), BC-D04 Voxide route, session budget and provisional allowlist, and BC-D09 hackathon dates with an assumed EAT timezone. Linked from the README, WORKFLOW and architecture docs.
 - Eleven-clip RES-06 draft metadata with 259 traceable occurrences, single-pass adjudications, separate main-argument assessments and a 7 dev / 4 test split. Explicit draft validation and CI preserve unresolved rights, coverage and media-review limitations; this is not a frozen benchmark.
 - Voice session policy: 30-second setup timeout, five-minute input window from server ready, a bounded 30-second finishing reply with the microphone released, and a 15-second listening-silence stop. No automatic reconnection.
 - Voice orb engine interface: interaction phases, a rate-limited 0..1 level, lossy presentation events, push-to-talk hold and user barge-in (the last two untested live).
