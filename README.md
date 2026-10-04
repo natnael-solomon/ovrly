@@ -12,7 +12,7 @@ For the backend, run `sh scripts/backend.sh` on Linux/WSL with uv and Docker Com
 - [Team workflow](WORKFLOW.md)
 - [Backend](backend/README.md)
 - [Contracts](packages/contracts/README.md) (JSON Schemas, enums and synthetic fixtures shared by Android and the backend)
-- [Evaluation](evaluation/README.md) (eleven-clip local frozen corpus, 7 dev / 4 test, preserved review history)
+- [Evaluation](evaluation/README.md) (synthetic examples and an eleven-clip rights-pending local snapshot, 7 dev / 4 test; the RES-01 frozen corpus is still pending)
 - [Architecture](docs/architecture.md)
 - [Decision records](docs/decisions/README.md) (scope, tracking, dates, Voxide route)
 - [Changelog](CHANGELOG.md)

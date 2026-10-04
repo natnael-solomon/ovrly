@@ -29,9 +29,7 @@
 - Larger sample overlay with simulated evidence interactions and confirmation before stopping a real session.
 - Android 10+ native launch splash with a chrome ring, a 900 ms handoff and no artificial delay. Android 12+ follows the saved Light/Dark appearance.
 - Versioned evaluation-data schemas, provenance-labeled annotation/adjudication workflow, synthetic JSONL examples and dependency-free validation with CI. The reviewed clip corpus is still pending.
-- Owner-approved eleven-clip local evaluation freeze, version `res01-local-frozen-2026-10-04`, with pinned approval evidence, preserved 259 original/264 final decisions and 7/4 split. Explicit `--frozen-local` validation retains limitations and excludes uploads, redistribution and training; strict full-coverage validation is unchanged.
-- RES-01 content candidate with 106 reviewed-caption speech mappings, four EPI annual-growth assertions, a frame-timed qualitative meme premise, and final AP/clip-f confirmations. Historical inputs and 7/4 split are preserved; the subsequent local freeze records approval separately.
-- RES-01 review revision preserving the original eleven-clip draft and 7/4 split, reconciling 20 supplied-card occurrences, recording d/k/i modality confirmations and clip-m's user-confirmed negative without inferring language or rights approval.
+- Reduced-scope eleven-clip local evaluation snapshot `res01-local-frozen-2026-10-04` in `evaluation/corpus-local/` (`kind: frozen-local`) with the owner's 2026-10-04 local-use acceptance, preserved 259 original/264 final decisions and 7/4 split, plus the intermediate `reviewed-draft/` and `freeze-candidate/` revisions it builds on. A new explicit `--frozen-local` validation mode checks it with the draft rules and additional modality/negative checks; strict full-coverage `--frozen` validation is unchanged and rejects it. Rights clearance remains pending on every clip and RES-01 stays open.
 
 ### Changed
 

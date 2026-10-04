@@ -1,10 +1,11 @@
 # RES-01 content-complete candidate
 
 **Version: `res01-content-2026-10-04`. Status: draft, not frozen.**
-Historical candidate: the owner subsequently approved local use and credits.
-The [local frozen corpus](../corpus-local/README.md) preserves these records
-with the new approval. The remaining-state table below describes this earlier
-candidate, not new requests for user action.
+Historical candidate: the owner subsequently accepted the clip selection for
+local use. The [local snapshot](../corpus-local/README.md) preserves these
+records with that acceptance; its rights clearances remain pending and it is
+not the RES-01 frozen corpus. The remaining-state table below describes this
+earlier candidate, not new requests for user action.
 This is the latest [RES-01](https://github.com/natnael-solomon/ovrly/issues/8)
 content revision, following the [review revision](../reviewed-draft/README.md).
 It resolves the supplied card-content questions and remaps the social speech

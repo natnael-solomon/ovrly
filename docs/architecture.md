@@ -90,13 +90,16 @@ status: the manifest remains `draft` while rights and acceptance are incomplete.
 
 Metadata-only CI never fetches media or calls providers. Local media verification additionally checks byte hashes. Rights, declared review provenance, scenario coverage and undeclared leakage require human sign-off. No validation mode scores a pipeline; normalized claims are not ASR transcripts or OCR-box ground truth.
 
-`corpus-local/` is the subsequent owner-approved immutable local freeze.
-Its `frozen-local` manifest adds the updated rights-checklist hash and explicit
-scope acceptance while preserving all candidate JSONL bytes. Validation uses
-`--frozen-local`, keeps provenance/media/split checks, and requires known final
-modalities and confirmed negatives. Recorded review/timing and coverage limits
-remain visible. The separate full-coverage `--frozen` mode is not relaxed;
-local approval does not authorize hosted processing, training or redistribution.
+`corpus-local/` is the subsequent owner-accepted local snapshot
+(`kind: frozen-local`). Its manifest adds the updated rights-checklist hash and
+the owner's local-use acceptance while preserving all candidate JSONL bytes.
+Validation uses `--frozen-local`, keeps provenance/media/split checks, and
+requires known final modalities and confirmed negatives, but applies the draft
+rules to the preserved rows: every clip still has pending rights clearance,
+unconfirmed coverage and provisional review. The separate full-coverage
+`--frozen` mode is not relaxed and rejects this snapshot; local acceptance does
+not authorize hosted processing, training or redistribution and does not
+complete RES-01.
 
 ## Development ownership
 
