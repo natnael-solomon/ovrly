@@ -148,7 +148,7 @@ Notification logic is tested Python in `.github/scripts/` (`telegram_*.py`); YAM
 
 | Workflow | Behavior |
 | --- | --- |
-| `telegram-notify.yml` | Loud posts for Android CI failure/timeout and published releases (first notes line). PR failures are removed after a later pass; `main` failures remain. Cancelled runs are ignored. One silent PR card is updated through draft/review/merge/close with linked `Closes #N` issues; Dependabot PRs are skipped. |
+| `telegram-notify.yml` | Loud posts for Android CI failure/timeout and published releases (first notes line). PR failures are removed after a later pass; `main` failures remain. Cancelled runs are ignored. One silent PR card is updated through draft/review/merge/close with linked `Closes #N` issues; Dependabot PRs are skipped. Each PR is announced once: the card recorded under its number in `TELEGRAM_NOTIFY_STATE` is the announcement, so `synchronize` and `reopened` post the card only when none is recorded (standing in for a delayed or dropped `opened` webhook), and an hourly catch-up job (also `workflow_dispatch`) lists open PRs with the built-in token and announces any without a recorded card. A webhook that arrives after the catch-up finds the card and edits it instead of posting again. A malformed state variable fails the job without posting; a missing one fails only the catch-up, `synchronize` and `reopened` paths, since those have no other duplicate guard. |
 | `telegram-board.yml` | Every 15 minutes, edits one pinned message for Ready, In progress, In review and `blocked` items. Posts silent summaries of status/priority/area changes, additions and removals. Ignores draft items. The first run establishes a baseline and posts "Board tracking started". Manual runs are supported. |
 | `telegram-apk.yml` | Manual build, owner-approved signing and delivery. Follow [release signing](docs/release-signing.md) for requests, approval, redelivery and setup. |
 
@@ -165,7 +165,7 @@ The notification workflows' `workflow_run` and `schedule` triggers use `main`; t
 
 For layout trials, temporarily point `TELEGRAM_CHAT_ID` at a private chat and open a draft PR; its `pull_request` events use the branch's workflow.
 
-The workflows maintain `TELEGRAM_NOTIFY_STATE` and `TELEGRAM_BOARD_STATE` for message IDs and board snapshots. Do not edit them manually. Deleting them resets state: the board re-baselines and PR cards start fresh.
+The workflows maintain `TELEGRAM_NOTIFY_STATE` and `TELEGRAM_BOARD_STATE` for message IDs and board snapshots. Do not edit them manually. Deleting them resets state: the board re-baselines and PR cards start fresh from the next `opened`, `ready_for_review` or `closed` event, while the notifier's catch-up, `synchronize` and `reopened` paths fail closed until a card has been recorded again. Runs that share a state variable are not serialised, so a PR opened during the few seconds a catch-up run is posting could receive two cards.
 
 PR titles, commit subjects, release notes and board titles are sent to Telegram; keep them free of private content. `.github/scripts/telegram_api.py` maps GitHub logins to team names in `DISPLAY_NAMES`.
 
