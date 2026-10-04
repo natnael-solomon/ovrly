@@ -1,0 +1,13 @@
+{
+  "synthetic": true,
+  "description": "A request whose target is JSON null. The target is required and must be an object; null is not an acceptable stand-in. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "request": "invalid",
+    "reason": "target"
+  },
+  "request": {
+    "request_id": "req_synthetic_9005",
+    "action": "queue_retry",
+    "target": null
+  }
+}

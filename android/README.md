@@ -49,6 +49,47 @@ prove complete metadata coverage. CI never regenerates baselines or verification
 Repository pre-commit checks also run these gates and audit dependencies; they
 require JDK 21, the SDK, uv and network access. See [shared checks](../WORKFLOW.md#shared-quality-gates).
 
+## Contract models and fixtures
+
+`app.ovrly.contract` holds the typed models and the production parser for the
+shared schemas in [`packages/contracts`](../packages/contracts/README.md),
+currently the voice-actions slice (`POST /v1/voice/actions`, BE-13 / #67).
+Serialization uses `kotlinx.serialization` through the
+`org.jetbrains.kotlin.plugin.serialization` plugin and `kotlinx-serialization-json`.
+AN-03 (#18) and AN-09 (#35) reuse these entry points instead of adding a second
+parser or DTO set:
+
+| Entry point | Purpose |
+| --- | --- |
+| `VoiceActionCodec.parseRequest` / `encodeRequest` | Strict request handling: unknown keys, a missing `target`, an action outside the allowlist, a target kind that does not match the action or an invalid identifier all throw `ContractParseException`. |
+| `VoiceActionCodec.parseResponse` / `encodeResponse` | Response handling: required fields, types, identifier syntax and the accepted/denied shape are enforced; unknown keys are tolerated as additive fields. |
+| `VoiceActionRequest`, `VoiceActionResponse`, `VoiceTarget`, `ContractError` | Models whose constructors enforce the schema, so an instance built in code is also one the contract allows. `ContractError` is the contract-wide BE-05 shape (`code`, `message`, `retryable`, `action`, `request_id`); in a voice response its `request_id` must echo the response `request_id`. |
+| `VoiceAction`, `VoiceTargetKind`, `VoiceActionResult`, `VoiceActionErrorCode`, `ContractErrorAction` | Enums with an `UNKNOWN` fallback for values this version does not define. `UNKNOWN` is never success: `VoiceActionResponse.isAccepted` is true only for `accepted`, and `UNKNOWN` cannot be encoded. |
+| `VoiceActionCodec.CONTRACT_VERSION` | Must equal `packages/contracts/VERSION`; a version bump fails the Android tests until the models are reviewed. |
+
+Unit tests read the committed fixtures and schemas in place: `app/build.gradle.kts`
+adds `../packages/contracts` as a test resources directory (only `VERSION`,
+`schemas/**` and `fixtures/**` are copied to the test classpath) and
+`ContractFixtures` loads `fixtures/voice-actions/*.json`. Nothing is duplicated
+into the module. `VoiceActionFixturesTest` asserts typed values for every
+accepted fixture, the error code of every denied fixture, the stated failure of
+every invalid request fixture, the `UNKNOWN` mapping of `unknown-enum-response`,
+and an encode/parse round trip. `VoiceActionCompatibilityTest` checks the Kotlin
+enums against the schema enums and `oneOf` pairs, rejects malformed payloads and
+the Android-only incompatible fixtures in
+`app/src/test/resources/fixtures/voice-actions-incompatible/` (an extra required
+field, renamed enum values, wrong types, missing required fields including the
+error shape, a non-boolean `retryable`, a non-echoed `error.request_id` and
+accepted/denied shape violations), and proves renamed or future enum values never become success.
+
+Adding a fixture to `packages/contracts/fixtures/voice-actions/` fails the
+classification test until it is covered here. The schema `pattern` for
+`error.code` is enforced, so a future code must still be `SCREAMING_SNAKE_CASE`;
+a response with a JSON `null` target is treated as an absent target. Schema or
+fixture problems belong in `packages/contracts` through #67 or #15, not in
+Android-side workarounds. Investigations, jobs, report versions, claims and
+evidence wait for the #15 handoff.
+
 ## Gallery and demo
 
 Open `app/src/main/java/app/ovrly/ui/GalleryPreviews.kt` in Studio's Design or Split view. `GlassOverlay.kt` contains the live-control previews. Gallery selection does not change the live overlay.

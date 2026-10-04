@@ -7,6 +7,7 @@
 | Package | Responsibility |
 | --- | --- |
 | `capture` | Projection/playback capture, bounded temporary output and lifecycle |
+| `contract` | Typed models and the production parser for the shared `packages/contracts` schemas (voice-actions slice today) |
 | `overlay` | Floating-window lifecycle, movement and controls |
 | `share` | Validation of video URIs and URL references |
 | `ui` | Companion screens, production controls and isolated sample/gallery content |
@@ -62,6 +63,8 @@ Backend CI checks the frozen environment, lint/types, PostgreSQL/migrations and 
 ## Future integration boundary
 
 Before connecting Android, agree a versioned API contract with validated schemas and compatibility tests: captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors. FastAPI exposes bootstrap OpenAPI and health endpoints, but no product endpoints exist. The first slice of that contract, the draft voice-actions request/response schemas, shared error shape and synthetic fixtures, lives in [`packages/contracts`](../packages/contracts/README.md); the remaining schemas and the Contract checks gate are #15.
+
+`packages/contracts` is the single source for that contract. Its first slice (BE-13, #67) is the voice-actions request/response schema with synthetic fixtures. The Android `contract` package parses that slice with the production parser and reads the committed fixtures directly through Gradle test resources; see the [Android README](../android/README.md#contract-models-and-fixtures). The investigation, job, report, claim and evidence schemas remain #15 work, and no endpoint is called.
 
 Hosted model weights stay with the provider. Credentials stay on the server; prompts and adapters belong in the backend. Evaluation fixtures live in root `evaluation/`, independently of backend implementation. Voxide remains a separate companion-navigation path. The directory layout enables no capture upload.
 
