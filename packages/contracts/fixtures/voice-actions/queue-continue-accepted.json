@@ -1,0 +1,26 @@
+{
+  "synthetic": true,
+  "description": "queue_continue accepted against an owned job. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "valid",
+    "response": "valid"
+  },
+  "request": {
+    "request_id": "req_synthetic_0005",
+    "action": "queue_continue",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0003"
+    }
+  },
+  "response": {
+    "request_id": "req_synthetic_0005",
+    "result": "accepted",
+    "action": "queue_continue",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0003"
+    },
+    "message": "Continuing the paused check."
+  }
+}

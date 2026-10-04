@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "description": "open_check without a target. Must fail request validation before any handler runs; the server returns its generic request-validation error, not a voice-action response, so no response payload is recorded. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "invalid"
+  },
+  "request": {
+    "request_id": "req_synthetic_0105",
+    "action": "open_check"
+  }
+}

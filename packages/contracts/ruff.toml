@@ -1,0 +1,6 @@
+# Extends the backend Ruff configuration so `ruff check packages/contracts` applies the same
+# rules; the per-file ignore mirrors backend/pyproject.toml for pytest assertions.
+extend = "../../backend/pyproject.toml"
+
+[lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]

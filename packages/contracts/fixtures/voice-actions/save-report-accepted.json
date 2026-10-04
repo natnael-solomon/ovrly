@@ -1,0 +1,26 @@
+{
+  "synthetic": true,
+  "description": "save_report accepted against an owned report. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "valid",
+    "response": "valid"
+  },
+  "request": {
+    "request_id": "req_synthetic_0002",
+    "action": "save_report",
+    "target": {
+      "kind": "report",
+      "id": "rep_synthetic_0001"
+    }
+  },
+  "response": {
+    "request_id": "req_synthetic_0002",
+    "result": "accepted",
+    "action": "save_report",
+    "target": {
+      "kind": "report",
+      "id": "rep_synthetic_0001"
+    },
+    "message": "Saved the report."
+  }
+}

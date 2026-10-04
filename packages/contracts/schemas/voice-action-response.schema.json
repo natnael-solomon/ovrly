@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Error code names are final only after review with the BE-10 (#33) owner.",
+  "title": "VoiceActionResponse",
+  "description": "Response body for POST /v1/voice/actions. Either the action was accepted and executed, or it was denied with a typed error. The message is always present and safe to speak or show in the overlay.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "result", "action", "message"],
+  "properties": {
+    "request_id": {
+      "$ref": "voice-action-request.schema.json#/$defs/opaque_id",
+      "description": "Echo of the request's request_id."
+    },
+    "result": {
+      "type": "string",
+      "description": "Outcome. Clients map values they do not know to UNKNOWN and must not treat UNKNOWN as success.",
+      "enum": ["accepted", "denied"]
+    },
+    "action": {
+      "type": "string",
+      "description": "The action name as received. Accepted results carry an allowlisted action; denied results echo the requested name so the overlay can name it.",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "target": {
+      "$ref": "voice-action-request.schema.json#/$defs/target",
+      "description": "Echo of the request target. Required when accepted; present on denial whenever the request carried a well-formed target."
+    },
+    "message": {
+      "type": "string",
+      "description": "Short English sentence for the overlay or spoken reply, for example 'Opened the check.' Never contains a transcript or another user's identifier.",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "error": {
+      "description": "Shared error shape (BE-05) restricted to the voice-action codes. Present only when result is denied; its request_id echoes the response request_id.",
+      "allOf": [
+        { "$ref": "error.schema.json" },
+        {
+          "properties": {
+            "code": {
+              "enum": [
+                "VOICE_ACTION_UNSUPPORTED",
+                "VOICE_TARGET_NOT_FOUND",
+                "VOICE_TARGET_NOT_OWNED",
+                "VOICE_ACTION_INVALID_STATE"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "result": { "const": "accepted" },
+        "action": {
+          "enum": ["open_check", "save_report", "queue_cancel", "queue_retry", "queue_continue"]
+        }
+      },
+      "required": ["target"],
+      "not": { "required": ["error"] }
+    },
+    {
+      "properties": {
+        "result": { "const": "denied" }
+      },
+      "required": ["error"]
+    }
+  ]
+}

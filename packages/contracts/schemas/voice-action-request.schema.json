@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). The action allowlist mirrors BC-D04 and is Conditional until AN-09 (#35) wires the client; a change to the enum is a breaking change and requires a version bump.",
+  "title": "VoiceActionRequest",
+  "description": "Request body for POST /v1/voice/actions (BE-10, #33). Exactly one allowlisted action against exactly one typed target. There are no free-form arguments; confirmation of queue_cancel happens on the device and is never sent to the server.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "action", "target"],
+  "properties": {
+    "request_id": {
+      "$ref": "#/$defs/opaque_id",
+      "description": "Client-generated idempotency key, unique per attempted action. Repeating a request with the same request_id must return the original outcome without executing the action again."
+    },
+    "action": {
+      "type": "string",
+      "description": "Allowlisted action name, exact and case-sensitive. The client-local switch_tab action is deliberately absent; it never reaches the backend.",
+      "enum": ["open_check", "save_report", "queue_cancel", "queue_retry", "queue_continue"]
+    },
+    "target": {
+      "$ref": "#/$defs/target",
+      "description": "The single object the action applies to. Its kind must match the action (see oneOf)."
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "action": { "const": "open_check" },
+        "target": { "properties": { "kind": { "const": "investigation" } } }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "save_report" },
+        "target": { "properties": { "kind": { "const": "report" } } }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "queue_cancel" },
+        "target": { "properties": { "kind": { "const": "job" } } }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "queue_retry" },
+        "target": { "properties": { "kind": { "const": "job" } } }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "queue_continue" },
+        "target": { "properties": { "kind": { "const": "job" } } }
+      }
+    }
+  ],
+  "$defs": {
+    "opaque_id": {
+      "type": "string",
+      "description": "Opaque, case-sensitive identifier: 1 to 128 ASCII characters, starting with a letter or digit, then letters, digits, underscore or hyphen. Matches the Android VoiceCommandContract syntax; no trimming or coercion.",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*(?![\\s\\S])"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "Resource type the id refers to.",
+          "enum": ["investigation", "report", "job"]
+        },
+        "id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Identifier of the target as previously shown to this caller. Valid syntax does not imply existence or ownership."
+        }
+      }
+    }
+  }
+}

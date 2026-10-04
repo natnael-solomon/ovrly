@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Contract-wide error shape as fixed in BE-05 (#19). BE-03 (#15) inherits this shape; every endpoint's errors use it.",
+  "title": "Error",
+  "description": "Typed error returned when a request is denied or fails. The code is stable and machine-readable; the message is short, English and safe to show in the overlay. Clients map codes and actions they do not know to UNKNOWN and still show the message.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "code",
+    "message",
+    "retryable",
+    "action",
+    "request_id"
+  ],
+  "properties": {
+    "code": {
+      "type": "string",
+      "description": "Stable SCREAMING_SNAKE_CASE identifier. Endpoints restrict this to their documented codes; the shared shape only fixes the syntax.",
+      "minLength": 3,
+      "maxLength": 64,
+      "pattern": "^[A-Z][A-Z0-9_]*(?![\\s\\S])"
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable explanation suitable for the overlay. Never contains a transcript, audio, credential or another user's identifier.",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "retryable": {
+      "type": "boolean",
+      "description": "Whether repeating the same request later can succeed without the caller changing anything."
+    },
+    "action": {
+      "type": "string",
+      "description": "What the client should do next. Clients map values they do not know to UNKNOWN.",
+      "enum": [
+        "none",
+        "retry",
+        "authenticate",
+        "fix_request",
+        "upload_again"
+      ]
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Request identifier echoed from the X-Request-Id middleware so a user-visible error can be correlated with server logs. Same opaque-id syntax as voice-action-request.schema.json#/$defs/opaque_id: 1 to 128 ASCII characters, starting with a letter or digit, then letters, digits, underscore or hyphen.",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*(?![\\s\\S])"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "synthetic": true,
+  "description": "queue_cancel accepted against an owned job. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "valid",
+    "response": "valid"
+  },
+  "request": {
+    "request_id": "req_synthetic_0003",
+    "action": "queue_cancel",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0001"
+    }
+  },
+  "response": {
+    "request_id": "req_synthetic_0003",
+    "result": "accepted",
+    "action": "queue_cancel",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0001"
+    },
+    "message": "Cancelled the queued check."
+  }
+}
