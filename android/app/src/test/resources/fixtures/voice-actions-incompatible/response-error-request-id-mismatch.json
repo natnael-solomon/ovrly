@@ -1,0 +1,25 @@
+{
+  "synthetic": true,
+  "description": "A denied response whose error.request_id does not echo the response request_id. The voice-actions contract requires the echo so an overlay error can be correlated with the request that caused it. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "response": "invalid",
+    "reason": "echo"
+  },
+  "response": {
+    "request_id": "req_synthetic_9111",
+    "result": "denied",
+    "action": "open_check",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_9111"
+    },
+    "message": "I could not find that check.",
+    "error": {
+      "code": "VOICE_TARGET_NOT_FOUND",
+      "message": "No investigation with that id is visible to the caller.",
+      "retryable": false,
+      "action": "none",
+      "request_id": "req_synthetic_other"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "description": "An accepted response that does not echo the target. The response schema requires target when result is accepted. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "response": "invalid",
+    "reason": "target"
+  },
+  "response": {
+    "request_id": "req_synthetic_9102",
+    "result": "accepted",
+    "action": "save_report",
+    "message": "Saved the report."
+  }
+}

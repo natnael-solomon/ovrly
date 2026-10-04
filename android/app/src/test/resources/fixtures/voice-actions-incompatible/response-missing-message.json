@@ -1,0 +1,17 @@
+{
+  "synthetic": true,
+  "description": "An accepted response without the required message. The parser must fail rather than default the message to an empty string. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "response": "invalid",
+    "reason": "message"
+  },
+  "response": {
+    "request_id": "req_synthetic_9101",
+    "result": "accepted",
+    "action": "open_check",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_9101"
+    }
+  }
+}

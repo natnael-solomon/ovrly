@@ -1,8 +1,10 @@
 import java.util.Properties
+import org.gradle.api.tasks.util.PatternFilterable
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jlleitschuh.gradle.ktlint")
 }
 
@@ -85,6 +87,16 @@ android {
         lintConfig = file("lint.xml")
     }
     testOptions { unitTests.isReturnDefaultValues = true }
+    sourceSets {
+        // Shared contract schemas and fixtures are read in place from the repository root.
+        // Unit tests load them as classpath resources; nothing is copied into the module.
+        getByName("test").resources.directories.add(rootProject.file("../packages/contracts").path)
+    }
+}
+
+// Keep only VERSION, schemas/ and fixtures/ from the contracts package on the test classpath.
+tasks.matching { it.name.endsWith("UnitTestJavaRes") }.configureEach {
+    (this as PatternFilterable).exclude("README.md", "ruff.toml", "validate.py", "tests/**")
 }
 
 dependencies {
@@ -103,6 +115,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
