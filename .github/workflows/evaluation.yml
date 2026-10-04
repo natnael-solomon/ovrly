@@ -36,11 +36,20 @@ jobs:
       - name: Validate working draft metadata
         run: python3 evaluation/validate.py evaluation/draft --draft
 
+      - name: Validate review revision metadata
+        run: python3 evaluation/validate.py evaluation/reviewed-draft --draft
+
+      - name: Validate content candidate metadata
+        run: python3 evaluation/validate.py evaluation/freeze-candidate --draft
+
+      - name: Validate owner-approved local frozen corpus
+        run: python3 evaluation/validate.py evaluation/corpus-local --frozen-local
+
       - name: Validate frozen metadata if present
         shell: bash
         run: |
           if [[ -e evaluation/corpus ]]; then
             python3 evaluation/validate.py evaluation/corpus --frozen
           else
-            echo "No reviewed corpus yet. Synthetic examples are not evaluation evidence."
+            echo "No full-coverage corpus. Local frozen scope is validated separately; examples are synthetic."
           fi

@@ -78,7 +78,28 @@ Hosted model weights stay with the provider. Credentials stay on the server; pro
 
 The eleven-clip RES-06 `draft/` snapshot has explicit draft validation, per-review status, source/timing provenance and separate main-argument assessments. Pending rights, uncertain modality/language and incomplete coverage do not pass frozen validation. Synthetic examples only test the contract; RES-01 still requires the reviewed 10-20-clip corpus.
 
+`reviewed-draft/` preserves that original snapshot and records later user
+confirmations and supplied-card reconciliation. A `user-confirmed-negative`
+assessment records claim absence without certifying language, rights or full
+review completion; eligible final decisions contradicting it fail validation.
+
+`freeze-candidate/` adds the final supplied-card discoveries and reconciles
+social speech intervals to reviewed subtitle cues. Original annotations and
+previous snapshots are preserved. Candidate naming does not confer frozen
+status: the manifest remains `draft` while rights and acceptance are incomplete.
+
 Metadata-only CI never fetches media or calls providers. Local media verification additionally checks byte hashes. Rights, declared review provenance, scenario coverage and undeclared leakage require human sign-off. No validation mode scores a pipeline; normalized claims are not ASR transcripts or OCR-box ground truth.
+
+`corpus-local/` is the subsequent owner-accepted local snapshot
+(`kind: frozen-local`). Its manifest adds the updated rights-checklist hash and
+the owner's local-use acceptance while preserving all candidate JSONL bytes.
+Validation uses `--frozen-local`, keeps provenance/media/split checks, and
+requires known final modalities and confirmed negatives, but applies the draft
+rules to the preserved rows: every clip still has pending rights clearance,
+unconfirmed coverage and provisional review. The separate full-coverage
+`--frozen` mode is not relaxed and rejects this snapshot; local acceptance does
+not authorize hosted processing, training or redistribution and does not
+complete RES-01.
 
 ## Development ownership
 

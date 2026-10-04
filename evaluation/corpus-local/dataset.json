@@ -1,0 +1,47 @@
+{
+  "schema_version": 2,
+  "dataset_version": "res01-local-frozen-2026-10-04",
+  "kind": "frozen-local",
+  "freeze_approval": {
+    "approved_by": "project-owner",
+    "approved_at": "2026-10-04T19:26:06.979+03:00",
+    "scope": "local-evaluation-only",
+    "rights_review_sha256": "dd46f6016858a5df85243e2233ae8a913cefda5a64f9f0db175239468b594981",
+    "source_manifest_sha256": "2bd80504ce717592bb62e59b49547bf9a704a6c5c6e28972f969afd838fd6104",
+    "approved_clip_ids": [
+      "social-01",
+      "social-02",
+      "social-03",
+      "social-04",
+      "social-05",
+      "social-07",
+      "clip-k",
+      "clip-d",
+      "clip-f",
+      "clip-i",
+      "clip-m"
+    ],
+    "credits_signoff": "approved",
+    "coverage_policy": "as-recorded-no-additional-scenarios",
+    "review_policy": "single-pass-preserve-recorded-limitations",
+    "allows_hosted_processing": false,
+    "allows_redistribution": false,
+    "allows_training": false
+  },
+  "limitations": [
+    "Owner-approved local evaluation freeze of the fixed eleven-clip set; no model training, hosted processing or media redistribution is authorized.",
+    "Owner updated the rights checklist and explicitly requested freeze on 2026-10-04. The private checklist is hash-pinned, not published; owner approval is not represented as a new third-party license or rights-holder consent.",
+    "All four JSONL companions are byte-identical to res01-content-2026-10-04. Historical pending rights fields describe the earlier evidence state; freeze_approval records subsequent local-use/credit acceptance without inventing published licensing evidence.",
+    "Exactly one provenance-labeled original pass plus final adjudication is retained: 259 original occurrences, 264 final decisions. AI-assisted authorship, original provisional statuses and correction history remain truthful.",
+    "All 106 social speech intervals use reviewed subtitle-cue envelopes, not forced-aligned words. Card visibility intervals remain separate; the meme cut was locally frame-inspected.",
+    "The fixed 7 dev / 4 test split is frozen. No additional scenarios are required for this local profile. Coverage arrays remain as recorded; unconfirmed or absent scenarios cannot be reported as successfully evaluated.",
+    "Clip-m is a user-confirmed negative with no eligible decisions. Language applicability remains unverified and must not be used to claim English ASR performance.",
+    "This limited-scope freeze does not meet the separate full-coverage --frozen contract, certify exhaustive review or establish accuracy, latency, ASR or OCR results."
+  ],
+  "files": {
+    "clips.jsonl": "3bc5291a74a55403f3047f2ebf1a86d9437083f40a64ea18c6826565c309cbaf",
+    "annotations.jsonl": "9cfcd5f15dde0f3854a26266426054bc2e6be6a5c2fb344dc2d5c40e32481a3a",
+    "adjudications.jsonl": "30a56631b15f2d8619a692798566f36f02c48ca46b26f2fb0983abf733b78650",
+    "main-arguments.jsonl": "1dd925da50330581536c2ab945a06d15387823d8149d8540a7412ac77b87773f"
+  }
+}

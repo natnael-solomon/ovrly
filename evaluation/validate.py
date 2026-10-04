@@ -6,6 +6,7 @@ import json
 import math
 import re
 import sys
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 
@@ -203,17 +204,29 @@ def check_media_path(value, location):
     return path
 
 
-def validate_dataset(directory, *, frozen=False, draft=False, media_root=None):
-    require(not (frozen and draft), directory, "draft and frozen modes are mutually exclusive")
+def validate_dataset(directory, *, frozen=False, draft=False, local_frozen=False, media_root=None):
+    require(sum((frozen, draft, local_frozen)) <= 1, directory, "validation modes are mutually exclusive")
+    provisional_records = draft or local_frozen
+    real = frozen or provisional_records
     schemas = {}
     for name in ("dataset", "clip", "annotation", "adjudication", "main-argument"):
         schemas[name] = read_json(ROOT / "schemas" / f"{name}.schema.json")
         check_schema(schemas[name], f"{name}.schema.json")
     manifest = read_json(directory / "dataset.json")
     validate_value(manifest, schemas["dataset"], str(directory / "dataset.json"))
-    require(manifest["kind"] == ("frozen" if frozen else "draft" if draft else "examples"), directory,
+    kind = "frozen-local" if local_frozen else "frozen" if frozen else "draft" if draft else "examples"
+    require(manifest["kind"] == kind, directory,
             "dataset kind does not match requested mode")
-    if draft:
+    require(("freeze_approval" in manifest) == local_frozen, directory,
+            "freeze_approval is required exclusively for frozen-local")
+    if local_frozen:
+        approval = manifest["freeze_approval"]
+        try:
+            approved_at = datetime.fromisoformat(approval["approved_at"])
+        except ValueError as error:
+            raise Invalid(f"{directory}: invalid approval timestamp") from error
+        require(approved_at.utcoffset() is not None, directory, "approval timestamp requires timezone")
+    if provisional_records:
         require(bool(manifest.get("limitations")), directory, "draft requires explicit limitations")
         require(all(note.strip() for note in manifest["limitations"]), directory,
                 "draft limitations must not be whitespace")
@@ -226,8 +239,11 @@ def validate_dataset(directory, *, frozen=False, draft=False, media_root=None):
         data[table], locations[table] = load_rows(path, schemas[schema_name], id_key)
     clips = data["clips"]
     require(bool(clips), directory, "dataset has no clips")
-    if frozen:
+    if frozen or local_frozen:
         require(10 <= len(clips) <= 20, directory, "frozen dataset requires 10-20 clips")
+    if local_frozen:
+        require(set(approval["approved_clip_ids"]) == set(clips), directory,
+                "owner approval must cover exactly the frozen clips")
     require({c["split"] for c in clips.values()} == {"dev", "test"}, directory,
             "both dev and test splits must be nonempty")
     groups = {}
@@ -235,14 +251,14 @@ def validate_dataset(directory, *, frozen=False, draft=False, media_root=None):
     media_paths = set()
     for clip_id, clip in clips.items():
         loc = locations["clips"][clip_id]
-        require(clip["synthetic"] is not (frozen or draft), loc, "synthetic status does not match dataset kind")
-        require(draft or clip["language"] == "en", loc + ".language",
+        require(clip["synthetic"] is not real, loc, "synthetic status does not match dataset kind")
+        require(provisional_records or clip["language"] == "en", loc + ".language",
                 "unverified language is draft-only")
         require(clip["duration_ms"] <= (180000 if clip["style"] == "live" else 600000),
                 loc + ".duration_ms", "clip exceeds style duration limit")
-        require((clip["rights"]["basis"] == "synthetic") is not (frozen or draft), loc + ".rights",
+        require((clip["rights"]["basis"] == "synthetic") is not real, loc + ".rights",
                 "rights basis does not match dataset kind")
-        if draft:
+        if provisional_records:
             require("clearance" in clip["rights"], loc + ".rights", "draft requires explicit clearance")
         else:
             require(clip["rights"]["basis"] != "pending"
@@ -263,7 +279,7 @@ def validate_dataset(directory, *, frozen=False, draft=False, media_root=None):
                         f"split leakage for {group}")
                 groups[key] = clip["split"]
         media = clip["media"]
-        if frozen or draft:
+        if real:
             require(clip["source_url"] is not None, loc + ".source_url", "real source URL required")
             require(media["path"] is not None and media["sha256"] is not None, loc + ".media",
                     "real media path and SHA-256 required")
@@ -304,7 +320,7 @@ def validate_dataset(directory, *, frozen=False, draft=False, media_root=None):
         if annotation["annotator_kind"] == "ai-assisted":
             require(not annotation["blind_to_model_output"] and not annotation["independent"],
                     loc, "AI-assisted annotations cannot claim model blindness or independent human authorship")
-        if draft:
+        if provisional_records:
             require("review_status" in annotation, loc, "draft requires explicit review_status")
         else:
             require(annotation.get("review_status", "complete") == "complete", loc,
@@ -313,8 +329,8 @@ def validate_dataset(directory, *, frozen=False, draft=False, media_root=None):
         for index, occurrence in enumerate(annotation["occurrences"]):
             occurrence_loc = f"{loc}.occurrences[{index}]"
             require(occurrence["occurrence_id"] not in occurrences, occurrence_loc, "duplicate occurrence ID")
-            check_occurrence(occurrence, clips[clip_id]["duration_ms"], occurrence_loc, draft=draft)
-            if draft:
+            check_occurrence(occurrence, clips[clip_id]["duration_ms"], occurrence_loc, draft=provisional_records)
+            if provisional_records:
                 require("source" in occurrence, occurrence_loc, "draft occurrences require source provenance")
                 for field in ("reference", "units"):
                     require(bool(occurrence["source"][field].strip()), occurrence_loc,
@@ -339,7 +355,7 @@ def validate_dataset(directory, *, frozen=False, draft=False, media_root=None):
         require(set(adjudication["annotation_ids"]) == set(passes[clip_id]), loc + ".annotation_ids",
                 "must reference the sole annotation pass for this clip")
         require(bool(adjudication["review_note"].strip()), loc, "review note must not be whitespace")
-        if draft:
+        if provisional_records:
             require("review_status" in adjudication, loc, "draft requires explicit review_status")
         else:
             require(adjudication.get("review_status", "complete") == "complete", loc,
@@ -350,7 +366,10 @@ def validate_dataset(directory, *, frozen=False, draft=False, media_root=None):
             decision_loc = f"{loc}.decisions[{index}]"
             require(decision["gold_id"] not in gold_ids, decision_loc, "duplicate gold ID")
             gold_ids.add(decision["gold_id"])
-            check_occurrence(decision, clips[clip_id]["duration_ms"], decision_loc, draft=draft)
+            check_occurrence(decision, clips[clip_id]["duration_ms"], decision_loc, draft=provisional_records)
+            if local_frozen:
+                require(decision["modality"] != "unverified", decision_loc,
+                        "local freeze requires known final modality")
             if adjudication.get("review_status") == "complete":
                 require(decision["modality"] != "unverified", decision_loc,
                         "complete review cannot retain unverified modality")
@@ -366,7 +385,7 @@ def validate_dataset(directory, *, frozen=False, draft=False, media_root=None):
                 used.add(key)
         require(used == expected, loc + ".decisions", "every original occurrence needs an adjudication reference")
         has_claims = any(d["eligible"] for d in adjudication["decisions"])
-        provisional = draft and (
+        provisional = provisional_records and (
             adjudication["review_status"] == "provisional"
             or any(data["annotations"][a]["review_status"] == "provisional" for a in passes[clip_id])
         )
@@ -393,6 +412,16 @@ def validate_dataset(directory, *, frozen=False, draft=False, media_root=None):
                     "human note must match assessment basis")
             if argument["human_note"] is not None:
                 require(bool(argument["human_note"].strip()), loc, "human note must not be whitespace")
+            if local_frozen or argument["basis"] == "user-confirmed-negative":
+                final = next(review for review in data["adjudications"].values()
+                             if review["clip_id"] == clip_id)
+                has_claims = any(decision["eligible"] for decision in final["decisions"])
+                if argument["basis"] == "user-confirmed-negative":
+                    require(not has_claims, loc,
+                            "confirmed negative cannot have eligible final decisions")
+                if local_frozen and not has_claims:
+                    require(argument["basis"] == "user-confirmed-negative", loc,
+                            "local freeze requires explicit confirmation for negative clips")
             if not draft:
                 require(argument["basis"] != "user-reported-negative", loc,
                         "unconfirmed negative assessment is draft-only")
@@ -408,14 +437,22 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--frozen", action="store_true", help="require the real 10-20-clip corpus")
     mode.add_argument("--draft", action="store_true", help="check real working data without freeze approval")
+    mode.add_argument("--frozen-local", action="store_true",
+                      help="check owner-approved local-only freeze with recorded limitations")
     parser.add_argument("--media-root", type=Path, help="also verify local media bytes (never uploaded)")
     args = parser.parse_args(argv)
     try:
-        count = validate_dataset(args.directory, frozen=args.frozen, draft=args.draft, media_root=args.media_root)
+        count = validate_dataset(args.directory, frozen=args.frozen, draft=args.draft,
+                                 local_frozen=args.frozen_local, media_root=args.media_root)
     except (Invalid, OSError, UnicodeError, RecursionError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    if args.draft:
+    if args.frozen_local:
+        print(f"Valid owner-approved local frozen metadata: {count} clips. "
+              + ("Media hashes verified." if args.media_root else "Media bytes NOT verified; supply --media-root.")
+              + " Limited coverage and recorded review/timing limitations retained."
+              + " NOT full-coverage certification or permission for uploads, redistribution or training.")
+    elif args.draft:
         print(f"Valid draft metadata: {count} clips. NOT frozen or benchmark-ready. "
               + ("Media hashes verified." if args.media_root else "Media bytes NOT verified; supply --media-root.")
               + " Rights, coverage and review limitations remain.")

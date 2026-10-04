@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "dataset_version": "res01-content-2026-10-04",
+  "kind": "draft",
+  "limitations": [
+    "Freeze candidate with completed supplied-card and social-speech reconciliation, not a rights-cleared frozen corpus.",
+    "Preserves res06-draft-2026-10-02 and res01-review-2026-10-04; original clips and 259 annotations are byte-identical, with 264 final decisions including five disclosed visual discoveries.",
+    "All 106 social speech occurrences now use reviewed SRT cue envelopes. This is not word-level forced alignment or measured timestamp accuracy.",
+    "AP secondary box is author/publication metadata, not a separate claim. EPI higher-resolution inset supplies four average annual growth assertions; opening meme is qualitative, not numerical.",
+    "Meme visibility measured at the local video opening through the cut at 12933 ms. Other card intervals remain supplied user envelopes; full-screen OCR/background artwork is outside this annotation scope.",
+    "Users confirmed no on-screen claims for d/k, no on-screen text card for f, both speech/caption modalities for i, and no assessable claims for m.",
+    "Clip-m's negative is confirmed; language applicability and archival rights are not inferred from claim absence.",
+    "Fixed eleven-clip scope and 7 dev / 4 test split retained. No further scenario acquisition planned; missing scenarios are not evaluated, not falsely marked covered.",
+    "Social permission evidence, embedded-credit sign-off and archival clearance remain absent or pending; no upload or redistribution authorization is granted.",
+    "Original provisional annotations and remaining frozen-contract acceptance gates are preserved, not relabeled to force a pass."
+  ],
+  "files": {
+    "clips.jsonl": "3bc5291a74a55403f3047f2ebf1a86d9437083f40a64ea18c6826565c309cbaf",
+    "annotations.jsonl": "9cfcd5f15dde0f3854a26266426054bc2e6be6a5c2fb344dc2d5c40e32481a3a",
+    "adjudications.jsonl": "30a56631b15f2d8619a692798566f36f02c48ca46b26f2fb0983abf733b78650",
+    "main-arguments.jsonl": "1dd925da50330581536c2ab945a06d15387823d8149d8540a7412ac77b87773f"
+  }
+}

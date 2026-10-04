@@ -37,7 +37,7 @@ class SchemaTest(unittest.TestCase):
                     with self.subTest(path=path.name, field=name, suffix=repr(suffix)):
                         with self.assertRaisesRegex(Invalid, "pattern mismatch"):
                             validate_value("valid-id-1" + suffix, schema, name)
-        self.assertEqual(17, checked)
+        self.assertEqual(18, checked)
 
     def test_sha256_schemas_reject_trailing_whitespace(self):
         clip = read_json(ROOT / "schemas" / "clip.schema.json")
@@ -47,8 +47,11 @@ class SchemaTest(unittest.TestCase):
             "source.sha256": read_json(ROOT / "schemas" / "annotation.schema.json")[
                 "properties"]["occurrences"]["items"]["properties"]["source"]["properties"]["sha256"],
             **dataset["properties"]["files"]["properties"],
+            **{name: schema for name, schema in
+               dataset["properties"]["freeze_approval"]["properties"].items()
+               if name.endswith("_sha256")},
         }
-        self.assertEqual(6, len(schemas))
+        self.assertEqual(8, len(schemas))
         for name, schema in schemas.items():
             validate_value("a" * 64, schema, name)
             for suffix in (" ", "\t", "\n", "\r", "\r\n", "\u0085", "\u2028", "\u2029", "\u00a0"):
