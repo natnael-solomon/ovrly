@@ -27,6 +27,7 @@ class JobEvent(StrEnum):
     PUBLISH = "publish"
     FAIL = "fail"
     RELEASE = "release"
+    RETRY = "retry"
     EXPIRE = "expire"
     REQUEST_CANCEL = "request_cancel"
     CANCEL = "cancel"
@@ -65,7 +66,7 @@ def apply(status: JobStatus, event: JobEvent) -> JobStatus:
             return replace(status, state=JobState.PUBLISHED)
         case JobEvent.FAIL if state in LEASED_STATES:
             return replace(status, state=JobState.FAILED)
-        case JobEvent.RELEASE | JobEvent.EXPIRE if state in LEASED_STATES:
+        case JobEvent.RELEASE | JobEvent.RETRY | JobEvent.EXPIRE if state in LEASED_STATES:
             if status.cancel_requested:
                 return replace(status, state=JobState.CANCELLED)
             return replace(status, state=JobState.QUEUED)

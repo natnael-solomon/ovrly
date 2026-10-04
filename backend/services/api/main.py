@@ -10,6 +10,7 @@ from services.api import routes
 from services.database import Database
 from services.jobs.faults import FaultInjector
 from services.jobs.handlers import JobHandler, default_handlers
+from services.jobs.retries import RetryPolicy
 from services.settings import Settings, load_settings
 from services.worker.runtime import Worker
 
@@ -36,6 +37,7 @@ def create_app(
                 faults=faults,
                 lease_seconds=config.job_lease_seconds,
                 poll_seconds=config.job_poll_seconds,
+                retry_policy=RetryPolicy.from_settings(config),
             )
             if config.embed_worker
             else None

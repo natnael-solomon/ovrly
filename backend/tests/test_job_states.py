@@ -85,3 +85,6 @@ def test_requested_versus_effective_cancellation():
     assert apply(requested, JobEvent.CANCEL) == JobStatus(JobState.CANCELLED, True)
     assert apply(requested, JobEvent.EXPIRE) == JobStatus(JobState.CANCELLED, True)
     assert apply(running, JobEvent.EXPIRE) == JobStatus(JobState.QUEUED)
+    assert apply(running, JobEvent.RETRY) == JobStatus(JobState.QUEUED)
+    assert apply(requested, JobEvent.RETRY) == JobStatus(JobState.CANCELLED, True)
+    assert not is_legal(queued, JobEvent.RETRY)

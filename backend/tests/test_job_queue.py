@@ -14,6 +14,7 @@ from services.jobs.queue import (
     PublishRejected,
     StageKey,
 )
+from services.jobs.retries import RetryClass
 from services.jobs.states import JobState, JobStatus
 from services.settings import Settings
 
@@ -230,3 +231,76 @@ async def test_unknown_job_reads_as_missing(queue):
     assert await queue.get(missing) is None
     with pytest.raises(PublishRejected, match="no longer exists"):
         await queue.publish(Lease(missing, "w1", 1, 0, None), {})
+
+
+async def test_retry_schedules_availability_and_counts_per_class(queue):
+    stage_key, claimed = await full_claim(queue)
+    assert claimed.retry_counts == {}
+    assert claimed.provider_request_id is None
+    assert await queue.start(claimed.lease)
+    assert await queue.retry(claimed.lease, RetryClass.TRANSIENT, 0.3)
+    record = await queue.get(claimed.id)
+    assert record.status == JobStatus(JobState.QUEUED)
+    assert record.retry_class is RetryClass.TRANSIENT
+    assert record.retry_counts == {"transient": 1}
+    assert record.lease_owner is None
+    assert await queue.claim("w2", [stage_key.stage], 30) is None, "Not available yet"
+    await asyncio.sleep(0.35)
+    again = await queue.claim("w2", [stage_key.stage], 30)
+    assert again.id == claimed.id
+    assert again.retry_counts == {"transient": 1}
+    assert again.attempts == 2
+    assert await queue.retry(again.lease, RetryClass.RATE_LIMITED, 0)
+    third = await queue.claim("w3", [stage_key.stage], 30)
+    assert third.retry_counts == {"transient": 1, "rate_limited": 1}
+    assert await queue.retry(third.lease, RetryClass.TRANSIENT, 0)
+    assert (await queue.get(claimed.id)).retry_counts == {"transient": 2, "rate_limited": 1}
+
+
+async def test_retry_with_pending_cancel_becomes_cancelled(queue):
+    _, claimed = await full_claim(queue)
+    assert await queue.request_cancel(claimed.id) is CancelOutcome.REQUESTED
+    assert await queue.retry(claimed.lease, RetryClass.TRANSIENT, 0)
+    record = await queue.get(claimed.id)
+    assert record.status == JobStatus(JobState.CANCELLED, cancel_requested=True)
+    assert record.generation == 1
+    assert record.retry_counts == {"transient": 1}
+
+
+async def test_stale_lease_cannot_retry_or_record_a_request_id(queue):
+    stage_key, stale = await full_claim(queue, lease_seconds=0.05)
+    await asyncio.sleep(0.1)
+    fresh = await queue.claim("w2", [stage_key.stage], 30)
+    assert fresh.id == stale.id
+    assert not await queue.retry(stale.lease, RetryClass.TRANSIENT, 0)
+    with pytest.raises(LeaseLost):
+        await queue.record_request_id(stale.lease, "req-stale")
+    assert (await queue.get(stale.id)).provider_request_id is None
+    assert (await queue.get(stale.id)).status.state is JobState.LEASED
+
+
+async def test_fail_records_the_retry_class(queue):
+    _, claimed = await full_claim(queue)
+    assert await queue.fail(claimed.lease, "NonRetriableInput", RetryClass.NON_RETRIABLE_INPUT)
+    record = await queue.get(claimed.id)
+    assert record.status.state is JobState.FAILED
+    assert record.failure == "NonRetriableInput"
+    assert record.retry_class is RetryClass.NON_RETRIABLE_INPUT
+
+
+async def test_request_id_is_recorded_and_found_across_re_leases(queue):
+    stage_key, claimed = await full_claim(queue, lease_seconds=0.05)
+    request_id = "req-" + uuid.uuid4().hex
+    assert await queue.find_by_request_id(request_id) is None
+    await queue.record_request_id(claimed.lease, request_id)
+    found = await queue.find_by_request_id(request_id)
+    assert found.id == claimed.id
+    assert found.provider_request_id == request_id
+    await asyncio.sleep(0.1)
+    re_leased = await queue.claim("w2", [stage_key.stage], 30)
+    assert re_leased.provider_request_id == request_id, "The next attempt must reconcile"
+    assert await queue.start(re_leased.lease)
+    assert await queue.retry(re_leased.lease, RetryClass.UNKNOWN_OUTCOME, 0)
+    assert (await queue.get(claimed.id)).provider_request_id == request_id
+    assert await queue.delete(claimed.id)
+    assert (await queue.find_by_request_id(request_id)).status.state is JobState.DELETED

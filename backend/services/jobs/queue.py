@@ -8,21 +8,22 @@ deletion cannot publish or otherwise mutate the job.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import ColumnElement, and_, case, delete, func, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import ColumnElement, Text, and_, case, delete, func, select, update
+from sqlalchemy.dialects.postgresql import array, insert
 from sqlalchemy.engine import Row
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from services.database import Database
 from services.jobs.models import job_results, jobs
+from services.jobs.retries import RetryClass
 from services.jobs.states import LEASED_STATES, JobState, JobStatus
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,9 @@ class ClaimedJob:
     key: StageKey
     payload: dict[str, Any]
     attempts: int
+    retry_counts: Mapping[str, int]
+    # Set when an earlier attempt recorded a provider request id; reconcile, do not re-call.
+    provider_request_id: str | None
 
     @property
     def id(self) -> UUID:
@@ -77,6 +81,10 @@ class JobRecord:
     lease_owner: str | None
     lease_expires_at: datetime | None
     failure: str | None
+    retry_class: RetryClass | None
+    retry_counts: Mapping[str, int]
+    provider_request_id: str | None
+    available_at: datetime
 
 
 @dataclass(frozen=True)
@@ -217,13 +225,22 @@ class JobQueue:
                         jobs.c.lease_expires_at,
                         jobs.c.payload,
                         jobs.c.attempts,
+                        jobs.c.retry_counts,
+                        jobs.c.provider_request_id,
                     )
                 )
             ).first()
         if row is None:
             return None
         lease = Lease(row.id, worker_id, row.fencing_token, row.generation, row.lease_expires_at)
-        return ClaimedJob(lease, _key(row), dict(row.payload), row.attempts)
+        return ClaimedJob(
+            lease,
+            _key(row),
+            dict(row.payload),
+            row.attempts,
+            dict(row.retry_counts),
+            row.provider_request_id,
+        )
 
     async def _fenced_update(self, lease: Lease, states: list[str], **values: Any) -> bool:
         async with self.database.engine.begin() as connection:
@@ -328,10 +345,54 @@ class JobQueue:
             return "cancellation was requested"
         return f"the job is {record.status.state.value}"
 
-    async def fail(self, lease: Lease, reason: str) -> bool:
+    async def fail(self, lease: Lease, reason: str, retry_class: RetryClass | None = None) -> bool:
         return await self._fenced_update(
-            lease, _LEASED, state=JobState.FAILED.value, failure=reason, **self._cleared()
+            lease,
+            _LEASED,
+            state=JobState.FAILED.value,
+            failure=reason,
+            retry_class=retry_class.value if retry_class is not None else None,
+            **self._cleared(),
         )
+
+    async def retry(self, lease: Lease, retry_class: RetryClass, delay_seconds: float) -> bool:
+        """Return an owned lease to the queue after ``delay_seconds`` and count the retry.
+
+        A pending cancellation wins and becomes effective, exactly as in :meth:`release`.
+        """
+        counter = jobs.c.retry_counts[retry_class.value].as_integer()
+        counted = func.jsonb_set(
+            jobs.c.retry_counts,
+            array([retry_class.value], type_=Text),
+            func.to_jsonb(func.coalesce(counter, 0) + 1),
+        )
+        return await self._fenced_update(
+            lease,
+            _LEASED,
+            state=case(
+                (jobs.c.cancel_requested, JobState.CANCELLED.value),
+                else_=JobState.QUEUED.value,
+            ),
+            generation=jobs.c.generation + case((jobs.c.cancel_requested, 1), else_=0),
+            available_at=func.now() + timedelta(seconds=delay_seconds),
+            retry_class=retry_class.value,
+            retry_counts=counted,
+            **self._cleared(),
+        )
+
+    async def record_request_id(self, lease: Lease, request_id: str) -> None:
+        """Persist the provider request id before the call so a timeout can reconcile."""
+        if not await self._fenced_update(lease, _LEASED, provider_request_id=request_id):
+            raise LeaseLost(f"Lease on job {lease.job_id} is no longer current")
+
+    async def find_by_request_id(self, request_id: str) -> JobRecord | None:
+        async with self.database.engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    select(jobs).where(jobs.c.provider_request_id == request_id)
+                )
+            ).first()
+        return self._record(row) if row is not None else None
 
     async def release(self, lease: Lease) -> bool:
         """Return an owned lease to the queue, or make a requested cancellation effective."""
@@ -405,8 +466,10 @@ class JobQueue:
     async def get(self, job_id: UUID) -> JobRecord | None:
         async with self.database.engine.connect() as connection:
             row = (await connection.execute(select(jobs).where(jobs.c.id == job_id))).first()
-        if row is None:
-            return None
+        return self._record(row) if row is not None else None
+
+    @staticmethod
+    def _record(row: Row[Any]) -> JobRecord:
         return JobRecord(
             id=row.id,
             key=_key(row),
@@ -417,6 +480,10 @@ class JobQueue:
             lease_owner=row.lease_owner,
             lease_expires_at=row.lease_expires_at,
             failure=row.failure,
+            retry_class=RetryClass(row.retry_class) if row.retry_class is not None else None,
+            retry_counts=dict(row.retry_counts),
+            provider_request_id=row.provider_request_id,
+            available_at=row.available_at,
         )
 
     async def published(self, key: StageKey) -> list[PublishedResult]:

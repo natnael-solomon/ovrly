@@ -43,7 +43,12 @@ class BackendWorkflowTest(unittest.TestCase):
         self.assertIn("if: needs.changes.outputs.backend == 'true'", recovery)
         self.assertIn("services:\n      postgres:", recovery)
         self.assertIn("alembic upgrade head", recovery)
-        for path in ("tests/test_job_states.py", "tests/test_job_queue.py", "tests/recovery"):
+        for path in (
+            "tests/test_job_states.py",
+            "tests/test_job_retries.py",
+            "tests/test_job_queue.py",
+            "tests/recovery",
+        ):
             self.assertIn(path, recovery)
         result = SOURCE.split("  recovery_result:\n", 1)[1]
         self.assertIn("name: Backend recovery\n    if: ${{ always() }}", result)
