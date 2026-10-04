@@ -1,9 +1,14 @@
 # Backend
 
-Python 3.11 / uv / FastAPI foundation with PostgreSQL, Alembic and a shared worker
-lifecycle. No research, intake, authentication, uploads or durable jobs are
-implemented yet. The worker is explicitly idle: it proves startup, supervision
-and shutdown, not processing or lease draining.
+Python 3.11 / uv / FastAPI foundation with PostgreSQL, Alembic, a shared worker
+lifecycle and a durable PostgreSQL job queue with typed retry classes. The API
+mints guest principals, links them to a Google account (BC-D07), accepts
+uploads and records investigations behind bearer authentication (see
+[Identity and intake API](#identity-and-intake-api)). Each recorded
+investigation is handed to the queue as an `intake` job in the same
+transaction; the worker's `intake` stage only confirms the record today, so no
+research processing happens yet (BE-07, #20). See
+[Durable jobs and recovery](#durable-jobs-and-recovery).
 
 ## Local setup (Linux / WSL)
 
@@ -69,7 +74,20 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_API_PORT` | Development helper's loopback API port, 8000 |
 | `OVRLY_EMBED_WORKER` | Off for ordinary API startup; helper explicitly enables it |
 | `OVRLY_DATABASE_TIMEOUT_SECONDS` | 3; positive, at most 30 |
-| `OVRLY_WORKER_SHUTDOWN_SECONDS` | 5; positive, at most 30 |
+| `OVRLY_WORKER_SHUTDOWN_SECONDS` | 5; positive, at most 30. Time a stopping worker may spend finishing its in-flight job before the lease is released |
+| `OVRLY_JOB_LEASE_SECONDS` | 30; positive, at most 600. Lease granted per claim; handlers extend it with heartbeats |
+| `OVRLY_JOB_POLL_SECONDS` | 1; positive, at most 60. Idle wait between claim attempts |
+| `OVRLY_UPLOAD_MAX_BYTES` | 268435456 (256 MiB); positive. Placeholder until BC-D06 fixes the budget |
+| `OVRLY_UPLOAD_TARGET_SECONDS` | 900; how long an upload target accepts bytes and completion, at most 86400 |
+| `OVRLY_MAX_SHARED_DURATION_SECONDS` | 600; declared shared-media duration limit from BC-D01 |
+| `OVRLY_STORAGE_DIR` | `.data/uploads`, relative to `backend/` and Git-ignored; local filesystem upload store |
+| `OVRLY_JOB_RETRY_TRANSIENT_ATTEMPTS` | 5; 0 to 20. Scheduled retries for the `transient` class before the job fails |
+| `OVRLY_JOB_RETRY_RATE_LIMITED_ATTEMPTS` | 5; 0 to 20. Retries for the `rate_limited` class |
+| `OVRLY_JOB_RETRY_SCHEMA_REPAIR_ATTEMPTS` | 2; 0 to 10. Repair attempts for the `invalid_model_schema` class |
+| `OVRLY_JOB_RETRY_UNKNOWN_OUTCOME_ATTEMPTS` | 3; 0 to 10. Reconciliation attempts for the `unknown_outcome` class |
+| `OVRLY_JOB_RETRY_BACKOFF_SECONDS` | 1; positive, at most 60. Base of the exponential backoff |
+| `OVRLY_JOB_RETRY_MAX_BACKOFF_SECONDS` | 60; positive, at most 3600 and at least the base. Caps backoff and provider retry-after hints |
+| `OVRLY_GOOGLE_CLIENT_ID` | Empty; Google Web client ID that linked ID tokens must be issued for (BC-D07). Configuration, not a secret. Empty leaves `POST /v1/principals/link` unavailable with 503 `ACCOUNT_LINK_UNAVAILABLE` |
 
 The helper checks for at least 2 GiB free on the checkout filesystem before and
 after dependency/image setup and after database startup. It stops further work if
@@ -103,10 +121,189 @@ uv run --frozen --env-file .env.example python -m services.worker
 Do not start the standalone worker alongside an embedded worker for the same
 development session. The standalone entry point handles SIGINT/SIGTERM on
 Linux/WSL; native Windows signal handling is not implemented. Both modes close
-owned database resources. Worker failures are visible and are not automatically
-restarted. The current baseline only establishes Alembic history; it intentionally
-does not create product/job tables. Future schema changes require a reviewed
-migration and upgrade/downgrade coverage, not `create_all()` during API startup.
+owned database resources and drain their lease on shutdown. Worker failures are
+visible and are not automatically restarted. Migration `0001` only establishes
+Alembic history; `0002_jobs` creates the `jobs` and `job_results` tables,
+`0003_identity_intake` creates the principal, credential, upload, investigation
+and idempotency tables defined in `services/models.py`, `0004_job_retries`
+adds the retry class, per-class retry counters and the provider request id to
+`jobs`, and `0005_account_link` adds `google_sub` (unique), `merged_into` and
+`merged_at` to `principals`. Future schema changes require a reviewed migration
+and upgrade/downgrade coverage, not `create_all()` during API startup.
+
+### Durable jobs and recovery
+
+`services/jobs` implements the BE-04 engine. `queue.py` is the PostgreSQL
+queue, `states.py` the pure state machine, `handlers.py` the stage-handler
+protocol, `retries.py` the retry classes and policy, and `faults.py` the
+fault-injection hooks used only by tests.
+
+| Mechanism | Behaviour |
+| --- | --- |
+| Stage key | `(version, stage, input_hash)` is unique on `jobs` and `job_results`; re-enqueueing returns the existing job. `JobQueue.enqueue` takes the caller's connection so the business record and the queue row commit in one transaction. |
+| Claim | `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)`; each claim bumps the fencing token and attempt count, grants a lease and first returns expired leases to the queue (or makes a pending cancellation effective). Only jobs whose `available_at` has passed are claimable. |
+| Lease | Owner, expiry and a monotonically increasing fencing token. `heartbeat` extends it and reports a cancellation request; a lost lease raises `LeaseLost`. |
+| Publish | Compare-and-set on owner, fencing token, generation, `running` state and no pending cancellation; the result row is written in the same transaction. Any mismatch raises `PublishRejected`. |
+| Retry | A handler raises a typed outcome (table below). The policy either schedules the job through `available_at`, recording the class and a per-class counter in `retry_counts`, or declares the class exhausted so the job fails with `retry_class` set. A pending cancellation wins over a retry. |
+| Request id | `JobContext.record_request_id` persists the provider request id before the call (fenced). A re-leased attempt sees it on `ClaimedJob.provider_request_id` and reconciles instead of calling again; `find_by_request_id` routes callbacks. The policy refuses to retry an `UnknownOutcome` when no id was recorded. |
+| Infrastructure errors | Database, socket and timeout errors raised during a stage leave the outcome unknown: the worker never marks the job failed, hands the lease back if it can and otherwise lets it expire, so the job is re-leased. The worker loop survives. |
+| Cancellation | `request_cancel` cancels a queued job immediately (effective) or sets `cancel_requested` for a leased one (requested); the worker observes it at start, through heartbeats or when the lease expires, and makes it effective. Both bump the generation. |
+| Deletion | `delete` tombstones the job, clears its payload, bumps the generation and removes the published result. The tombstone keeps `provider_request_id` so a late callback is routed to nothing. |
+| States | queued, leased, running, published, cancelled, deleted, failed. Terminal states only move to deleted; deleted is absorbing. `tests/test_job_states.py` checks random legal and illegal sequences with Hypothesis. |
+| Shutdown | Stop requests end claiming; the in-flight job finishes and publishes within `OVRLY_WORKER_SHUTDOWN_SECONDS`, otherwise the task is cancelled and its lease is released, so a job is neither lost nor run twice by the same worker. |
+
+| Retry class | Raised as | Schedule |
+| --- | --- | --- |
+| `transient` | `Transient` (provider 5xx, resets) | Exponential backoff with full jitter from `OVRLY_JOB_RETRY_BACKOFF_SECONDS`, capped by the maximum; `OVRLY_JOB_RETRY_TRANSIENT_ATTEMPTS` retries |
+| `rate_limited` | `RateLimited(retry_after_seconds)` (provider 429) | The provider's hint clamped to the maximum backoff, otherwise backoff; `OVRLY_JOB_RETRY_RATE_LIMITED_ATTEMPTS` retries |
+| `non_retriable_input` | `NonRetriableInput` | Never; the job fails on the first outcome |
+| `invalid_model_schema` | `InvalidModelSchema` | Backoff; `OVRLY_JOB_RETRY_SCHEMA_REPAIR_ATTEMPTS` repair attempts, visible to the handler through `retry_counts` |
+| `unknown_outcome` | `UnknownOutcome` (provider timeout) | Backoff only when a request id was recorded; `OVRLY_JOB_RETRY_UNKNOWN_OUTCOME_ATTEMPTS` reconciliation attempts; never a silent re-call |
+
+Workers execute only the stages they have handlers for. `default_handlers()`
+registers the `intake` stage from `services/pipeline/intake.py`: it checks that
+the investigation still exists and belongs to the owner in the job payload,
+confirms `queued` at stage `intake` with the coverage placeholder and publishes
+a result row; a missing or foreign investigation is `NonRetriableInput`. Media
+stages arrive with BE-07 (#20). Handlers receive a `JobContext`
+whose `heartbeat()` must be called by long stages. Other handler exceptions
+mark the job `failed` with the exception type only; messages are never
+persisted or logged. `POST /v1/jobs/{id}/cancel`, `DELETE /v1/jobs/{id}` and
+the cross-owner-read invariant are
+[BE-04 part 3 / #75](https://github.com/natnael-solomon/ovrly/issues/75), built
+on the BE-05 (#19) error shape and identity; the queue primitives they call
+(`request_cancel`, `delete`) are already here.
+
+`services/api/intake.py` hands each new investigation to the queue.
+`QueueDispatcher` runs inside the transaction that writes the investigation and
+idempotency rows and calls `JobQueue.enqueue` with stage key
+`(1, "intake", sha256("investigation:<id>"))` and payload
+`{investigation_id, owner_id}`. A dispatcher failure rolls back the
+investigation, the key and the job together; a replayed `Idempotency-Key`
+never reaches the dispatcher, and the stage-key uniqueness would reject a
+second job anyway. `RecordOnlyDispatcher` remains for tests that isolate the
+API from the queue (`create_app(dispatcher=...)`).
+
+`tests/recovery/` holds the in-process API + worker harness with
+`ScriptedFaults` checkpoints (`claimed`, `before_publish`, `after_publish`,
+plus the stage-level `after_provider_call` and `after_artifact_store` that stub
+stages hit through `JobContext.checkpoint`). No provider or artifact store is
+integrated yet, so those stages are stubs registered only in tests. Covered:
+
+- Worker killed before the state commit, after the provider call (request id
+  recorded, reconciled on re-lease, provider called once) and after the
+  artifact store (idempotent write under the stage key); each re-leased and
+  completed exactly once.
+- Lease expiry while the original worker is alive (stale publish rejected by
+  the fencing token); lost leases detected by heartbeats and at start.
+- Graceful drain in embedded and standalone (SIGTERM) modes, forced drain
+  releasing the lease, and an API lifespan restart with an in-flight request
+  and a running stage (released, re-leased by the new lifespan, completed once).
+- Cancellation before a stage, during a stage and mid-retrieval (no further
+  chunk fetched); deletion with a delayed provider callback (late publish
+  rejected, no resurrected content, tombstone kept). #75 adds the API-driven
+  variants.
+- Database connection dropped mid-stage with `pg_terminate_backend`, and the
+  variant where the release fails too (lease expires); the worker survives and
+  the job is never marked failed.
+- Every retry class through the worker (`test_retries.py`): success after
+  backoff, exhaustion with the class recorded, the clamped rate-limit hint,
+  immediate failure for non-retriable input, bounded schema repair, unknown
+  outcome reconciled by request id, exhausted, or refused without an id.
+- Duplicate provider callback with the same request id (`test_idempotency.py`):
+  concurrent and late duplicates publish once; a callback for a deleted job is
+  dropped.
+- Intake hand-off (`test_intake_handoff.py`): a dispatcher failure rolls back
+  the investigation and the job together; sequential and concurrent replays of
+  one `Idempotency-Key` yield exactly one job; the embedded worker killed
+  before publishing the `intake` result is re-leased by a standalone worker
+  with the production stage table and the investigation is published once,
+  reporting `running` meanwhile; a job for a missing or foreign investigation
+  fails as `non_retriable_input`.
+- Negative invariants: duplicate publish, publish after cancel, publish after
+  delete, stale fencing token, stale lease retry or request-id write.
+
+After each case the harness asserts exactly one publication (or none for
+cancelled, deleted and failed jobs), no lost job, matching stage key, fencing
+token and generation, no held leases and, for deletions, an empty payload and
+no result. CI runs this as the separate **Backend recovery** job:
+
+```sh
+OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0.0.1:55432/ovrly' \
+  uv run --frozen pytest -q tests/test_job_states.py tests/test_job_retries.py \
+  tests/test_job_queue.py tests/recovery
+```
+
+Not covered here: the cancel/delete endpoints and cross-owner reads (#75), and
+the chunk `(session, seq)` idempotency test, which belongs to the capture
+intake endpoint that introduces that resource. Investigation POST idempotency
+is covered by `test_intake_handoff.py` and `tests/test_intake_api.py`.
+
+## Identity and intake API
+
+All product routes live under `/v1`, return JSON and use the shared contract
+error shape from
+[`packages/contracts/schemas/error.schema.json`](../packages/contracts/schemas/error.schema.json):
+`{code, message, retryable, action, request_id}` with `SCREAMING_SNAKE_CASE`
+codes. Validation failures (422 `VALIDATION_FAILED`), unknown routes
+(`NOT_FOUND`), database outages (503 `DATABASE_UNAVAILABLE`) and unexpected
+failures (500 `INTERNAL_ERROR`) use the same shape; messages never include
+internals, inputs or secrets. Every response carries `X-Request-Id`; a
+well-formed client value (1 to 128 characters, starting with a letter or digit,
+then letters, digits, `_` or `-`) is echoed, otherwise one is generated.
+`action` is a client hint: `none`, `retry`, `authenticate`, `fix_request` or
+`upload_again`. The test suite validates every error response against the
+schema with the contracts validator.
+
+| Route | Behavior |
+| --- | --- |
+| `POST /v1/principals/guest` | Mints a guest principal and an opaque bearer token (`ovk_` prefix, 256 random bits). Only a SHA-256 digest is stored; the token is returned once and never logged. 201. |
+| `POST /v1/principals/link` | Body `{"provider": "google", "id_token": ...}`, bearer-authenticated as the calling guest ([BC-D07](../docs/decisions/BC-D07-account-link.md)). The token is verified against `OVRLY_GOOGLE_CLIENT_ID`. Unknown subject: the caller is upgraded in place (`kind` becomes `account`, credential stays valid, every object keeps its owner) and the response is `200 {principal_id, kind, linked: true, merged_saved_reports, credential: null}`; repeating it is the same 200. Subject already owned by another principal A: in one transaction the caller's explicitly saved reports move to A (`transfer_saved_reports`, zero until #33 adds the table), the caller's credentials are revoked, `merged_into` is recorded, and the response carries `principal_id = A` plus a new `credential` for A. Investigations, uploads and idempotency keys stay with the revoked guest. Already linked to a different subject: 409 `ACCOUNT_ALREADY_LINKED`. Bad token: 401 `INVALID_ID_TOKEN`. No client ID configured: 503 `ACCOUNT_LINK_UNAVAILABLE`. |
+| `POST /v1/uploads` | Declares `size_bytes`, `sha256` and optional `content_type`; returns a scoped `target`, `max_bytes` and `expires_at`. Over the byte limit: 413 `UPLOAD_TOO_LARGE`. |
+| `PUT /v1/uploads/{id}/content` | Streams raw bytes to the target while holding the upload row lock, so a concurrent completion waits for the whole body. Exceeding the smaller of the limit and the declared size discards the partial content with 413. Expired: 410 `UPLOAD_EXPIRED`. |
+| `POST /v1/uploads/{id}/complete` | Re-reads the stored bytes and compares size and SHA-256 with the declaration. Mismatch deletes the bytes and returns 409 `UPLOAD_MISMATCH`; missing bytes return 409 `UPLOAD_CONTENT_MISSING`. Completing twice returns the same 200. |
+| `POST /v1/investigations` | Requires `Idempotency-Key` (400 if missing or longer than 200 characters). Body: `{"source": {"kind": "url", "url": ...}}` or `{"source": {"kind": "upload", "upload_id": ...}}`, each with optional `duration_ms`. Writes the investigation, the key and the `intake` job in one transaction before answering 202. Same key and body replays the original 202 body; same key with a different body is 409 `IDEMPOTENCY_KEY_REUSED`. Keys are scoped per owner. |
+| `GET /v1/investigations` | Newest-first list of the caller's investigations (at most 100). |
+| `GET /v1/investigations/{id}` | `state`, `stage`, a coverage placeholder, `version` and a safe `error` object or `null`. `state` reflects the intake job: `queued` or `leased` read as `queued`, `running` as `running`, `failed` as `failed` with a `PROCESSING_FAILED` error unless a specific code was recorded, `cancelled` or `deleted` as `cancelled`; a published job leaves the stored state. Lease owners, fencing tokens, retry classes and failure types are never exposed. |
+
+Every route except guest minting requires `Authorization: Bearer <token>`.
+Missing credentials return 401 `AUTHENTICATION_REQUIRED`; malformed, unknown or
+revoked ones (including a guest credential revoked by a second-device link)
+return 401 `INVALID_CREDENTIAL`, both with `WWW-Authenticate`.
+Identity comes only from the credential: `user_id`, `owner_id` or `principal_id`
+in a body, query string or `X-User-Id`-style header is rejected with
+`CLIENT_IDENTITY_REJECTED`. Object routes load rows through the owner-scoped
+helper in `services/api/auth/ownership.py`; another owner's object is a plain
+404, so existence is not revealed.
+
+Limits come from settings. A declared `duration_ms` above
+`OVRLY_MAX_SHARED_DURATION_SECONDS` is 422 `DURATION_LIMIT_EXCEEDED`; the byte
+limit is checked at declaration and while streaming. Upload bytes are written
+to `OVRLY_STORAGE_DIR` through the `UploadStore` interface in
+`services/storage.py`; object storage can replace the local store once BC-D03 is
+decided. Uploaded media is development data on the local disk, not a retention
+policy or consent record.
+
+Recorded investigations are handed to the queue as described under
+[Durable jobs and recovery](#durable-jobs-and-recovery); until BE-07 (#20)
+adds media stages they stay `queued` at stage `intake` after the intake job
+publishes. Account linking follows
+[BC-D07](../docs/decisions/BC-D07-account-link.md): identity is verified
+server-side from the Google ID token (`services/api/auth/google.py`), and
+`services/api/auth/linking.py` performs the upgrade or second-device merge in
+one transaction, with every write restricted to the calling principal. Quotas
+beyond the two limits and deletion remain open (#77 retention, #75 user
+deletion). `packages/contracts` holds the shared error shape, the voice-actions schemas
+and, from BE-03 (#15), the upload, investigation, job, capture, report, claim,
+evidence and assessment schemas with their enums and the OpenAPI document. The
+intake and account-link request and response models in `services/api/schemas.py`
+are mirrored there; the new read models (`Claim`, `Evidence`, `Assessment`,
+`ReportVersion`, `JobSummary`, `InvestigationReadModel`) generate the six
+result fixtures through `packages/contracts/roundtrip.py`, and
+`tests/test_contract_roundtrip.py` fails when a model and its fixture drift.
+No route emits the read models yet: `GET /v1/investigations/{id}` still returns
+`InvestigationResponse`, and adopting `InvestigationReadModel` (adding
+`processing_status`, `job` and `report`) is #33 work.
 
 ## Local checks
 
@@ -135,8 +332,17 @@ Ordinary options such as `sslmode` remain supported.
 
 Coverage includes real PostgreSQL readiness, migration round trips and drift,
 safe failure responses, both worker modes, signal shutdown, cancellation and
-resource cleanup, and startup-helper negative paths. No provider keys or
-personal media are needed.
+resource cleanup, the job queue invariants, the recovery harness,
+startup-helper negative paths, and the intake API: guest credentials, rejected
+client identity, cross-owner 404s, idempotent replay and 409, upload limits,
+expiry and hash mismatch, the job-state view of investigations, account
+linking with an injected token verifier (in-place upgrade, idempotent repeat,
+second-device merge, the owner invariant and the Google verifier's outcome
+mapping with a patched library call), and the shared error shape validated
+against `packages/contracts/schemas/error.schema.json`. The test database is
+migrated to `head` once per session. No provider keys, Google calls or
+personal media are needed; upload tests use synthetic bytes in a temporary
+directory.
 
 Ruff includes security rules (`S`) and rejects bare `type: ignore` comments
 (`PGH003`); MyPy also enables `ignore-without-code`. Only pytest's `S101`
@@ -145,7 +351,10 @@ line-specific, explained `S603` annotations; production code has no security-rul
 exemptions.
 
 The optional `quality` group adds locked pre-commit, actionlint, zizmor and
-pip-audit tooling without changing runtime dependencies. From the repository root:
+pip-audit tooling without changing runtime dependencies; the optional
+`contracts` group adds `openapi-spec-validator` for the
+[contracts package](../packages/contracts/README.md#validation) OpenAPI check.
+From the repository root:
 
 ```sh
 uv sync --project backend --frozen --group quality
@@ -184,7 +393,11 @@ produce that check. PostgreSQL and Python setup are not started for docs-only
 changes in this Backend CI workflow; the separate Quality checks job still runs.
 
 The validation job uses Python 3.11, pinned setup-uv, the frozen lockfile, Ruff,
-strict MyPy with the Pydantic plugin, PostgreSQL 16, migration upgrade/drift
+strict MyPy with the Pydantic plugin, the
+[contracts package](../packages/contracts/README.md#validation) validator and
+server round-trip check (the full contract gate, including OpenAPI, spectral,
+oasdiff and the Android tests, is the separate **Contract checks** workflow),
+tests, PostgreSQL 16, migration upgrade/drift
 checks and the real test suite. Only pushes to `main` save uv caches; PRs can read
 them. Dependabot checks the `/backend` uv project weekly with grouped minor/patch
 updates. There are no production secrets or live providers in this workflow.
@@ -222,11 +435,10 @@ not claim the regression check passed. Unknown refs, failing baseline tests,
 missing reports or source without a manifest fail instead of taking that path.
 
 The current `services/worker` tree is held to **90% line coverage**, including
-the standalone entry point. `services/api/auth` and `services/contracts` have
-future 90% floors (module files and package directories supported); absence is
-shown as **not implemented / not evaluated**, not 100%. Their eventual locations
-must be confirmed when those tasks land. Android coverage is not part of this
-denominator and must not be inferred from backend results.
+the standalone entry point. `services/api/auth` now exists and is held to the
+same 90% floor; `services/contracts` keeps a future 90% floor and is shown as
+**not implemented / not evaluated**, not 100%, until #15 lands. Android coverage
+is not part of this denominator and must not be inferred from backend results.
 
 Remaining [REPO-04 / #13](https://github.com/natnael-solomon/ovrly/issues/13) work:
 Android unit/instrumented reports and capture/share floors depend on the emulator
@@ -235,8 +447,11 @@ implementations; a maintainer must add **Backend checks** to the main ruleset
 after the workflow lands and reports successfully. This PR does not change
 protection settings or complete the whole issue.
 
-Durable jobs, leases and drain/recovery assertions remain
-[BE-04 / #16](https://github.com/natnael-solomon/ovrly/issues/16).
+Durable job cancel/delete endpoints and the cross-owner-read invariant remain
+[BE-04 part 3 / #75](https://github.com/natnael-solomon/ovrly/issues/75) under
+[BE-04 / #16](https://github.com/natnael-solomon/ovrly/issues/16); the engine,
+retry classes and recovery cases are described under
+[Durable jobs and recovery](#durable-jobs-and-recovery).
 
 ## BE-01 router experiment
 
@@ -496,7 +711,7 @@ semantic fidelity and extraction recall require a separate model evaluation.
 The schema records uncertain attribution/context but does not verify their
 truth. Approximate envelopes remain source metadata, not generated word timing.
 
-### BC-D03 / BC-D04: provider and hosting decisions
+### BE-01 provider and hosting decisions
 
 Decision update: **2026-10-04**, including the user's later removal of Gemini
 and instruction to close BE-01 with hosting/account compatibility assumed.
@@ -504,11 +719,16 @@ These are BE-01 research decisions, not deployed adapters or amendments to the
 shared production contract. Raw account evidence, requests, transcripts,
 permission records and recordings remain local and ignored.
 
+The original #11 checklist associates this evidence with BC-D03 / BC-D04.
+Those issue references do not redefine the canonical
+[BC-D04 Voxide decision](../docs/decisions/BC-D04-voxide-route.md).
+Cross-cutting decision records follow the [decision log](../docs/decisions/README.md).
+
 | Stage | Selected order | Verification and boundary |
 | --- | --- | --- |
 | Claim extraction | Scholarxiv `auto:cheap`, then Groq `openai/gpt-oss-20b` with `strict: true` JSON Schema | Groq is the only selected fallback. It accepts the experimental schema but still makes semantic/source-reference errors. Gemini was removed by the user; there is no selected second fallback. |
 | Speech-to-text | Groq Whisper candidates, separately from the claim fallback chain | `whisper-large-v3` and `whisper-large-v3-turbo` both transcribed the authorized non-social development excerpt. This does not select an ASR fallback chain. |
-| Hosting | EthioDeploy Free Web Service with embedded background work and Postgres | Selected by the user; project/addon provisioning and deployment are not verified. Durable jobs and recovery remain #16. |
+| Hosting | EthioDeploy Free Web Service with embedded background work and Postgres | Selected by the user; project/addon provisioning and deployment are not verified. The durable job engine and local recovery coverage are described above; hosted recovery is not verified. |
 
 Neither Gemini nor OpenRouter is part of the selected chain. No provider switching
 has been added to the API, worker or fixed Scholarxiv comparison runner; actual

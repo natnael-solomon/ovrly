@@ -1,0 +1,16 @@
+{
+  "synthetic": true,
+  "description": "queue_cancel carrying a remote confirmed flag. Confirmation happens on the device and is never a request field; any extra property fails validation. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "invalid"
+  },
+  "request": {
+    "request_id": "req_synthetic_0107",
+    "action": "queue_cancel",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0107"
+    },
+    "confirmed": true
+  }
+}

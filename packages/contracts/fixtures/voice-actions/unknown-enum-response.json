@@ -1,0 +1,33 @@
+{
+  "synthetic": true,
+  "description": "A response from a newer server using enum values this contract version does not define (result, error.code and error.action). Strict validation rejects it; with enum checks relaxed it is structurally valid, which is what lets the Android parser (#62) map FUTURE_VALUE to UNKNOWN instead of failing or assuming success. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "valid",
+    "response": "unknown-enum"
+  },
+  "request": {
+    "request_id": "req_synthetic_0108",
+    "action": "queue_retry",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0108"
+    }
+  },
+  "response": {
+    "request_id": "req_synthetic_0108",
+    "result": "FUTURE_VALUE",
+    "action": "queue_retry",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0108"
+    },
+    "message": "The check was scheduled for later.",
+    "error": {
+      "code": "FUTURE_VALUE",
+      "message": "A newer server used a code this contract version does not define.",
+      "retryable": false,
+      "action": "__future_value__",
+      "request_id": "req_synthetic_0108"
+    }
+  }
+}

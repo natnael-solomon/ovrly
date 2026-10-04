@@ -1,0 +1,25 @@
+{
+  "synthetic": true,
+  "description": "An accepted response that also carries an error. The schema forbids error on an accepted result; the parser must not pick one half and ignore the other. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "response": "invalid",
+    "reason": "error"
+  },
+  "response": {
+    "request_id": "req_synthetic_9103",
+    "result": "accepted",
+    "action": "queue_retry",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_9103"
+    },
+    "message": "Retrying the failed check.",
+    "error": {
+      "code": "VOICE_ACTION_INVALID_STATE",
+      "message": "The job is not failed.",
+      "retryable": false,
+      "action": "none",
+      "request_id": "req_synthetic_9103"
+    }
+  }
+}

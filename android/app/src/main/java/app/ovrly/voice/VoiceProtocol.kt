@@ -7,18 +7,40 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
+enum class VoiceInteractionPhase {
+    IDLE,
+    CONNECTING,
+    LISTENING,
+    THINKING,
+    SPEAKING,
+    FINISHING,
+    ERROR
+}
+
+/** Lossy presentation cues for the voice orb; never use them for control decisions. */
+sealed interface VoiceOrbEvent {
+    data object Snap : VoiceOrbEvent
+    data object Onset : VoiceOrbEvent
+    data class Burst(val strength: Float) : VoiceOrbEvent
+    data object Interrupt : VoiceOrbEvent
+    data object Shake : VoiceOrbEvent
+}
+
 data class VoiceState(
     val status: String = "Disabled",
     val message: String = "Experimental voice is not configured. No microphone or network is active.",
     val active: Boolean = false,
+    val phase: VoiceInteractionPhase = VoiceInteractionPhase.IDLE
 )
 
 internal data class VoiceConfiguration(
     val enabled: Boolean,
     val baseUrl: String,
     val publishableKey: String,
+    val mock: Boolean = false
 ) {
     fun unavailableState(): VoiceState? {
+        if (mock) return null
         if (!enabled || publishableKey.isBlank()) return VoiceState()
         val uri = try {
             URI(baseUrl)
@@ -31,18 +53,31 @@ internal data class VoiceConfiguration(
             uri.rawPath !in listOf("", "/") || uri.port !in -1..65535 || uri.port == 0 ||
             baseUrl.contains("vox_sk", ignoreCase = true)
         ) {
-            return VoiceState("Configuration error", "Use an HTTPS or WSS origin without credentials, paths, queries or fragments.")
+            return VoiceState(
+                "Configuration error",
+                "Use an HTTPS or WSS origin without credentials, paths, queries or fragments."
+            )
         }
         if (!publishableKey.matches(Regex("vox_pub_[A-Za-z0-9_-]{1,240}")) ||
             publishableKey.contains("vox_sk", ignoreCase = true)
         ) {
-            return VoiceState("Configuration error", "Only a Voxide publishable key (vox_pub_) is allowed. Never put a secret key in the app.")
+            return VoiceState(
+                "Configuration error",
+                "Only a Voxide publishable key (vox_pub_) is allowed. Never put a secret key in the app."
+            )
         }
         return null
     }
 
     val httpsOrigin: String
         get() = baseUrl.replaceFirst(Regex("^wss:"), "https:").trimEnd('/')
+
+    companion object {
+        const val SETUP_MILLIS = 30_000L
+        const val INPUT_WINDOW_MILLIS = 300_000L
+        const val FINISHING_GRACE_MILLIS = 30_000L
+        const val SILENCE_MILLIS = 15_000L
+    }
 }
 
 internal class VoiceProtocolException : IllegalArgumentException("Invalid Voxide message")
@@ -50,7 +85,12 @@ internal class VoiceProtocolException : IllegalArgumentException("Invalid Voxide
 internal sealed interface VoiceEvent {
     data object Ready : VoiceEvent
     data class Audio(val pcm: ByteArray) : VoiceEvent
-    data class Tool(val id: String, val name: String, val validArguments: Boolean) : VoiceEvent
+    data class Tool(
+        val id: String,
+        val name: String,
+        /** Raw args object, or null when args is not an object or the envelope has extra fields. */
+        val arguments: String? = null
+    ) : VoiceEvent
     data object Interrupted : VoiceEvent
     data object TurnComplete : VoiceEvent
     data class Error(val usageLimit: Boolean) : VoiceEvent
@@ -64,18 +104,41 @@ internal sealed interface VoiceEvent {
  * Browser SDK evidence is not a provider guarantee of native Android support.
  */
 internal object VoiceProtocol {
-    const val ACTION = "open_design_gallery"
+    const val ACTION = "open_tab"
     const val MAX_MESSAGE_BYTES = 96 * 1024
     const val MAX_AUDIO_BYTES = 48_000
     const val MAX_INPUT_BYTES = 640
+    private const val TAB_DESCRIPTION =
+        "Switch the app to one of its main tabs. These are the ONLY tabs: " +
+            "space (Your space, the user's saved reports) and explore (Explore, sample reports). " +
+            "If the user asks for anything else, say voice can't open it. " +
+            "The result says whether the user was already on that tab; tell them so."
 
     fun manifest(): String = JSONObject()
-        .put("actions", JSONArray().put(JSONObject()
-            .put("name", ACTION)
-            .put("description", "Open the design gallery in this app.")
-            .put("params", JSONObject())
-            .put("scope", "global")
-            .put("dangerous", false)))
+        .put(
+            "actions",
+            JSONArray().put(
+                JSONObject()
+                    .put("name", ACTION)
+                    .put("description", TAB_DESCRIPTION)
+                    .put(
+                        "params",
+                        JSONObject().put(
+                            "tab",
+                            JSONObject()
+                                .put("type", "string")
+                                .put("required", true)
+                                .put(
+                                    "description",
+                                    "The tab to open. Must be one of the listed tabs."
+                                )
+                                .put("enum", JSONArray(VoiceTab.entries.map { it.wireName }))
+                        )
+                    )
+                    .put("scope", "global")
+                    .put("dangerous", false)
+            )
+        )
         .put("stateSchema", JSONArray())
         .put("environment", "production")
         .toString()
@@ -84,6 +147,7 @@ internal object VoiceProtocol {
         val json = objectFrom(text)
         return when (json.string("type", 64)) {
             "ready" -> VoiceEvent.Ready
+
             "audio" -> {
                 val encoded = json.string("data", MAX_AUDIO_BYTES * 4 / 3)
                 val pcm = try {
@@ -93,25 +157,34 @@ internal object VoiceProtocol {
                 }
                 if (pcm.isEmpty() || pcm.size > MAX_AUDIO_BYTES || pcm.size % 2 != 0 ||
                     Base64.getEncoder().encodeToString(pcm) != encoded
-                ) throw VoiceProtocolException()
+                ) {
+                    throw VoiceProtocolException()
+                }
                 VoiceEvent.Audio(pcm)
             }
+
             "tool_call" -> {
                 val id = json.string("id", 128)
                 val name = json.string("name", 64)
                 if (!id.matches(Regex("[A-Za-z0-9_.:-]+")) ||
                     !name.matches(Regex("[A-Za-z_][A-Za-z0-9_]*"))
-                ) throw VoiceProtocolException()
+                ) {
+                    throw VoiceProtocolException()
+                }
                 val args = json.opt("args")
                 val knownFields = setOf("type", "id", "name", "args")
+                val validEnvelope = json.keys().asSequence().all { it in knownFields }
                 VoiceEvent.Tool(
-                    id, name,
-                    args is JSONObject && args.length() == 0 &&
-                        json.keys().asSequence().all { it in knownFields },
+                    id,
+                    name,
+                    if (args is JSONObject && validEnvelope) args.toString() else null
                 )
             }
+
             "interrupted" -> VoiceEvent.Interrupted
+
             "turn_complete" -> VoiceEvent.TurnComplete
+
             "text", "text_user" -> {
                 json.string("text", 8192)
                 if (json.has("turnComplete") && json.opt("turnComplete") !is Boolean) {
@@ -119,7 +192,9 @@ internal object VoiceProtocol {
                 }
                 VoiceEvent.Text
             }
+
             "error" -> VoiceEvent.Error(json.string("message", 2048) == "usage_limit")
+
             else -> VoiceEvent.Unknown
         }
     }
@@ -129,6 +204,8 @@ internal object VoiceProtocol {
         return JSONObject().put("type", "audio_input")
             .put("data", Base64.getEncoder().encodeToString(pcm)).toString()
     }
+
+    fun interrupt(): String = JSONObject().put("type", "interrupt").toString()
 
     fun toolResult(tool: VoiceEvent.Tool, success: Boolean, message: String): String {
         val result = JSONObject().put("status", if (success) "success" else "error")
@@ -140,7 +217,9 @@ internal object VoiceProtocol {
     fun objectFrom(text: String): JSONObject {
         if (text.length > MAX_MESSAGE_BYTES ||
             text.toByteArray(Charsets.UTF_8).size > MAX_MESSAGE_BYTES
-        ) throw VoiceProtocolException()
+        ) {
+            throw VoiceProtocolException()
+        }
         try {
             StrictJson(text).validate()
             return JSONObject(text)
@@ -190,6 +269,7 @@ private class StrictJson(private val source: String) {
                     expect(',')
                 } while (true)
             }
+
             '[' -> {
                 index++
                 whitespace()
@@ -201,10 +281,15 @@ private class StrictJson(private val source: String) {
                     expect(',')
                 } while (true)
             }
+
             '"' -> string()
+
             't' -> literal("true")
+
             'f' -> literal("false")
+
             'n' -> literal("null")
+
             else -> number()
         }
     }
@@ -224,7 +309,9 @@ private class StrictJson(private val source: String) {
                     repeat(4) {
                         if (source.getOrNull(index++)?.digitToIntOrNull(16) == null) fail()
                     }
-                } else if (escape !in "\"\\/bfnrt") fail()
+                } else if (escape !in "\"\\/bfnrt") {
+                    fail()
+                }
             }
         }
         fail()
@@ -258,7 +345,14 @@ private class StrictJson(private val source: String) {
     }
 
     private fun peek(): Char = source.getOrNull(index) ?: '\u0000'
-    private fun take(char: Char): Boolean = if (peek() == char) { index++; true } else false
-    private fun expect(char: Char) { if (!take(char)) fail() }
+    private fun take(char: Char): Boolean = if (peek() == char) {
+        index++
+        true
+    } else {
+        false
+    }
+    private fun expect(char: Char) {
+        if (!take(char)) fail()
+    }
     private fun fail(): Nothing = throw VoiceProtocolException()
 }

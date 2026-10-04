@@ -1,0 +1,25 @@
+{
+  "synthetic": true,
+  "description": "Completing an upload (POST /v1/uploads/{id}/complete): an empty request body and the completed Upload read model with completed_at set. Synthetic fixture; no bytes were stored anywhere.",
+  "schemas": {
+    "request": "upload-complete-request.schema.json",
+    "response": "upload-complete-response.schema.json"
+  },
+  "expect": {
+    "request": "valid",
+    "response": "valid"
+  },
+  "request": {},
+  "response": {
+    "id": "00000000-0000-4000-8000-000000000301",
+    "state": "completed",
+    "target": "/v1/uploads/00000000-0000-4000-8000-000000000301/content",
+    "max_bytes": 268435456,
+    "declared_size_bytes": 7340032,
+    "declared_sha256": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+    "content_type": "video/mp4",
+    "expires_at": "2026-10-04T12:15:00Z",
+    "created_at": "2026-10-04T12:00:00Z",
+    "completed_at": "2026-10-04T12:03:20Z"
+  }
+}

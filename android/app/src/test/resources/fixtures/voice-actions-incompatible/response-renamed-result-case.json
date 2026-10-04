@@ -1,0 +1,17 @@
+{
+  "synthetic": true,
+  "description": "A response whose result uses a renamed enum value (Accepted instead of accepted). Enum names are exact and case-sensitive, so the parser must map it to UNKNOWN and never report success. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "response": "unknown-enum"
+  },
+  "response": {
+    "request_id": "req_synthetic_9108",
+    "result": "Accepted",
+    "action": "open_check",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_9108"
+    },
+    "message": "Opened the check."
+  }
+}

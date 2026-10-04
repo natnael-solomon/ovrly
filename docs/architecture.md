@@ -7,6 +7,7 @@
 | Package | Responsibility |
 | --- | --- |
 | `capture` | Projection/playback capture, bounded temporary output and lifecycle |
+| `contract` | Typed models and the production parser for the shared `packages/contracts` schemas (voice-actions slice today) |
 | `overlay` | Floating-window lifecycle, movement and controls |
 | `share` | Validation of video URIs and URL references |
 | `ui` | Companion screens, production controls and isolated sample/gallery content |
@@ -14,7 +15,7 @@
 
 Android owns permissions and media access. Hiding controls does not stop capture. Stopping capture releases media access; research cancellation is a separate, future action.
 
-`AppShell` provides Your space, Explore and Settings. The activity owns the selected tab; external capture/share intents open Settings. Capture and voice keep their existing state stores and an active-session shortcut across tabs. Sample saves use restored UI state, not capture storage or a provider. Tab and report scroll positions have separate saveable scopes.
+`AppShell` provides Your space, Explore and Settings. The activity owns the selected tab; external capture/share intents open Settings. Capture and voice keep their existing state stores. Capture keeps an active-session shortcut across tabs; voice shows its state on the header orb. Sample saves use restored UI state, not capture storage or a provider. Tab and report scroll positions have separate saveable scopes.
 
 See the [Android README](../android/README.md) for builds and [UI maintenance](android-ui.md) for appearance, artwork and splash behavior.
 
@@ -51,17 +52,23 @@ Unit tests cover palette contrast, fallback decisions and demo-entry policy. The
 
 ## Backend foundation
 
-`backend` is one Python 3.11/uv project with FastAPI, shared settings and SQLAlchemy asyncio/Psycopg. `services/api` owns the API lifespan; `services/worker` runs standalone or as an optional lifespan task (`OVRLY_EMBED_WORKER=1`). The [Linux/WSL helper](../backend/README.md#local-setup-linux--wsl) starts PostgreSQL 16 in Compose, applies Alembic migrations and runs the API and embedded worker natively.
+`backend` is one Python 3.11/uv project with FastAPI, shared settings and SQLAlchemy asyncio/Psycopg. `services/api` owns the API lifespan; `services/worker` runs standalone or as an optional lifespan task (`OVRLY_EMBED_WORKER=1`); `services/jobs` holds the durable queue. The [Linux/WSL helper](../backend/README.md#local-setup-linux--wsl) starts PostgreSQL 16 in Compose, applies Alembic migrations and runs the API and embedded worker natively.
 
-`/healthz` checks the database and, when enabled, the embedded worker. Failures return a safe 503; failed embedded-worker startup prevents API startup. API-only readiness does not monitor a separate worker. Shutdown stops owned tasks and closes database connections. The migration baseline creates no product tables.
+`/healthz` checks the database and, when enabled, the embedded worker. Failures return a safe 503; failed embedded-worker startup prevents API startup. API-only readiness does not monitor a separate worker. Shutdown stops owned tasks, finishes or releases the worker's in-flight lease and closes database connections.
 
-This is lifecycle scaffolding. Jobs, leases, recovery and lease draining remain #16. It does not establish hosting entitlement or durable processing.
+Jobs live in PostgreSQL with an idempotent stage key `(version, stage, input hash)`, are claimed with `FOR UPDATE SKIP LOCKED` and carry a lease with a fencing token plus a cancellation/deletion generation. Publishing a stage result is compare-and-set against both, in the same transaction as the result row, so a stale or late worker can never publish. The state machine (queued, leased, running, published, cancelled, deleted, failed, with requested versus effective cancellation) is property-tested. Stage handlers report failures as typed retry classes (transient, rate limited, non-retriable input, invalid model schema, unknown outcome); the worker schedules bounded, jittered retries through the job's availability time and records the class on exhaustion. An unknown outcome is retried only when the handler recorded the provider request id before the call, so the next attempt reconciles by id instead of calling again. Database or network errors during a stage leave the outcome unknown: the lease is released or expires and the job is re-leased, never failed. Recovery cases run in CI as **Backend recovery**; see the [backend README](../backend/README.md#durable-jobs-and-recovery). Cancel/delete endpoints and the cross-owner-read invariant are #75; the `intake` stage is the only production stage and media stages are later tasks. Nothing here establishes hosting entitlement.
+
+`services/api/auth` owns guest principals, opaque bearer credentials (stored as digests), Google account linking per [BC-D07](decisions/BC-D07-account-link.md) (`google.py` verifies the ID token behind an `IdTokenVerifier` protocol; `linking.py` upgrades the caller in place or merges a second device into the existing account in one transaction, every write restricted to the calling principal) and the owner-scoped loader every object route uses; another owner's object is a 404. `services/api/routes` exposes `/v1/principals/guest`, `/v1/principals/link`, `/v1/uploads` and `/v1/investigations`; `services/api/errors.py` gives every failure the shared contract error shape `{code, message, retryable, action, request_id}` from [`packages/contracts`](../packages/contracts/README.md). Upload bytes go through the `UploadStore` interface in `services/storage.py` (local filesystem now, object storage pending BC-D03). Investigation creation writes the record, its idempotency key and one `intake` job in one transaction before answering 202: `services/api/intake.py` holds the `QueueDispatcher` that calls `JobQueue.enqueue` on the same connection with a stage key derived from the investigation id, so neither a replay nor a dispatcher failure can leave the record and the job out of step. `services/pipeline/intake.py` is the worker-side `intake` stage registered by `default_handlers()`; it confirms the owned record and publishes a placeholder result until BE-07 (#20) adds media stages. Investigation reads derive `state` from the job (`queued`, `running`, `failed`, `cancelled`) without exposing leases, fencing tokens or failure types. The intake and account-link request and response models in `services/api/schemas.py` are mirrored by the JSON Schemas and the OpenAPI document in `packages/contracts` (BE-03, #15); the read models for claims, evidence, assessments, report versions and job summaries live there too and generate the contract's result fixtures, but no route emits them yet. Tables are defined in `services/models.py` and created by migrations `0003_identity_intake` and `0005_account_link`.
+
+Investigations are queued but not analysed yet: media stages are BE-07 (#20), saved reports and their transfer on account merge are BE-10 (#33), quotas and retention are #77.
 
 Backend CI checks the frozen environment, lint/types, PostgreSQL/migrations and service coverage. Known documentation-only changes skip execution but report the final check. Coverage is compared with remeasured `main`; a missing pre-bootstrap baseline is disclosed. Android coverage, future-module evidence and required-check activation remain #13.
 
 ## Future integration boundary
 
-Before connecting Android, agree a versioned API contract with validated schemas and compatibility tests: captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors. FastAPI exposes bootstrap OpenAPI and health endpoints, but no product contract or product endpoints exist.
+Before connecting Android, agree a versioned API contract with validated schemas and compatibility tests: captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors. FastAPI exposes bootstrap OpenAPI, health and the `/v1` identity and intake endpoints. That contract lives in [`packages/contracts`](../packages/contracts/README.md): the voice-actions slice, the shared error shape, the upload, investigation, job, capture-session, report-version, claim, evidence and assessment schemas with one `$def` per enum, six result fixtures generated from the backend read models, intake samples, and a hand-maintained OpenAPI 3.1 document whose schemas reference those files. The required **Contract checks** workflow validates all of it (spectral, oasdiff against the base, server round trip, Android contract tests) on every PR.
+
+`packages/contracts` is the single source for that contract. The Android `contract` package parses the voice-actions slice with the production parser and reads the committed fixtures directly through Gradle test resources; see the [Android README](../android/README.md#contract-models-and-fixtures). Models and parsing for the investigation, job, report, claim, evidence and assessment schemas are #62 part 2, built from that handoff; no endpoint is called.
 
 Hosted model weights stay with the provider. Credentials stay on the server; prompts and adapters belong in the backend. Evaluation fixtures live in root `evaluation/`, independently of backend implementation. Voxide remains a separate companion-navigation path. The directory layout enables no capture upload.
 
@@ -75,6 +82,6 @@ Metadata-only CI never fetches media or calls providers. Local media verificatio
 
 ## Development ownership
 
-Android builds independently of backend dependencies. Backend platform and research work share one Python project; client/server contract changes need both sides' review.
+Android builds independently of backend dependencies. Backend platform and research work share one Python project; client/server contract changes need both sides' review. Product scope, task tracking, hackathon dates and the Voxide route are recorded in [docs/decisions](decisions/README.md).
 
 Generated builds, caches, APKs and machine configuration stay out of Git. Use ignored root `.local` for personal tooling/media and `.scratch` for disposable experiments. Version shared configuration and approved test fixtures; keep evaluation media outside version control by default.

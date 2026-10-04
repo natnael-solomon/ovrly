@@ -82,6 +82,10 @@ jobs:
         run: uv run --frozen ruff check . && uv run --frozen ruff format --check .
       - name: Strict types
         run: uv run --frozen mypy --strict services/
+      - name: Contract schemas, fixtures and server round-trip
+        run: >-
+          uv run --frozen python ../packages/contracts/validate.py
+          && uv run --frozen python ../packages/contracts/roundtrip.py --check
       - name: Upgrade database and check migration drift
         run: uv run --frozen alembic upgrade head && uv run --frozen alembic check
       - name: Test and compare coverage with main
@@ -100,6 +104,63 @@ jobs:
             backend/reports/main/coverage.json
             backend/reports/summary.md
             backend/reports/comparison.json
+          retention-days: 7
+          if-no-files-found: warn
+
+  recovery:
+    name: Validate recovery
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OVRLY_DATABASE_URL: postgresql+psycopg://ovrly:ci-only@127.0.0.1:5432/ovrly
+      OVRLY_TEST_DATABASE_URL: postgresql+psycopg://ovrly:ci-only@127.0.0.1:5432/ovrly
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+        env:
+          POSTGRES_USER: ovrly
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: ovrly
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ovrly -d ovrly"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.9.21'
+          python-version: '3.11'
+          working-directory: backend
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Install locked dependencies
+        run: uv sync --frozen
+      - name: Upgrade database
+        run: uv run --frozen alembic upgrade head
+      - name: Job state machine properties and recovery cases
+        run: >-
+          uv run --frozen pytest -q -p no:cacheprovider
+          --junitxml=reports/recovery-junit.xml
+          tests/test_job_states.py tests/test_job_retries.py tests/test_job_queue.py tests/recovery
+      - name: Upload recovery report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: backend-recovery-report
+          path: backend/reports/recovery-junit.xml
           retention-days: 7
           if-no-files-found: warn
 
@@ -127,5 +188,32 @@ jobs:
             echo "Backend validation passed." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "::error::Backend validation failed, was cancelled, or did not run."
+            exit 1
+          fi
+
+  recovery_result:
+    name: Backend recovery
+    if: ${{ always() }}
+    needs: [changes, recovery]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      DETECTION: ${{ needs.changes.result }}
+      REQUIRED: ${{ needs.changes.outputs.backend }}
+      VALIDATION: ${{ needs.recovery.result }}
+    steps:
+      - name: Report recovery result
+        shell: bash
+        run: |
+          if [[ "$DETECTION" != success ]]; then
+            echo "::error::Backend change detection did not succeed."
+            exit 1
+          fi
+          if [[ "$REQUIRED" == false && "$VALIDATION" == skipped ]]; then
+            echo "Documentation-only change: recovery suite skipped." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$REQUIRED" == true && "$VALIDATION" == success ]]; then
+            echo "Recovery suite passed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Recovery suite failed, was cancelled, or did not run."
             exit 1
           fi

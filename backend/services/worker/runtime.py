@@ -1,18 +1,48 @@
 import asyncio
 import logging
+import os
+import socket
+from collections.abc import Mapping
 from contextlib import suppress
+from uuid import UUID, uuid4
 
 from sqlalchemy.exc import SQLAlchemyError
 
 from services.database import Database
+from services.jobs.faults import Checkpoint, FaultInjector, NoFaults
+from services.jobs.handlers import CancellationRequested, JobContext, JobHandler
+from services.jobs.queue import ClaimedJob, JobQueue, Lease, LeaseLost, PublishRejected
+from services.jobs.retries import RetryableError, RetryPolicy, UnknownOutcome
 
 logger = logging.getLogger(__name__)
 
+# Infrastructure failures leave the stage outcome unknown; the job is never marked failed.
+INFRASTRUCTURE_ERRORS = (SQLAlchemyError, OSError, TimeoutError)
+
 
 class Worker:
-    def __init__(self, database: Database, shutdown_seconds: float):
+    def __init__(
+        self,
+        database: Database,
+        shutdown_seconds: float,
+        *,
+        handlers: Mapping[str, JobHandler] | None = None,
+        faults: FaultInjector | None = None,
+        lease_seconds: float = 30,
+        poll_seconds: float = 1,
+        retry_policy: RetryPolicy | None = None,
+        worker_id: str | None = None,
+    ):
         self.database = database
         self.shutdown_seconds = shutdown_seconds
+        self.handlers: Mapping[str, JobHandler] = dict(handlers or {})
+        self.faults: FaultInjector = faults if faults is not None else NoFaults()
+        self.lease_seconds = lease_seconds
+        self.poll_seconds = poll_seconds
+        self.retry_policy = retry_policy if retry_policy is not None else RetryPolicy()
+        self.worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}-{uuid4().hex[:8]}"
+        self.queue = JobQueue(database)
+        self._owned: dict[UUID, Lease] = {}
         self._stop = asyncio.Event()
         self._started = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
@@ -21,14 +51,117 @@ class Worker:
     def running(self) -> bool:
         return self._started.is_set() and self._task is not None and not self._task.done()
 
+    @property
+    def owned_leases(self) -> frozenset[UUID]:
+        """Leases this worker currently holds in memory; empty once drained."""
+        return frozenset(self._owned)
+
     async def run(self) -> None:
         try:
             await self.database.ping()
         except (SQLAlchemyError, OSError, TimeoutError):
             raise RuntimeError("Worker startup failed: database unavailable") from None
         self._started.set()
-        logger.info("Worker ready (lifecycle skeleton; no job processing)")
-        await self._stop.wait()
+        stages = list(self.handlers)
+        logger.info("Worker ready (%s, %d stage handlers)", self.worker_id, len(stages))
+        while not self._stop.is_set():
+            job = await self.queue.claim(self.worker_id, stages, self.lease_seconds)
+            if job is None:
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(self._stop.wait(), self.poll_seconds)
+                continue
+            await self._execute(job)
+
+    async def _execute(self, job: ClaimedJob) -> None:
+        lease = job.lease
+        self._owned[job.id] = lease
+        try:
+            await self.faults.checkpoint(Checkpoint.CLAIMED, job)
+            if not await self.queue.start(lease):
+                # Either cancellation was requested while leased or the lease is already lost.
+                if await self.queue.cancel(lease):
+                    logger.info("Job %s cancelled before it started", job.id)
+                else:
+                    logger.warning("Job %s lease lost before it started", job.id)
+                return
+            context = JobContext(self.queue, lease, self.lease_seconds, self.faults)
+            try:
+                result = await self.handlers[job.key.stage](job, context)
+            except CancellationRequested:
+                await self.queue.cancel(lease)
+                logger.info("Job %s cancelled during stage %s", job.id, job.key.stage)
+                return
+            except LeaseLost:
+                logger.warning("Job %s lease lost during stage %s", job.id, job.key.stage)
+                return
+            except RetryableError as outcome:
+                await self._retry(job, outcome)
+                return
+            except INFRASTRUCTURE_ERRORS:
+                # The stage outcome is unknown; hand the lease back or let it expire so the
+                # job is re-leased. The worker itself keeps running.
+                logger.warning("Job %s infrastructure error in stage %s", job.id, job.key.stage)
+                await self._release(lease)
+                return
+            except Exception as error:
+                # Only the exception type is recorded; messages may contain private details.
+                reason = type(error).__name__
+                logger.error("Job %s failed in stage %s (%s)", job.id, job.key.stage, reason)
+                await self.queue.fail(lease, reason)
+                return
+            await self.faults.checkpoint(Checkpoint.BEFORE_PUBLISH, job)
+            try:
+                await self.queue.publish(lease, result)
+            except PublishRejected as rejected:
+                logger.warning("Job %s not published: %s", job.id, rejected.reason)
+            await self.faults.checkpoint(Checkpoint.AFTER_PUBLISH, job)
+        except asyncio.CancelledError:
+            # Forced shutdown: hand the lease back so the job is neither lost nor duplicated.
+            with suppress(TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.shield(self._release(lease, reason="during shutdown")),
+                    self.shutdown_seconds,
+                )
+            raise
+        finally:
+            self._owned.pop(job.id, None)
+
+    async def _retry(self, job: ClaimedJob, outcome: RetryableError) -> None:
+        """Schedule the next attempt per the retry class, or fail with the class recorded."""
+        recorded = job.provider_request_id is not None
+        if not recorded and isinstance(outcome, UnknownOutcome):
+            # The handler records the id during this attempt; the claim predates it.
+            record = await self.queue.get(job.id)
+            recorded = record is not None and record.provider_request_id is not None
+        decision = self.retry_policy.decide(outcome, job.retry_counts, request_id_recorded=recorded)
+        retry_class = decision.retry_class
+        if decision.delay_seconds is None:
+            logger.error(
+                "Job %s failed in stage %s (%s, retries exhausted after %d)",
+                job.id,
+                job.key.stage,
+                retry_class.value,
+                decision.count - 1,
+            )
+            await self.queue.fail(job.lease, type(outcome).__name__, retry_class)
+            return
+        if await self.queue.retry(job.lease, retry_class, decision.delay_seconds):
+            logger.info(
+                "Job %s retry %d (%s) scheduled in %.2fs",
+                job.id,
+                decision.count,
+                retry_class.value,
+                decision.delay_seconds,
+            )
+        else:
+            logger.warning("Job %s lease lost before retry %s", job.id, retry_class.value)
+
+    async def _release(self, lease: Lease, *, reason: str = "after an error") -> None:
+        try:
+            if await self.queue.release(lease):
+                logger.info("Job %s lease released %s", lease.job_id, reason)
+        except INFRASTRUCTURE_ERRORS:
+            logger.error("Job %s lease could not be released; it will expire", lease.job_id)
 
     def _finished(self, task: asyncio.Task[None]) -> None:
         if not task.cancelled() and task.exception() is not None:
@@ -61,6 +194,7 @@ class Worker:
         await self._task
 
     async def stop(self) -> None:
+        """Stop claiming, finish or release the in-flight job, then return."""
         if self._task is None:
             return
         self.request_stop()

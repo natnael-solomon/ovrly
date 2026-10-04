@@ -1,0 +1,15 @@
+{
+  "synthetic": true,
+  "description": "open_check with a job target. The action and target kind disagree, so the request fails validation. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "invalid"
+  },
+  "request": {
+    "request_id": "req_synthetic_0106",
+    "action": "open_check",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0106"
+    }
+  }
+}

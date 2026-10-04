@@ -1,0 +1,16 @@
+{
+  "synthetic": true,
+  "description": "A request whose request_id is a number. The schema requires a string; the parser must not coerce it. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "request": "invalid",
+    "reason": "request_id"
+  },
+  "request": {
+    "request_id": 9004,
+    "action": "open_check",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_9004"
+    }
+  }
+}

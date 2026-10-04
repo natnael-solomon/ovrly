@@ -1,1 +1,1 @@
-"""Worker lifecycle; durable jobs and leases are introduced by BE-04."""
+"""Worker lifecycle: claims leased jobs from :mod:`services.jobs` and drains them on shutdown."""

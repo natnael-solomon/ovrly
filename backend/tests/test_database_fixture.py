@@ -15,6 +15,7 @@ def isolated_connection(monkeypatch):
     monkeypatch.setenv("OVRLY_TEST_DATABASE_URL", TEST_URL)
     connect = MagicMock()
     monkeypatch.setattr("conftest.psycopg.connect", connect)
+    monkeypatch.setattr("conftest.migrate", MagicMock())
     return connect
 
 

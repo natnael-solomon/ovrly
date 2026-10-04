@@ -1,0 +1,29 @@
+{
+  "synthetic": true,
+  "description": "Declaring an upload and the pending Upload read model the server answers with (POST /v1/uploads, 201). Synthetic fixture: the hash is of no real file and the target is not served anywhere.",
+  "schemas": {
+    "request": "upload-declare-request.schema.json",
+    "response": "upload-declare-response.schema.json"
+  },
+  "expect": {
+    "request": "valid",
+    "response": "valid"
+  },
+  "request": {
+    "size_bytes": 7340032,
+    "sha256": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+    "content_type": "video/mp4"
+  },
+  "response": {
+    "id": "00000000-0000-4000-8000-000000000301",
+    "state": "pending",
+    "target": "/v1/uploads/00000000-0000-4000-8000-000000000301/content",
+    "max_bytes": 268435456,
+    "declared_size_bytes": 7340032,
+    "declared_sha256": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+    "content_type": "video/mp4",
+    "expires_at": "2026-10-04T12:15:00Z",
+    "created_at": "2026-10-04T12:00:00Z",
+    "completed_at": null
+  }
+}

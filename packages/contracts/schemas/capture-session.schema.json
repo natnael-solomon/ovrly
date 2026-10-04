@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Hand-authored: no backend model or endpoint exists yet (the live-overlay intake endpoints are a later pipeline task), so this schema is the agreement both sides build towards. Field names follow build contract section 4.",
+  "title": "CaptureSession",
+  "description": "Read model of one live capture session: the explicitly started overlay capture of up to three minutes that is processed incrementally while it runs (decision record 0001). Chunks are numbered with a sequence number and timed on the capture timebase, zero at the start of this session. Duplicate and out-of-order handling are stated as data so a client can show and test them: a repeated (session, seq) with identical bytes is acknowledged again without being stored twice, and chunks may arrive in any order, with the server recording the sequence ranges it has not received in gaps until they are filled. Clients map an unknown state to UNKNOWN.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "investigation_id",
+    "state",
+    "timebase",
+    "started_at",
+    "closed_at",
+    "max_duration_ms",
+    "chunk_duration_ms",
+    "chunks_received",
+    "highest_seq",
+    "received_ms",
+    "gaps",
+    "duplicate_handling",
+    "out_of_order_handling"
+  ],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "investigation_id": {
+      "$ref": "common.schema.json#/$defs/uuid",
+      "description": "The investigation this session feeds; its claims use the same capture timebase."
+    },
+    "state": { "$ref": "enums.schema.json#/$defs/capture_session_state" },
+    "timebase": {
+      "const": "capture",
+      "$ref": "enums.schema.json#/$defs/timebase",
+      "description": "Always capture for a live session: offsets count from the start of this session, not from any media file."
+    },
+    "started_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "closed_at": {
+      "$ref": "common.schema.json#/$defs/nullable_timestamp",
+      "description": "When the client closed the session or the server marked it abandoned; null while open."
+    },
+    "max_duration_ms": {
+      "type": "integer",
+      "description": "Server limit on the capture interval; 180000 for the three-minute live limit."
+    },
+    "chunk_duration_ms": {
+      "type": "integer",
+      "description": "Nominal length of one chunk the client agreed to send; the last chunk may be shorter."
+    },
+    "chunks_received": {
+      "type": "integer",
+      "description": "Distinct (session, seq) pairs stored so far. Duplicates do not count."
+    },
+    "highest_seq": {
+      "$ref": "common.schema.json#/$defs/nullable_integer",
+      "description": "Largest sequence number stored, or null before the first chunk."
+    },
+    "received_ms": {
+      "type": "integer",
+      "description": "Milliseconds of capture covered by stored chunks, excluding gaps."
+    },
+    "gaps": {
+      "type": "array",
+      "description": "Sequence ranges below highest_seq that have not been stored. Empty when every chunk up to highest_seq is present.",
+      "items": { "$ref": "common.schema.json#/$defs/seq_range" }
+    },
+    "duplicate_handling": {
+      "const": "replay_acknowledgement",
+      "type": "string",
+      "description": "A chunk whose (session, seq) was already stored is acknowledged with the original acknowledgement and disposition duplicate; it is never stored or processed twice. Different bytes under the same seq are a client error (409 CAPTURE_CHUNK_CONFLICT)."
+    },
+    "out_of_order_handling": {
+      "const": "accept_and_record_gaps",
+      "type": "string",
+      "description": "Chunks are stored in the order received and placed by seq; a chunk above a missing seq is accepted with disposition out_of_order and the missing range is added to gaps until it arrives. Processing of a gap's neighbours may wait for it."
+    }
+  }
+}

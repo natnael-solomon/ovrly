@@ -37,15 +37,19 @@ class VoiceProtocolTest {
             VoiceConfiguration(true, "wss://example.invalid:8443/", "vox_pub_test").httpsOrigin)
     }
 
-    @Test fun manifestAdvertisesOnlyRealGalleryActionAndNoUserState() {
+    @Test fun manifestAdvertisesOnlyTheTabActionAndNoUserState() {
         val manifest = JSONObject(VoiceProtocol.manifest())
         assertEquals("production", manifest.getString("environment"))
         assertEquals(0, manifest.getJSONArray("stateSchema").length())
         val actions = manifest.getJSONArray("actions")
         assertEquals(1, actions.length())
         val action = actions.getJSONObject(0)
-        assertEquals("open_design_gallery", action.getString("name"))
-        assertEquals(0, action.getJSONObject("params").length())
+        assertEquals("open_tab", action.getString("name"))
+        val params = action.getJSONObject("params")
+        assertEquals(1, params.length())
+        val tab = params.getJSONObject("tab")
+        assertTrue(tab.getBoolean("required"))
+        assertEquals("""["space","explore"]""", tab.getJSONArray("enum").toString())
         assertFalse(action.getBoolean("dangerous"))
     }
 
@@ -75,35 +79,40 @@ class VoiceProtocolTest {
             (VoiceProtocol.parse("""{"type":"audio","data":"$max"}""") as VoiceEvent.Audio).pcm.size)
     }
 
-    @Test fun knownActionRequiresExplicitEmptyObjectArguments() {
-        val valid = VoiceProtocol.parse(tool("{}")) as VoiceEvent.Tool
-        assertTrue(valid.validArguments)
-        for (args in listOf("null", "\"{}\"", "[]", """{"path":"/account"}""", "false", "0")) {
-            assertFalse((VoiceProtocol.parse(tool(args)) as VoiceEvent.Tool).validArguments)
-        }
-        assertFalse((VoiceProtocol.parse("""{"type":"tool_call","id":"1","name":"open_design_gallery"}""")
-            as VoiceEvent.Tool).validArguments)
-        assertFalse((VoiceProtocol.parse("""{"type":"tool_call","id":"1","name":"open_design_gallery","args":{},"extra":1}""")
-            as VoiceEvent.Tool).validArguments)
+    @Test fun tabActionRequiresExactlyOneKnownTab() {
+        assertEquals(VoiceTab.EXPLORE, tab("""{"tab":"explore"}"""))
+        assertEquals(VoiceTab.SPACE, tab("""{"tab":"space"}"""))
+        val rejected = listOf(
+            "{}", "null", "\"space\"", "[]", """{"tab":"settings"}""", """{"tab":"Space"}""",
+            """{"tab":1}""", """{"tab":"space","x":1}""", "false", "0"
+        )
+        for (args in rejected) assertEquals(args, null, tab(args))
+        assertEquals(null, toolArguments("""{"type":"tool_call","id":"1","name":"open_tab"}"""))
+        val extra = """{"type":"tool_call","id":"1","name":"open_tab","args":{},"extra":1}"""
+        assertEquals(null, toolArguments(extra))
     }
+
+    private fun toolArguments(raw: String) = (VoiceProtocol.parse(raw) as VoiceEvent.Tool).arguments
+
+    private fun tab(args: String) = VoiceTab.from(toolArguments(tool(args)))
 
     @Test fun rejectsInvalidToolIdentifiers() {
         for (id in listOf("", "a b", "x".repeat(129))) {
-            invalid("""{"type":"tool_call","id":"$id","name":"open_design_gallery","args":{}}""")
+            invalid("""{"type":"tool_call","id":"$id","name":"open_tab","args":{}}""")
         }
-        invalid("""{"type":"tool_call","id":1,"name":"open_design_gallery","args":{}}""")
+        invalid("""{"type":"tool_call","id":1,"name":"open_tab","args":{}}""")
         invalid("""{"type":"tool_call","id":"1","name":"../other","args":{}}""")
     }
 
     @Test fun toolResultsPreserveCorrelationAndRealOutcome() {
-        val call = VoiceProtocol.parse(tool("{}")) as VoiceEvent.Tool
-        val success = JSONObject(VoiceProtocol.toolResult(call, true, "Design gallery opened."))
+        val call = VoiceProtocol.parse(tool("""{"tab":"explore"}""")) as VoiceEvent.Tool
+        val success = JSONObject(VoiceProtocol.toolResult(call, true, "Switched to Explore."))
         assertEquals("tool_result", success.getString("type"))
         assertEquals("call-1", success.getString("id"))
-        assertEquals("open_design_gallery", success.getString("name"))
+        assertEquals("open_tab", success.getString("name"))
         assertEquals(0, success.getJSONObject("state").length())
         assertEquals("success", success.getJSONObject("result").getString("status"))
-        assertEquals("Design gallery opened.", success.getJSONObject("result").getString("result"))
+        assertEquals("Switched to Explore.", success.getJSONObject("result").getString("result"))
         val failure = JSONObject(VoiceProtocol.toolResult(call, false, "Failed"))
         assertEquals("error", failure.getJSONObject("result").getString("status"))
         assertEquals("Failed", failure.getJSONObject("result").getString("message"))
@@ -139,7 +148,7 @@ class VoiceProtocolTest {
     }
 
     private fun tool(args: String) =
-        """{"type":"tool_call","id":"call-1","name":"open_design_gallery","args":$args}"""
+        """{"type":"tool_call","id":"call-1","name":"open_tab","args":$args}"""
 
     private fun invalid(text: String) {
         assertThrows(VoiceProtocolException::class.java) { VoiceProtocol.parse(text) }

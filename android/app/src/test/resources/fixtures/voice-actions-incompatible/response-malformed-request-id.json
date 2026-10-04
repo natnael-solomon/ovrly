@@ -1,0 +1,18 @@
+{
+  "synthetic": true,
+  "description": "An accepted response echoing a request_id with a space in it. Identifiers are opaque but bounded to the documented syntax; the parser rejects them rather than trimming. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "response": "invalid",
+    "reason": "request_id"
+  },
+  "response": {
+    "request_id": "req synthetic 9107",
+    "result": "accepted",
+    "action": "open_check",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_9107"
+    },
+    "message": "Opened the check."
+  }
+}

@@ -1,0 +1,102 @@
+# Spectral ruleset for packages/contracts/openapi.json (BE-03, #15).
+#
+#   npx --yes @stoplight/spectral-cli@6.17.0 lint --fail-severity warn \
+#     --ruleset packages/contracts/.spectral.yaml packages/contracts/openapi.json
+#
+# The two project rules mirror openapi_check.py so the gate holds with or without Node:
+#   - every 4xx/5xx response body is the shared error shape (schemas/error.schema.json)
+#   - every enum is a typed string enum
+# Relative $refs into schemas/*.schema.json are resolved by spectral before the rules run,
+# so the enum rule also covers the referenced schema files.
+extends:
+  - spectral:oas
+
+rules:
+  # The document carries a draft version and local server on purpose; keep the oas defaults
+  # for everything else (operation ids, tags, descriptions, unused components).
+  oas3-api-servers: off
+  info-contact: off
+
+  ovrly-error-responses-use-error-shape:
+    description: Every 4xx and 5xx response body must be #/components/schemas/Error (a $ref to schemas/error.schema.json).
+    message: "{{path}}: error responses use the shared error shape, not {{value}}"
+    severity: error
+    resolved: false
+    given:
+      - $.paths[*][*].responses[?(@property.match(/^[45][0-9][0-9]$/))].content.application/json.schema
+      - $.components.responses[*].content.application/json.schema
+    then:
+      field: "$ref"
+      function: pattern
+      functionOptions:
+        match: "^#/components/schemas/Error$"
+
+  ovrly-error-component-is-the-shared-shape:
+    description: components.schemas.Error must reference schemas/error.schema.json.
+    severity: error
+    resolved: false
+    given: $.components.schemas.Error
+    then:
+      field: "$ref"
+      function: pattern
+      functionOptions:
+        match: "^schemas/error\\.schema\\.json$"
+
+  ovrly-error-responses-have-json-content:
+    description: Every 4xx and 5xx response declares an application/json body.
+    severity: error
+    given: $.paths[*][*].responses[?(@property.match(/^[45][0-9][0-9]$/))]
+    then:
+      - field: content.application/json
+        function: truthy
+
+  ovrly-responses-echo-request-id:
+    description: Every response declares the X-Request-Id header.
+    severity: error
+    given:
+      - $.paths[*][*].responses[*]
+      - $.components.responses[*]
+    then:
+      field: headers.X-Request-Id
+      function: truthy
+
+  ovrly-no-untyped-enums:
+    description: An enum must sit next to "type":"string" so clients can give it a typed UNKNOWN fallback.
+    message: "{{path}}: enum without type string"
+    severity: error
+    resolved: true
+    given: $..[?(@ && @.enum)]
+    then:
+      field: type
+      function: enumeration
+      functionOptions:
+        values:
+          - string
+
+  ovrly-enum-values-are-strings:
+    description: Enum values are nonempty strings.
+    severity: error
+    resolved: true
+    given: $..enum[*]
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: string
+          minLength: 1
+
+overrides:
+  # Published for the Android models before their endpoints exist (live-overlay intake is a
+  # later pipeline task). Remove these entries when the capture paths are added.
+  - files:
+      - "openapi.json#/components/schemas/CaptureSession"
+      - "openapi.json#/components/schemas/CaptureChunkRequest"
+      - "openapi.json#/components/schemas/CaptureChunk"
+      - "openapi.json#/components/schemas/Job"
+      - "openapi.json#/components/schemas/Upload"
+      - "openapi.json#/components/schemas/ReportVersion"
+      - "openapi.json#/components/schemas/Claim"
+      - "openapi.json#/components/schemas/Evidence"
+      - "openapi.json#/components/schemas/Assessment"
+    rules:
+      oas3-unused-component: off

@@ -1,8 +1,10 @@
 import java.util.Properties
+import org.gradle.api.tasks.util.PatternFilterable
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jlleitschuh.gradle.ktlint")
 }
 
@@ -14,6 +16,19 @@ ktlint {
 val voiceConfig = Properties().apply {
     val config = rootProject.file("voxide.local.properties")
     if (config.exists()) config.inputStream().use { load(it) }
+}
+val liveVoice = providers.environmentVariable("VOXIDE_LIVE").orNull.let {
+    require(it == null || it == "0" || it == "1") { "VOXIDE_LIVE must be 0 or 1." }
+    it == "1"
+}
+check(!liveVoice || providers.environmentVariable("CI").orNull != "true") {
+    "Live voice is forbidden in CI."
+}
+check(!liveVoice || providers.environmentVariable("GITHUB_ACTIONS").orNull != "true") {
+    "Live voice is forbidden in GitHub Actions."
+}
+check(!liveVoice || voiceConfig.getProperty("enabled") == "true") {
+    "Live voice also requires enabled=true in the ignored local configuration."
 }
 fun quoted(value: String): String = "\"" + value.replace("\\", "\\\\")
     .replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r") + "\""
@@ -35,9 +50,18 @@ android {
         targetSdk = 37
         versionCode = releaseVersionCode()
         versionName = "0.1.0"
-        buildConfigField("boolean", "VOXIDE_ENABLED", (voiceConfig.getProperty("enabled") == "true").toString())
-        buildConfigField("String", "VOXIDE_BASE_URL", quoted(voiceConfig.getProperty("baseUrl", "https://voxide.onrender.com")))
-        buildConfigField("String", "VOXIDE_PUBLISHABLE_KEY", quoted(voiceConfig.getProperty("publishableKey", "")))
+        buildConfigField("boolean", "VOXIDE_ENABLED", liveVoice.toString())
+        buildConfigField("boolean", "VOXIDE_LIVE", liveVoice.toString())
+        buildConfigField(
+            "String",
+            "VOXIDE_BASE_URL",
+            quoted(voiceConfig.getProperty("baseUrl", "https://voxide.onrender.com"))
+        )
+        buildConfigField(
+            "String",
+            "VOXIDE_PUBLISHABLE_KEY",
+            quoted(if (liveVoice) voiceConfig.getProperty("publishableKey", "") else "")
+        )
     }
     buildFeatures {
         compose = true
@@ -47,7 +71,10 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
     compileOptions {
@@ -60,6 +87,16 @@ android {
         lintConfig = file("lint.xml")
     }
     testOptions { unitTests.isReturnDefaultValues = true }
+    sourceSets {
+        // Shared contract schemas and fixtures are read in place from the repository root.
+        // Unit tests load them as classpath resources; nothing is copied into the module.
+        getByName("test").resources.directories.add(rootProject.file("../packages/contracts").path)
+    }
+}
+
+// Keep only VERSION, schemas/ and fixtures/ from the contracts package on the test classpath.
+tasks.matching { it.name.endsWith("UnitTestJavaRes") }.configureEach {
+    (this as PatternFilterable).exclude("README.md", "ruff.toml", "validate.py", "tests/**")
 }
 
 dependencies {
@@ -78,6 +115,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")

@@ -1,0 +1,17 @@
+{
+  "synthetic": true,
+  "description": "A request shaped by a hypothetical newer schema that added confirmed_on_device as a required field without a version bump. The 0.1.0-draft request schema has additionalProperties false, so the production parser must reject the extra key rather than send it. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "request": "invalid",
+    "reason": "confirmed_on_device"
+  },
+  "request": {
+    "request_id": "req_synthetic_9001",
+    "action": "open_check",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_9001"
+    },
+    "confirmed_on_device": true
+  }
+}

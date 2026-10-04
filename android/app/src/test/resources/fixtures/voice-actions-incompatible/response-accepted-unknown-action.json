@@ -1,0 +1,18 @@
+{
+  "synthetic": true,
+  "description": "An accepted response naming an action outside the allowlist. Acceptance is only defined for allowlisted actions, so the parser must fail instead of reporting success for delete_report. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "response": "invalid",
+    "reason": "allowlisted action"
+  },
+  "response": {
+    "request_id": "req_synthetic_9105",
+    "result": "accepted",
+    "action": "delete_report",
+    "target": {
+      "kind": "report",
+      "id": "rep_synthetic_9105"
+    },
+    "message": "Deleted the report."
+  }
+}

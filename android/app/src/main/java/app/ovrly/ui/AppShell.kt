@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.ovrly.ui.voice.VoiceOrbDockState
 
 enum class AppDestination(val label: String) {
     SPACE("Your space"), EXPLORE("Explore"), SETTINGS("Settings"),
@@ -51,11 +52,18 @@ fun AppShell(
     destination: AppDestination,
     onDestination: (AppDestination) -> Unit,
     activeSession: String?,
+    voiceDock: VoiceOrbDockState? = null,
     settings: @Composable () -> Unit,
 ) {
     val p = LocalOvrlyPalette.current
     val pages = rememberSaveableStateHolder()
     var selectedReport by rememberSaveable { mutableStateOf<String?>(null) }
+    // Destination can also change from outside (voice); an open report belongs to the old tab.
+    var shownDestination by rememberSaveable { mutableStateOf(destination) }
+    if (shownDestination != destination) {
+        shownDestination = destination
+        selectedReport = null
+    }
     var savedIds by rememberSaveable { mutableStateOf(SampleReports.take(3).map { it.id }) }
     val report = SampleReports.firstOrNull { it.id == selectedReport }
     val showingReport = destination != AppDestination.SETTINGS && report != null
@@ -129,8 +137,14 @@ fun AppShell(
                         reports = SampleReports.filter { it.id in savedIds },
                         onOpen = { selectedReport = it.id },
                         onExplore = { navigate(AppDestination.EXPLORE) },
+                        voiceDock = voiceDock
                     )
-                    AppDestination.EXPLORE -> ExploreScreen(onOpen = { selectedReport = it.id })
+
+                    AppDestination.EXPLORE -> ExploreScreen(
+                        onOpen = { selectedReport = it.id },
+                        voiceDock = voiceDock
+                    )
+
                     AppDestination.SETTINGS -> settings()
                 }
             }

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py JobSummary: the client-visible columns of the jobs table (backend/services/jobs/models.py). Lease owner, lease expiry, fencing token, generation, payload and provider request id stay server-side.",
+  "title": "Job",
+  "description": "Summary of one durable queue job (BE-04, #16), nested in an investigation read and the target of the queue_cancel, queue_retry and queue_continue voice actions. state follows the job state machine; cancel_requested is the separate flag that distinguishes a requested cancellation (a worker still holds the lease) from the effective cancelled state. Clients map unknown state, stage and retry_class values to UNKNOWN.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "state",
+    "stage",
+    "cancel_requested",
+    "attempts",
+    "retry_class",
+    "available_at",
+    "updated_at"
+  ],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "state": { "$ref": "enums.schema.json#/$defs/job_state" },
+    "stage": { "$ref": "enums.schema.json#/$defs/stage" },
+    "cancel_requested": {
+      "type": "boolean",
+      "description": "True once the owner asked for cancellation; the state becomes cancelled when the worker observes it or the lease expires. A published job never carries it."
+    },
+    "attempts": {
+      "type": "integer",
+      "description": "Number of claims so far, including re-leases after a crash. Independent of the per-class retry counters."
+    },
+    "retry_class": {
+      "description": "Class of the last scheduled retry, or of the terminal failure when state is failed; null otherwise.",
+      "oneOf": [{ "type": "null" }, { "$ref": "enums.schema.json#/$defs/retry_class" }]
+    },
+    "available_at": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "When the job becomes claimable; in the future while a retry backoff is pending."
+    },
+    "updated_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+  }
+}

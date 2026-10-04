@@ -1,0 +1,18 @@
+{
+  "synthetic": true,
+  "description": "A denied response without an error. The schema requires error when result is denied, so a denial can always be explained with a typed code. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "response": "invalid",
+    "reason": "error"
+  },
+  "response": {
+    "request_id": "req_synthetic_9104",
+    "result": "denied",
+    "action": "open_check",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_9104"
+    },
+    "message": "I could not do that."
+  }
+}
