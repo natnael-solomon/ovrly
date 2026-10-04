@@ -1,6 +1,10 @@
 # RES-06 working dataset
 
 **Version: `res06-draft-2026-10-02`. Status: provisional, not frozen.**
+This historical snapshot is preserved. See the
+[2026-10-04 review revision](../reviewed-draft/README.md) for subsequent
+user confirmations and card reconciliation; the limitations below describe
+the original October 2 state, not unresolved requests to repeat those confirmations.
 This is the reduced-scope metadata handoff for
 [RES-06](https://github.com/natnael-solomon/ovrly/issues/65), not completion of
 [RES-01](https://github.com/natnael-solomon/ovrly/issues/8).

@@ -4,6 +4,9 @@
 
 ### Added
 
+- Owner-approved eleven-clip local evaluation freeze, version `res01-local-frozen-2026-10-04`, with pinned approval evidence, preserved 259 original/264 final decisions and 7/4 split. Explicit `--frozen-local` validation retains limitations and excludes uploads, redistribution and training; strict full-coverage validation is unchanged.
+- RES-01 content candidate with 106 reviewed-caption speech mappings, four EPI annual-growth assertions, a frame-timed qualitative meme premise, and final AP/clip-f confirmations. Historical inputs and 7/4 split are preserved; rights and freeze acceptance remain pending.
+- RES-01 review revision preserving the original eleven-clip draft and 7/4 split, reconciling 20 supplied-card occurrences, recording d/k/i modality confirmations and clip-m's user-confirmed negative without inferring language or rights approval.
 - Eleven-clip RES-06 draft metadata with 259 traceable occurrences, single-pass adjudications, separate main-argument assessments and a 7 dev / 4 test split. Explicit draft validation and CI preserve unresolved rights, coverage and media-review limitations; this is not a frozen benchmark.
 - Pinned Android detekt/Compose and ktlint gates with reviewed finding baselines, Gradle dependency verification, and backend/repository vulnerability audits in CI and local pre-commit.
 - Checksum-pinned Gitleaks scans of reachable history and tracked changes, with full redaction, a private Voxide configuration guard and synthetic enforcement tests.
