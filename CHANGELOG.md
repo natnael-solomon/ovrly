@@ -4,6 +4,7 @@
 
 ### Added
 
+- Opt-in BE-01 router experiment with a fixed routing matrix, version-2 observation/occurrence schemas, source-span and speaker/context validation, diagnostic single repair, local recordings and per-route metrics. Recorded the limited development go, deferred incomplete comparison, EthioDeploy selection and Groq GPT-OSS as the sole claim fallback. User-directed issue closure accepts unverified account/hosting assumptions; production integration remains incomplete.
 - Eleven-clip RES-06 draft metadata with 259 traceable occurrences, single-pass adjudications, separate main-argument assessments and a 7 dev / 4 test split. Explicit draft validation and CI preserve unresolved rights, coverage and media-review limitations; this is not a frozen benchmark.
 - Pinned Android detekt/Compose and ktlint gates with reviewed finding baselines, Gradle dependency verification, and backend/repository vulnerability audits in CI and local pre-commit.
 - Checksum-pinned Gitleaks scans of reachable history and tracked changes, with full redaction, a private Voxide configuration guard and synthetic enforcement tests.
