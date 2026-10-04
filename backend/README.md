@@ -7,7 +7,8 @@ uploads and records investigations behind bearer authentication (see
 [Identity and intake API](#identity-and-intake-api)). Each recorded
 investigation is handed to the queue as an `intake` job in the same
 transaction; the worker's `intake` stage only confirms the record today, so no
-research processing happens yet (BE-07, #20). See
+research processing happens yet (BE-07, #20). The worker can also run opt-in
+privacy-retention jobs (see [Privacy operations](#privacy-operations)). See
 [Durable jobs and recovery](#durable-jobs-and-recovery).
 
 ## Local setup (Linux / WSL)
@@ -236,10 +237,12 @@ OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0
   tests/test_job_queue.py tests/recovery
 ```
 
-Not covered here: external-provider erasure, upload/artifact retention and
-backup expiry (#77); the chunk `(session, seq)` idempotency test belongs to
-the capture intake endpoint that introduces that resource. Investigation POST
-idempotency is covered by `test_intake_handoff.py` and `tests/test_intake_api.py`.
+Privacy recovery tests cover current workspace/upload retention and late-result
+rejection. External-provider erasure, future artifact stores and physical
+backup expiry are not implemented; the chunk `(session, seq)` idempotency test
+belongs to the capture intake endpoint that introduces that resource.
+Investigation POST idempotency is covered by `test_intake_handoff.py` and
+`tests/test_intake_api.py`.
 
 ### Job actions
 
@@ -284,6 +287,57 @@ recovery tests compare actual API output with these fixtures and test replay,
 concurrent requests, rollback, invalid input and delayed publication. Android
 parsing and both-side contract review remain coordinated through #15/#62.
 
+## Privacy operations
+
+The [data map and runbook](../docs/operations/data-map.md) enumerate current
+tables, columns, upload bytes, logs and infrastructure copies. Automatic
+retention is **disabled by default**: [BC-D06](../docs/decisions/BC-D06-retention.md)
+is Proposed until the product owner accepts it.
+
+| Setting | Proposed default and enforced bounds |
+| --- | --- |
+| `OVRLY_RETENTION_ENABLED` | `0`; explicit opt-in for approved demo data only |
+| `OVRLY_RETENTION_DATA_SECONDS` | 86400; 60..2592000. Whole workspace lifetime from principal creation; also legacy ownerless job content age |
+| `OVRLY_RETENTION_TOMBSTONE_SECONDS` | 604800; 60..7776000. Detached tombstone/terminal retention-receipt age |
+| `OVRLY_RETENTION_POLL_SECONDS` | 60; 1..3600. Scheduling interval |
+| `OVRLY_RETENTION_BATCH_SIZE` | 100; 1..1000 expired subjects per category per sweep |
+
+When enabled, both embedded and standalone workers register and schedule the
+`privacy_retention` stage using the existing durable queue. Slot keys prevent
+duplicate schedules across processes; failures use existing lease recovery.
+API-only mode schedules nothing. The API and worker must share the same
+database, settings and **upload directory/mount**.
+
+The proposed policy expires credentials and every upload/investigation/job
+belonging to a principal 24 hours after that principal was created, including
+newer content. It is deliberately **not a permanent account/saved-report
+policy** or inactivity timer. Pending upload targets expire separately.
+Cleanup uses row locks and the same `JobQueue.delete` as user-requested
+deletion; counts indicate completed operations, not external-provider erasure.
+Old detached tombstones are eventually removed; late publication still fails.
+API replay receipts are therefore bounded by retention.
+
+Both entry points install `services/logging.py`: fixed event messages, UUID
+job IDs, counts and finite codes only. Unknown messages, dynamic stages/worker
+names, exception messages/tracebacks, request URLs and extra fields are
+redacted. Client-chosen request IDs are correlated by
+`request_log_id(X-Request-Id)` (SHA-256's first 16 bytes formatted as a UUID);
+the raw header is not logged. Do not install new unfiltered handlers after
+startup. Uvicorn/HTTP/SQL access messages become `UNSTRUCTURED_LOG_REDACTED`;
+API completion events retain status and the hashed request ID instead.
+Host log retention is operator-owned; no local log file is created.
+
+Run targeted checks from `backend/` with the documented test database:
+
+```sh
+uv run --frozen pytest -q tests/test_privacy_logging.py tests/recovery/test_privacy.py
+```
+
+These run in Backend checks; deletion/late-callback cases also run in Backend
+recovery. The [PDP Articles 18-22 checklist](../docs/operations/pdp-checklist.md)
+records unresolved transfer/sovereignty gates and is not legal advice.
+No provider erasure, backup cleanup, deployment or policy approval is claimed.
+
 ## Identity and intake API
 
 All product routes live under `/v1`, return JSON and use the shared contract
@@ -326,8 +380,8 @@ Limits come from settings. A declared `duration_ms` above
 limit is checked at declaration and while streaming. Upload bytes are written
 to `OVRLY_STORAGE_DIR` through the `UploadStore` interface in
 `services/storage.py`; object storage can replace the local store once BC-D03 is
-decided. Uploaded media is development data on the local disk, not a retention
-policy or consent record.
+decided. Uploaded media is development data on the local disk; consent must be
+recorded separately and automatic retention requires the explicit opt-in above.
 
 Recorded investigations are handed to the queue as described under
 [Durable jobs and recovery](#durable-jobs-and-recovery); until BE-07 (#20)

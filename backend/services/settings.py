@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # Google Web client ID whose audience linked ID tokens must carry (BC-D07). Empty
     # disables account linking; it is configuration, not a secret.
     google_client_id: str = Field(default="", max_length=256)
+    retention_enabled: bool = False
+    retention_data_seconds: int = Field(default=86400, ge=60, le=2592000)
+    retention_tombstone_seconds: int = Field(default=604800, ge=60, le=7776000)
+    retention_poll_seconds: int = Field(default=60, ge=1, le=3600)
+    retention_batch_size: int = Field(default=100, ge=1, le=1000)
 
     @model_validator(mode="after")
     def backoff_bounds(self) -> Self:

@@ -74,6 +74,24 @@ tests prove cancellation during retrieval and rejection of delayed publication.
 
 Investigations are queued but not analysed yet: media stages are BE-07 (#20), saved reports and their transfer on account merge are BE-10 (#33), quotas and retention are #77.
 
+`services/privacy.py` schedules opt-in retention work on the existing durable
+job engine in both worker entry points. It deletes an expired principal's
+workspace and stored upload bytes, cascades replay/credential rows, and uses
+the same `JobQueue.delete` as the API for fenced result removal. Upload locks
+serialize cleanup with streaming; failures leave retryable metadata rather
+than reporting complete cleanup. Detached tombstones expire later, without
+allowing an old lease to publish. The fixed-lifetime demo policy is
+[Proposed BC-D06](decisions/BC-D06-retention.md), disabled by default, not a
+permanent-account policy. See the [data map](operations/data-map.md) for every
+current storage location and unresolved backup/provider erasure boundaries.
+
+`services/logging.py` supplies content-free logging for API and worker:
+allowlisted events, fixed codes, UUID job IDs, hashed request IDs and counts,
+with raw access messages, dynamic strings, extras and traceback content
+removed from configured sinks. No production log retention provider is
+configured. The [PDP checklist](operations/pdp-checklist.md) keeps transfer
+and sovereignty obligations separate from successful retention tests.
+
 Backend CI checks the frozen environment, lint/types, PostgreSQL/migrations and service coverage. Known documentation-only changes skip execution but report the final check. Coverage is compared with remeasured `main`; a missing pre-bootstrap baseline is disclosed. Android coverage, future-module evidence and required-check activation remain #13.
 
 ## Future integration boundary

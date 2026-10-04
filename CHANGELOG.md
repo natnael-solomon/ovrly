@@ -4,6 +4,13 @@
 
 ### Added
 
+- Opt-in backend privacy retention jobs with shared job-deletion fencing,
+  upload-write locking, workspace/credential/replay cleanup and bounded
+  tombstone expiry. Shared content-free API/worker logging and synthetic
+  retention/recovery tests accompany the data map, Proposed BC-D06 windows
+  and PDP transfer/sovereignty checklist. Automatic deletion is disabled by
+  default; no permanent-account policy or legal approval is implied.
+
 - Owner-scoped job cancellation and deletion APIs with durable replay receipts,
   atomic authorization/mutation, tombstones and explicit database-only cleanup.
   Shared job-action schemas and fixtures, API-driven recovery cases and
