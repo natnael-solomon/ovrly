@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py UploadResponse field for field; every field is always present, nullable ones are null.",
+  "title": "Upload",
+  "description": "Read model of an upload, returned by POST /v1/uploads (201) and POST /v1/uploads/{id}/complete (200). Clients map an unknown state to UNKNOWN and never treat it as completed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "state",
+    "target",
+    "max_bytes",
+    "declared_size_bytes",
+    "declared_sha256",
+    "content_type",
+    "expires_at",
+    "created_at",
+    "completed_at"
+  ],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "state": { "$ref": "enums.schema.json#/$defs/upload_state" },
+    "target": {
+      "type": "string",
+      "description": "Path the client PUTs the raw bytes to, relative to the API origin, for example /v1/uploads/{id}/content. Opaque to the client.",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "max_bytes": {
+      "type": "integer",
+      "description": "Server byte limit in force for this upload."
+    },
+    "declared_size_bytes": { "type": "integer" },
+    "declared_sha256": { "$ref": "common.schema.json#/$defs/sha256" },
+    "content_type": { "type": "string", "minLength": 3, "maxLength": 128 },
+    "expires_at": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "After this instant the target rejects bytes and completion with 410 UPLOAD_EXPIRED."
+    },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "completed_at": {
+      "$ref": "common.schema.json#/$defs/nullable_timestamp",
+      "description": "Null until the server has verified size and SHA-256."
+    }
+  }
+}

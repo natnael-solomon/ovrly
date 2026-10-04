@@ -1,0 +1,16 @@
+{
+  "synthetic": true,
+  "description": "A request whose target kind is outside this version's enum. Requests are never relaxed: the kind cannot match any action, so validation fails. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "request": "invalid",
+    "reason": "target.kind"
+  },
+  "request": {
+    "request_id": "req_synthetic_9003",
+    "action": "open_check",
+    "target": {
+      "kind": "investigations",
+      "id": "inv_synthetic_9003"
+    }
+  }
+}

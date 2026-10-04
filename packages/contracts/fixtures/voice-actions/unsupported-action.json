@@ -1,0 +1,34 @@
+{
+  "synthetic": true,
+  "description": "delete_report is outside the allowlist. The request fails schema validation; a server that still receives it answers with VOICE_ACTION_UNSUPPORTED. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "invalid",
+    "response": "valid",
+    "error_code": "VOICE_ACTION_UNSUPPORTED"
+  },
+  "request": {
+    "request_id": "req_synthetic_0101",
+    "action": "delete_report",
+    "target": {
+      "kind": "report",
+      "id": "rep_synthetic_0101"
+    }
+  },
+  "response": {
+    "request_id": "req_synthetic_0101",
+    "result": "denied",
+    "action": "delete_report",
+    "target": {
+      "kind": "report",
+      "id": "rep_synthetic_0101"
+    },
+    "message": "Deleting by voice is not supported. Use the report screen instead.",
+    "error": {
+      "code": "VOICE_ACTION_UNSUPPORTED",
+      "message": "The action delete_report is not in the voice allowlist.",
+      "retryable": false,
+      "action": "fix_request",
+      "request_id": "req_synthetic_0101"
+    }
+  }
+}

@@ -1,9 +1,9 @@
 package app.ovrly.voice
 
 import java.io.IOException
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -22,14 +22,24 @@ internal interface VoiceTransport : AutoCloseable {
 }
 
 internal interface VoiceAudio : AutoCloseable {
-    fun start(input: (ByteArray) -> Unit, drained: () -> Unit, failed: (String) -> Unit)
+    /** [output] reports playback RMS from the playback thread every few 20 ms writes. */
+    fun start(
+        input: (ByteArray) -> Unit,
+        drained: () -> Unit,
+        failed: (String) -> Unit,
+        output: (Float) -> Unit
+    )
     fun enqueue(pcm: ByteArray): Boolean
     fun interrupt()
+
+    /** Releases the microphone while playback continues; idempotent. */
+    fun stopInput()
 }
 
 /**
- * All transitions, including actions, are serialized on the supplied main dispatcher.
- * Generation checks reject callbacks from cancelled handshakes and previous sessions.
+ * Connection lifecycle and public controls. All transitions, including actions, are serialized
+ * on the supplied main dispatcher. Generation checks reject callbacks from cancelled handshakes
+ * and previous sessions; turn-taking after ready lives in [VoiceConversation].
  */
 internal class VoiceSession(
     private val configuration: VoiceConfiguration,
@@ -38,245 +48,284 @@ internal class VoiceSession(
     private val permissionGranted: () -> Boolean,
     private val dispatch: (() -> Unit) -> Unit,
     private val schedule: (Long, () -> Unit) -> VoiceCancellation,
-    private val openGallery: () -> Unit,
+    private val navigator: VoiceNavigator,
     private val diagnostics: VoiceDiagnostics,
+    private val presentation: VoicePresentation =
+        VoicePresentation { TimeUnit.NANOSECONDS.toMillis(System.nanoTime()) }
 ) : AutoCloseable {
-    private val mutableState = MutableStateFlow(configuration.unavailableState() ?: VoiceState(
-        "Experimental voice",
-        "Ready to try Voxide. Native Android support is unverified; starting sends microphone audio to Voxide.",
-    ))
+    private val mutableState = MutableStateFlow(
+        configuration.unavailableState() ?: VoiceState(
+            if (configuration.mock) "Offline voice simulation" else "Experimental voice",
+            if (configuration.mock) {
+                "Offline simulation: no microphone, network or session usage."
+            } else {
+                "Ready to try Voxide. Native Android support is unverified; " +
+                    "starting sends microphone audio to Voxide."
+            }
+        )
+    )
     val state: StateFlow<VoiceState> = mutableState.asStateFlow()
+    val level: StateFlow<Float> = presentation.level
+    val events: SharedFlow<VoiceOrbEvent> = presentation.events
     private var generation = 0
     private var closed = false
-    private var ready = false
     private var transport: VoiceTransport? = null
-    private var audio: VoiceAudio? = null
     private var deadline: VoiceCancellation? = null
-    private var duration: VoiceCancellation? = null
-    private val results = mutableMapOf<String, Pair<VoiceEvent.Tool, String>>()
+    private var inbox: VoiceInbox? = null
+    private var conversation: VoiceConversation? = null
 
-    fun start() = dispatch {
-        if (closed || state.value.active) return@dispatch
-        configuration.unavailableState()?.let { mutableState.value = it; return@dispatch }
-        if (!permissionGranted()) {
-            mutableState.value = VoiceState("Microphone permission needed", "Allow microphone access before starting voice.")
-            return@dispatch
+    // Push-to-talk began this connection; releasing before ready cancels it.
+    private var heldStart = false
+
+    fun start() = dispatch { begin() }
+
+    /** Push-to-talk. Holding while idle starts voice; releasing before ready cancels it. */
+    fun holdStart() = dispatch {
+        if (closed) return@dispatch
+        val active = conversation
+        if (active != null) {
+            active.hold(true)
+        } else if (!state.value.active) {
+            begin()
+            heldStart = state.value.active
+        }
+    }
+
+    fun holdEnd() = dispatch {
+        if (closed) return@dispatch
+        val active = conversation
+        if (active != null) {
+            active.hold(false)
+        } else if (heldStart && state.value.active) {
+            finish("Stopped", "Voice start cancelled.", error = false)
+        }
+        heldStart = false
+    }
+
+    fun interrupt() = dispatch {
+        if (!closed) conversation?.interrupt()
+    }
+
+    private fun begin() {
+        if (closed || state.value.active) return
+        val blocked = configuration.unavailableState() ?: VoiceState(
+            "Microphone permission needed",
+            "Allow microphone access before starting voice."
+        ).takeUnless { permissionGranted() }
+        if (blocked != null) {
+            mutableState.value = blocked
+            return
         }
         val token = ++generation
-        val pendingMessages = AtomicInteger()
-        val overflow = AtomicBoolean(false)
-        mutableState.value = VoiceState("Connecting", "Checking the experimental Voxide connection. Microphone is still off.", true)
+        mutableState.value = VoiceState(
+            "Connecting",
+            if (configuration.mock) {
+                "Running the offline protocol fixture. No microphone or network."
+            } else {
+                "Checking the experimental Voxide connection. Microphone is still off."
+            },
+            true,
+            VoiceInteractionPhase.CONNECTING
+        )
         var started = false
         try {
             transport = transportFactory()
-            deadline = schedule(30_000) { ifCurrent(token) {
-                finish("Connection timed out", "Voxide did not become ready. Native connections may not be supported.")
-            } }
-            duration = schedule(180_000) { ifCurrent(token) {
-                finish("Session ended", "The three-minute voice limit was reached. Start again when ready.")
-            } }
-            transport?.start(object : VoiceTransport.Listener {
-                override fun message(text: String) {
-                    if (pendingMessages.incrementAndGet() > 16) {
-                        pendingMessages.decrementAndGet()
-                        if (overflow.compareAndSet(false, true)) {
-                            dispatch { ifCurrent(token) {
-                                finish("Message limit reached", "Voxide messages arrived faster than they could be processed. Voice stopped.")
-                            } }
-                        }
-                        return
-                    }
-                    dispatch {
-                        try {
-                            ifCurrent(token) {
-                                var handled = false
-                                try {
-                                    receive(VoiceProtocol.parse(text), token)
-                                    handled = true
-                                } catch (cause: VoiceProtocolException) {
-                                    diagnostics.warning("Rejected Voxide protocol message", cause)
-                                    finish("Protocol error", "Voxide sent an invalid or oversized message. Voice stopped safely.")
-                                    handled = true
-                                } finally {
-                                    if (!handled) finish("Stopped", "An unexpected voice fault interrupted the session.")
-                                }
-                            }
-                        } finally {
-                            pendingMessages.decrementAndGet()
-                        }
-                    }
+            deadline = schedule(VoiceConfiguration.SETUP_MILLIS) {
+                ifCurrent(token) {
+                    finish(
+                        "Connection timed out",
+                        "Voxide did not become ready. Native connections may not be supported."
+                    )
                 }
-                override fun failed(message: String) = dispatch {
-                    ifCurrent(token) { finish("Voice unavailable", message) }
-                }
-            })
+            }
+            transport?.start(transportListener(token))
             started = true
         } catch (cause: IOException) {
             diagnostics.warning("Voice connection startup failed", cause)
-            finish("Connection failed", "The voice connection could not start because of a network error.")
+            finish(
+                "Connection failed",
+                "The voice connection could not start because of a network error."
+            )
         } catch (cause: SecurityException) {
             diagnostics.warning("Voice connection permission denied", cause)
-            finish("Connection denied", "Android denied the voice connection. Check network permissions.")
+            finish(
+                "Connection denied",
+                "Android denied the voice connection. Check network permissions."
+            )
         } finally {
             if (!started && state.value.active) finish("Stopped", "Voice startup did not complete.")
         }
     }
 
+    private fun transportListener(token: Int) = object : VoiceTransport.Listener {
+        private val incoming = VoiceInbox(
+            dispatch,
+            { event -> ifCurrent(token) { receiveEvent(event) } },
+            { status, message -> ifCurrent(token) { finish(status, message) } },
+            diagnostics
+        ).also { inbox = it }
+
+        private val host = object : VoiceHost {
+            override val current: Boolean
+                get() = !closed && generation == token && mutableState.value.active
+
+            override var state: VoiceState
+                get() = mutableState.value
+                set(value) {
+                    mutableState.value = value
+                }
+
+            override fun send(text: String) {
+                if (transport?.send(text) != true) {
+                    finish(
+                        "Connection interrupted",
+                        "The voice connection could not accept data. Voice stopped."
+                    )
+                }
+            }
+
+            override fun finish(status: String, message: String, error: Boolean) =
+                this@VoiceSession.finish(status, message, error)
+
+            override fun post(action: () -> Unit) = dispatch { ifCurrent(token, action) }
+
+            override fun schedule(milliseconds: Long, action: () -> Unit) =
+                this@VoiceSession.schedule(milliseconds) { ifCurrent(token, action) }
+        }
+
+        override fun message(text: String) = incoming.message(text)
+
+        override fun failed(message: String) = dispatch {
+            ifCurrent(token) { finish("Voice unavailable", message) }
+        }
+
+        private fun receiveEvent(event: VoiceEvent) {
+            var handled = false
+            try {
+                route(event)
+                handled = true
+            } catch (cause: VoiceProtocolException) {
+                diagnostics.warning("Rejected Voxide protocol message", cause)
+                finish(
+                    "Protocol error",
+                    "Voxide sent an invalid or oversized message. Voice stopped safely."
+                )
+                handled = true
+            } finally {
+                if (!handled) {
+                    finish("Stopped", "An unexpected voice fault interrupted the session.")
+                }
+            }
+        }
+
+        private fun route(event: VoiceEvent) {
+            val active = conversation
+            when {
+                event is VoiceEvent.Error -> finish(
+                    "Voice unavailable",
+                    if (event.usageLimit) {
+                        "Voxide usage limit reached."
+                    } else {
+                        "Voxide reported an error. " +
+                            "Check project configuration and native-client support."
+                    }
+                )
+
+                event == VoiceEvent.Ready -> if (active == null) ready()
+
+                active != null -> active.receive(event)
+
+                event != VoiceEvent.Unknown -> throw VoiceProtocolException()
+            }
+        }
+
+        private fun ready() {
+            if (!permissionGranted()) {
+                finish(
+                    "Microphone permission needed",
+                    "Microphone access was revoked. Voice stopped."
+                )
+                return
+            }
+            deadline?.cancel()
+            deadline = null
+            val created = VoiceConversation(
+                configuration,
+                host,
+                presentation,
+                VoiceActions(navigator, diagnostics),
+                permissionGranted,
+                heldStart
+            )
+            conversation = created
+            created.start(audioFactory())
+        }
+    }
+
     fun stop(reason: String = "Voice stopped.") = dispatch {
         if (!closed) {
-            if (state.value.active) finish("Stopped", reason.take(240))
-            else configuration.unavailableState()?.let { mutableState.value = it }
+            if (state.value.active) {
+                finish("Stopped", reason.take(240), error = false)
+            } else {
+                configuration.unavailableState()?.let { mutableState.value = it }
+            }
         }
     }
 
     override fun close() = dispatch {
         if (!closed) {
             try {
-                finish("Closed", "Voice closed.")
+                finish("Closed", "Voice closed.", error = false)
             } finally {
                 closed = true
             }
         }
     }
 
-    private fun receive(event: VoiceEvent, token: Int) {
-        if (event == VoiceEvent.Ready) {
-            if (ready) return
-            if (!permissionGranted()) {
-                finish("Microphone permission needed", "Microphone access was revoked. Voice stopped.")
-                return
-            }
-            ready = true
-            deadline?.cancel()
-            deadline = null
-            mutableState.value = VoiceState("Listening", "Microphone active. Only opening the design gallery is supported.", true)
-            audio = audioFactory()
-            val pendingInput = AtomicBoolean(false)
-            audio?.start(
-                input = { pcm ->
-                    if (pendingInput.compareAndSet(false, true)) dispatch {
-                        try {
-                            ifCurrent(token) {
-                                if (!permissionGranted()) {
-                                    finish("Microphone permission needed", "Microphone access was revoked. Voice stopped.")
-                                } else if (ready && state.value.status != "Speaking") {
-                                    send(VoiceProtocol.input(pcm))
-                                }
-                            }
-                        } finally {
-                            pendingInput.set(false)
-                        }
-                    }
-                },
-                drained = { dispatch {
-                    ifCurrent(token) {
-                        if (state.value.status == "Speaking") {
-                            mutableState.value = VoiceState("Listening", "Microphone active. Ask to open the design gallery.", true)
-                        }
-                    }
-                } },
-                failed = { message -> dispatch {
-                    ifCurrent(token) { finish("Audio unavailable", message) }
-                } },
-            )
-            return
-        }
-        if (event is VoiceEvent.Error) {
-            finish("Voice unavailable", if (event.usageLimit) "Voxide usage limit reached."
-                else "Voxide reported an error. Check project configuration and native-client support.")
-            return
-        }
-        if (!ready) {
-            if (event != VoiceEvent.Unknown) throw VoiceProtocolException()
-            return
-        }
-        when (event) {
-            is VoiceEvent.Audio -> {
-                mutableState.value = VoiceState("Speaking", "Assistant audio is playing. Microphone transmission is paused.", true)
-                if (audio?.enqueue(event.pcm) != true) {
-                    finish("Audio buffer full", "Assistant audio exceeded the bounded playback buffer. Voice stopped.")
-                }
-            }
-            is VoiceEvent.Tool -> execute(event, token)
-            VoiceEvent.Interrupted -> {
-                audio?.interrupt()
-                ifCurrent(token) {
-                    mutableState.value = VoiceState("Listening", "Assistant interrupted. Microphone resumes after the echo guard.", true)
-                }
-            }
-            else -> Unit
-        }
-    }
-
-    private fun execute(tool: VoiceEvent.Tool, token: Int) {
-        results[tool.id]?.let { (original, result) ->
-            if (tool != original) throw VoiceProtocolException()
-            send(result)
-            return
-        }
-        if (results.size >= 32) {
-            finish("Action limit reached", "Voice stopped after the per-session action limit.")
-            return
-        }
-        val response = when {
-            tool.name != VoiceProtocol.ACTION ->
-                VoiceProtocol.toolResult(tool, false, "This action is not allowed. Only open_design_gallery is supported.")
-            !tool.validArguments ->
-                VoiceProtocol.toolResult(tool, false, "open_design_gallery requires exactly an empty args object.")
-            else -> try {
-                openGallery()
-                VoiceProtocol.toolResult(tool, true, "Design gallery opened.")
-            } catch (cause: IllegalStateException) {
-                diagnostics.warning("Gallery navigation unavailable in the current activity state", cause)
-                VoiceProtocol.toolResult(tool, false, "The design gallery cannot open in the current app state.")
-            } catch (cause: SecurityException) {
-                diagnostics.warning("Gallery navigation denied", cause)
-                VoiceProtocol.toolResult(tool, false, "Android denied opening the design gallery.")
-            }
-        }
-        ifCurrent(token) {
-            results[tool.id] = tool to response
-            send(response)
-        }
-    }
-
-    private fun send(text: String) {
-        if (transport?.send(text) != true) finish("Connection interrupted", "The voice connection could not accept data. Voice stopped.")
-    }
-
     private inline fun ifCurrent(token: Int, block: () -> Unit) {
         if (!closed && generation == token && state.value.active) block()
     }
 
-    private fun finish(status: String, message: String) {
+    private fun finish(status: String, message: String, error: Boolean = true) {
         generation++
-        ready = false
+        heldStart = false
+        inbox?.close()
+        inbox = null
         val oldDeadline = deadline
-        val oldDuration = duration
-        deadline = null
-        duration = null
-        val oldAudio = audio
+        val oldConversation = conversation
         val oldTransport = transport
-        audio = null
+        deadline = null
+        conversation = null
         transport = null
-        results.clear()
         var completed = false
         var failures = emptyList<String>()
         try {
             failures = diagnostics.cleanup(
-                "connection deadline" to { oldDeadline?.cancel() },
-                "session deadline" to { oldDuration?.cancel() },
-                "audio" to { oldAudio?.close() },
-                "transport" to { oldTransport?.close() },
+                "session timers" to {
+                    oldDeadline?.cancel()
+                    oldConversation?.cancelTimers()
+                },
+                "audio" to { oldConversation?.audio?.close() },
+                "transport" to { oldTransport?.close() }
             )
             completed = true
         } finally {
             val suffix = when {
                 !completed -> " Cleanup was interrupted by an unexpected fault; see diagnostics."
-                failures.isNotEmpty() -> " Cleanup reported ${failures.size} resource failures; see OvrlyVoice diagnostics."
+
+                failures.isNotEmpty() ->
+                    " Cleanup reported ${failures.size} resource failures; " +
+                        "see OvrlyVoice diagnostics."
+
                 else -> ""
             }
-            mutableState.value = VoiceState(status, message + suffix)
+            mutableState.value = VoiceState(
+                status,
+                message + suffix,
+                phase = if (error) VoiceInteractionPhase.ERROR else VoiceInteractionPhase.IDLE
+            )
+            presentation.reset()
+            if (error) presentation.emit(VoiceOrbEvent.Shake)
         }
     }
 }

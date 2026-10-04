@@ -22,7 +22,7 @@ Notifications and compact overlay controls use `drawable/ic_ovrly.xml`. The gene
 
 ## Header wordmark
 
-Your space and Explore use `drawable-*/wordmark_ovrly.webp`, a 40 dp rendered wordmark at five densities. `Modifier.chromeGlare` sweeps a diagonal glare across it about every five seconds. The animation is masked to the bitmap, runs in the draw phase without recomposition, pauses off screen and follows the system animator scale.
+Your space and Explore use `drawable-*/wordmark_ovrly.webp`, a 44 dp rendered wordmark at five densities. `Modifier.chromeGlare` sweeps a diagonal glare across it about every five seconds; the docked voice orb repeats a fainter pass just after it. The animation is masked to the bitmap, runs in the draw phase without recomposition, pauses off screen and follows the system animator scale.
 
 Light mode draws a blurred ink shadow, blurred sheen halo and crisp ink edge beneath the chrome for contrast with paper. Dark mode omits those layers and uses a stronger glare.
 

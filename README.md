@@ -1,6 +1,6 @@
 # ovrly
 
-Native Android companion with floating controls and local video-interval capture.
+We’re building an Android overlay for checking claims in short/long videos against research, without leaving the app you’re watching.
 
 ## Get started
 
@@ -11,8 +11,10 @@ For the backend, run `sh scripts/backend.sh` on Linux/WSL with uv and Docker Com
 - [Task board](https://github.com/users/natnael-solomon/projects/3)
 - [Team workflow](WORKFLOW.md)
 - [Backend](backend/README.md)
+- [Contracts](packages/contracts/README.md) (JSON Schemas, enums and synthetic fixtures shared by Android and the backend)
 - [Evaluation](evaluation/README.md) (eleven-clip local frozen corpus, 7 dev / 4 test, preserved review history)
 - [Architecture](docs/architecture.md)
+- [Decision records](docs/decisions/README.md) (scope, tracking, dates, Voxide route)
 - [Changelog](CHANGELOG.md)
 
 Team references are shared privately.

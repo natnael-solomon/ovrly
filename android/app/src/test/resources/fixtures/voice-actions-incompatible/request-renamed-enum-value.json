@@ -1,0 +1,16 @@
+{
+  "synthetic": true,
+  "description": "A request whose action uses a renamed enum value (openCheck instead of open_check). Renaming an enum value is a breaking change; the request must fail validation instead of mapping to a known action. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "request": "invalid",
+    "reason": "allowlist"
+  },
+  "request": {
+    "request_id": "req_synthetic_9002",
+    "action": "openCheck",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_9002"
+    }
+  }
+}

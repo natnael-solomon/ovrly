@@ -12,6 +12,8 @@ Board stages are Backlog, Ready, In progress, In review and Done. Ready means th
 
 The issue is the task card; link its PR without creating a duplicate card. Move it to Done after merge. Close cancelled work as not planned and archive it.
 
+Cross-cutting product, scope and date decisions are recorded in [docs/decisions](docs/decisions/README.md) using the RFC section 22 template. Issues cite them by ID (`BC-D..`, `RFC-D..`, `AC..`).
+
 ## 2. Branch and implement
 
 Start from up-to-date `main` on a short-lived task branch, such as `feat/share-intake`, `fix/capture-stop`, `docs/setup-guide` or `chore/build-config`. Do not use permanent developer branches.
@@ -39,7 +41,7 @@ Never commit credentials, signing keys, personal media, machine configuration, g
 | Change | Required evidence |
 | --- | --- |
 | Android code/build | Debug build, unit tests and lint; add or update tests for changed behavior. |
-| Backend | Frozen uv install, Ruff lint/format, strict MyPy, PostgreSQL tests, migrations and coverage checks in the [backend README](backend/README.md#local-checks). Android/evaluation checks do not replace Backend CI. |
+| Backend | Frozen uv install, Ruff lint/format, strict MyPy, PostgreSQL tests, migrations and coverage checks in the [backend README](backend/README.md#local-checks). Job-engine changes also run the [recovery suite](backend/README.md#durable-jobs-and-recovery). Android/evaluation checks do not replace Backend CI. |
 | Recording, permissions, overlay or voice behavior | Applicable automated checks and checks on an authorized physical device. |
 | Documentation only | Relevant documentation checks; no Android build required. |
 
@@ -51,7 +53,9 @@ Record commands and outcomes, remaining limitations and, when applicable, device
 | --- | --- |
 | **Android checks** | On PRs to any branch, pushes to `main` and manual runs: Ubuntu 24.04, JDK 21, wrapper-based debug build/tests/lint, detekt/Compose/ktlint, unsigned release build with a ledger-style code, and real `apksigner`/`aapt2` verification using a temporary fixture key. Dependencies are checksum-verified; no production key or APK upload. |
 | **Evaluation contract checks** | On PRs, pushes to `main` and manual runs: standard-library validator tests, synthetic examples, explicit draft metadata and frozen metadata if `evaluation/corpus/` exists. No media downloads, provider keys or pipeline scoring. See [evaluation](evaluation/README.md). |
-| **Backend checks** | On PRs to any branch, edits/retargeting, `main` pushes and manual runs: change-detection tests, frozen Python 3.11/uv environment, Ruff, strict MyPy, PostgreSQL 16, Alembic upgrade/drift checks and service coverage. Validation has a 15-minute timeout. |
+| **Backend checks** | On PRs to any branch, edits/retargeting, `main` pushes and manual runs: change-detection tests, frozen Python 3.11/uv environment, Ruff, strict MyPy, the [contracts package](packages/contracts/README.md) validator and server round-trip check, PostgreSQL 16, Alembic upgrade/drift checks and service coverage. Validation has a 15-minute timeout. |
+| **Contract checks** | On PRs to any branch, edits/retargeting, `main` pushes and manual runs, no path filter: lint/type-check of the contract tooling, JSON Schema and fixture validation, the OpenAPI document (`openapi-spec-validator`, spectral with the error-shape and typed-enum rules), the server round trip in `--check` mode, the contract pytest suites, pinned checksum-verified `oasdiff` against the PR base (a breaking change fails without a `VERSION` bump), and the Android `app.ovrly.contract` unit tests against the same fixtures. One result from both jobs. See [Contract checks](packages/contracts/README.md#contract-checks-ci). |
+| **Backend recovery** | Same triggers and change detection as Backend checks, as a separate job: Alembic upgrade, then the Hypothesis job state-machine properties, retry-policy tests, queue invariant tests and the in-process API + worker recovery cases (worker killed before commit, after the provider call and after the artifact store, lease expiry with a live worker, cancel mid-retrieval, delete with a delayed callback, database connection drop, API lifespan restart, graceful and forced drain, every retry class, duplicate provider callbacks) against PostgreSQL 16. Documentation-only diffs skip execution but still report the check. |
 | **Quality checks** | On every PR target/edit, `main` push and manual run: shared pre-commit Android/backend gates, workflow analysis, secret and dependency scanning, and negative fixtures. Includes JDK/SDK setup; no path skips, PostgreSQL or product-provider calls. Thirty-minute timeout. |
 
 Known documentation and isolated evaluation changes skip Android setup/Gradle but still report the check. Changes to Android change detection, unknown paths, initial pushes and manual runs use the full job. Change-detection tests always run. Do not add workflow-level path filters that leave required checks pending.
@@ -175,6 +179,8 @@ Capture, overlay, voice and manifest paths trigger **Device evidence** and the `
 
 Every PR, including documentation, needs another developer's approval. Authors cannot approve their own work. Wait if no reviewer is available; resolve feedback and request another review after material changes.
 
+Contract changes (anything under `packages/contracts/`) need one Android reviewer and one backend reviewer, because both sides build from the same schemas and fixtures. `.github/CODEOWNERS` routes the directory to both; the owner is the Android reviewer today. A breaking contract change bumps `packages/contracts/VERSION` in the same PR (**Contract checks** fails otherwise), and a backend-only contract PR does not close #15 (see the [contracts README](packages/contracts/README.md#versioning)).
+
 ## 6. Merge
 
 Merge only when the PR is ready, another developer has approved, required checks pass, device evidence is present where required, and review discussions are resolved. Do not bypass these requirements for urgent changes.
@@ -183,7 +189,7 @@ Inspect the final squash author and full message, including automatically collec
 
 Squash into `main`, delete the merged branch and close linked issues with `Closes #123` where appropriate.
 
-The active `main` ruleset requires PRs, linear history, one approving review, stale-approval dismissal on push, resolved threads and up-to-date **Android checks** and **Device evidence**. Direct/force pushes and bypass actors are prohibited. Require **Backend checks** (REPO-04) and **Contract checks** (BE-03) when those workflows exist.
+The active `main` ruleset requires PRs, linear history, one approving review, stale-approval dismissal on push, resolved threads and up-to-date **Android checks** and **Device evidence**. Direct/force pushes and bypass actors are prohibited. Require **Backend checks** (REPO-04), **Backend recovery** (BE-04) and **Contract checks** (BE-03, `.github/workflows/contracts.yml`) once each workflow has reported on `main`.
 
 ## 7. Document and release
 

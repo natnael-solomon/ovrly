@@ -54,6 +54,34 @@ The stricter `--frozen` full-coverage benchmark contract remains unchanged and
 rejects this local profile. Local freeze is complete; broader certification
 and any future expanded use are separate work, not blockers to this snapshot.
 
+## BE-01 handoff
+
+This reference complements [BE-01](https://github.com/natnael-solomon/ovrly/issues/11)
+without changing its router, experiment schema or provider decisions.
+The corpus manifest is **not** a BE-01 input file: `frozen-local` describes
+reference approval, while BE-01's `be01-experimental-v2` input describes
+transcript observations and windows.
+
+Only the seven dev clips are candidates for that experiment: social-01,
+social-02, social-03, social-04, social-05, social-07 and clip-d. Keep clip-k,
+clip-f, clip-i and clip-m, including their labels, out of prompt tuning and
+the 50-window router comparison.
+
+Build any separately versioned BE-01 input from actual controlled captions or
+source subtitles, not the normalized `proposition` fields here. Preserve exact
+text, source hashes, supplied speaker labels (or null), parent/cue envelopes and
+window selection provenance. BE-01's observation-relative character offsets
+are not this corpus's media-relative millisecond intervals. Neither the corpus
+schema version `2` nor `gold_id`/`proposition_id` replaces BE-01's experiment
+version or observation IDs.
+
+Local freeze approval does not change BE-01's
+`hosted_processing_approved` attestation. Any separately granted provider-use
+approval must stay attached to its exact experiment input and scope; do not
+infer it from this freeze or retroactively revoke an independent approval.
+Keep real inputs and recordings outside Git. Plan mode and mocked tests are
+not a hosted run or evidence of free-tier entitlements.
+
 ## Verify and use
 
 ```text

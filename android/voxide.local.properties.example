@@ -2,6 +2,8 @@
 # Copy to voxide.local.properties (ignored). Values are embedded in the APK.
 # Never use a vox_sk secret. Native authorization must be approved by the provider.
 # Explicit microphone start uploads voice only after setup; no live calls during build/tests.
+# Debug uses an in-process, no-audio/no-network fixture unless VOXIDE_LIVE=1 at build time.
+# Rebuild without VOXIDE_LIVE after an authorized test. Track provider usage on the dashboard.
 enabled=false
 baseUrl=https://voxide.onrender.com
 publishableKey=

@@ -4,6 +4,7 @@ import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -37,6 +38,7 @@ internal class VoxideTransport(
 ) : VoiceTransport {
     private val lock = Any()
     private val ended = AtomicBoolean(false)
+    private val trace = VoiceTransportTrace(diagnostics)
     private var listener: VoiceTransport.Listener? = null
     private var call: Call? = null
     private var socket: WebSocket? = null
@@ -78,6 +80,7 @@ internal class VoxideTransport(
     private fun request(stage: String, request: Request, success: (Response) -> Unit) {
         synchronized(lock) {
             if (ended.get()) return
+            diagnostics.warning("Voice HTTP $stage started")
             call = client.newCall(request).also { next ->
                 next.enqueue(object : Callback {
                     override fun onFailure(call: Call, e: IOException) {
@@ -87,6 +90,9 @@ internal class VoxideTransport(
                     override fun onResponse(call: Call, response: Response) {
                         response.use {
                             if (ended.get()) return
+                            diagnostics.warning(
+                                "Voice HTTP $stage completed (HTTP ${response.code})"
+                            )
                             if (!response.isSuccessful) {
                                 fail(httpFailure(stage, response.code))
                                 return
@@ -122,13 +128,21 @@ internal class VoxideTransport(
         synchronized(lock) {
             if (ended.get()) return
             socket = client.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    if (!ended.get()) {
+                        diagnostics.warning("Voice WebSocket opened; waiting for server ready")
+                    }
+                }
+
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     if (ended.get()) return
                     if (text.length > VoiceProtocol.MAX_MESSAGE_BYTES ||
                         text.toByteArray(Charsets.UTF_8).size > VoiceProtocol.MAX_MESSAGE_BYTES
                     ) {
                         fail("Voxide sent an oversized message. Voice stopped.")
-                    } else listener?.message(text)
+                    } else {
+                        listener?.message(text)
+                    }
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
@@ -163,50 +177,59 @@ internal class VoxideTransport(
         if (ended.get() || text.length > VoiceProtocol.MAX_MESSAGE_BYTES ||
             ws.queueSize() + text.toByteArray(Charsets.UTF_8).size > 64 * 1024
         ) return false
-        ws.send(text)
+        ws.send(text).also { accepted ->
+            if (accepted) {
+                trace.sent(text)
+            } else {
+                diagnostics.warning("Voice send queue rejected a message")
+            }
+        }
     }
 
     private fun fail(message: String, cause: Throwable? = null) {
         if (ended.compareAndSet(false, true)) {
             diagnostics.warning(message, cause)
-            var completed = false
-            var failures = emptyList<String>()
             try {
-                failures = release()
-                completed = true
+                release()
             } finally {
-                val suffix = when {
-                    !completed -> " Connection cleanup encountered an unexpected fault."
-                    failures.isNotEmpty() -> " Connection cleanup reported ${failures.size} resource failures; see OvrlyVoice diagnostics."
-                    else -> ""
-                }
-                listener?.failed(message + suffix)
+                listener?.failed(message)
             }
         }
     }
 
     override fun close() {
         if (ended.compareAndSet(false, true)) {
-            val failures = release()
-            if (failures.isNotEmpty()) throw VoiceCleanupException(failures)
+            release()
         }
     }
 
-    private fun release(): List<String> {
+    private fun release() {
         val (oldCall, oldSocket) = synchronized(lock) {
             val resources = call to socket
             call = null
             socket = null
             resources
         }
-        // Cancel rather than drain queued microphone frames after the user's stop.
-        return diagnostics.cleanup(
-            "HTTP call" to { oldCall?.cancel() },
-            "WebSocket" to { oldSocket?.cancel() },
-            "HTTP dispatcher calls" to { client.dispatcher.cancelAll() },
-            "HTTP connection pool" to { client.connectionPool.evictAll() },
-            "HTTP executor" to { client.dispatcher.executorService.shutdown() },
-        )
+        trace.finish()
+        // Even closing a pooled TLS socket can write bytes. Never do it on the UI thread.
+        thread(name = "ovrly-voice-cleanup", isDaemon = true) {
+            var completed = false
+            try {
+                val failures = diagnostics.cleanup(
+                    "HTTP call" to { oldCall?.cancel() },
+                    "WebSocket" to { oldSocket?.cancel() },
+                    "HTTP dispatcher calls" to { client.dispatcher.cancelAll() },
+                    "HTTP connection pool" to { client.connectionPool.evictAll() },
+                    "HTTP executor" to { client.dispatcher.executorService.shutdown() }
+                )
+                diagnostics.warning("Voice network cleanup finished (${failures.size} failures)")
+                completed = true
+            } finally {
+                if (!completed) {
+                    diagnostics.warning("Voice network cleanup interrupted by an unexpected fault")
+                }
+            }
+        }
     }
 
     private fun httpFailure(stage: String, code: Int): String = when (code) {

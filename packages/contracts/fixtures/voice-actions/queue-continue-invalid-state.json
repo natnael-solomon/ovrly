@@ -1,0 +1,34 @@
+{
+  "synthetic": true,
+  "description": "queue_continue on a job that already completed. The request is well-formed; the server denies it with VOICE_ACTION_INVALID_STATE. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "valid",
+    "response": "valid",
+    "error_code": "VOICE_ACTION_INVALID_STATE"
+  },
+  "request": {
+    "request_id": "req_synthetic_0102",
+    "action": "queue_continue",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0102"
+    }
+  },
+  "response": {
+    "request_id": "req_synthetic_0102",
+    "result": "denied",
+    "action": "queue_continue",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0102"
+    },
+    "message": "That check already finished, so there is nothing to continue.",
+    "error": {
+      "code": "VOICE_ACTION_INVALID_STATE",
+      "message": "queue_continue requires a paused job; the job state is completed.",
+      "retryable": false,
+      "action": "none",
+      "request_id": "req_synthetic_0102"
+    }
+  }
+}

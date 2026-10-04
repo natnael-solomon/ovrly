@@ -59,6 +59,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.ovrly.ui.voice.VoiceOrbStudy
 
 internal val GalleryInk: Color @Composable get() = LocalOvrlyPalette.current.ink
 internal val GalleryMuted: Color @Composable get() = LocalOvrlyPalette.current.muted
@@ -147,6 +148,8 @@ fun GalleryScreen(onBack: () -> Unit, onDemo: (() -> Unit)? = null) {
                     }
                 }
             }
+
+            item(key = "voice-orb") { VoiceOrbStudy(brand = { BrandLockup() }) }
 
             item(key = "design-chooser") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

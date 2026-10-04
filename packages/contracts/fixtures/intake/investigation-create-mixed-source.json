@@ -1,0 +1,16 @@
+{
+  "synthetic": true,
+  "description": "A request that mixes the two source kinds (kind url with an upload_id) must fail validation: the union is discriminated on kind and each branch rejects the other's field. Synthetic fixture; no response is recorded because the framework rejects the body before a handler runs.",
+  "schemas": {
+    "request": "investigation-create-request.schema.json"
+  },
+  "expect": {
+    "request": "invalid"
+  },
+  "request": {
+    "source": {
+      "kind": "url",
+      "upload_id": "00000000-0000-4000-8000-000000000301"
+    }
+  }
+}
