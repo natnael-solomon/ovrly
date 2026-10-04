@@ -7,15 +7,17 @@ extraction route). One record, two identifiers.
 it, where does the backend run, and is the measured structural validity enough
 to start BE-08 development against that route?
 
-**Status:** Proposed. Authored from the BE-01 experiment by Neb-iyu on
-4 October 2026; awaits confirmation by the product owner natnael-solomon.
-Issue ownership does not grant authority over cross-cutting provider and
-hosting choices, so nothing here is Accepted until that confirmation is
-recorded with its date.
+**Status:** Conditional. Authored from the BE-01 experiment by Neb-iyu on
+4 October 2026 and confirmed by the product owner natnael-solomon on
+4 October 2026. The provider order, the hosting choice and the limited BE-08
+development go apply from that date. The record becomes Accepted when the
+committed verification evidence described below is linked here (tracked in
+#25).
 
 **Owner and participants:** Neb-iyu (BE-01 owner, research and pipeline)
 proposed every choice below and ran the experiment. natnael-solomon (product
-owner) is to confirm or reject. No sponsor or provider statement is on file.
+owner) confirmed it on 4 October 2026. No sponsor or provider statement is on
+file.
 
 ## Options considered
 
@@ -130,7 +132,7 @@ deployment and hosted recovery of the durable job engine are not verified.
 
 ## Chosen option and rationale
 
-Proposed by Neb-iyu, pending confirmation:
+Proposed by Neb-iyu and confirmed by natnael-solomon on 4 October 2026:
 
 | Stage | Selected order | Boundary |
 | --- | --- | --- |
@@ -188,15 +190,15 @@ the person checking sees a delayed or failed check, not a silent loss.
 
 ## Dependencies / capability gates
 
-- Confirmation by natnael-solomon, recorded here with the date.
+- Confirmation by natnael-solomon: given on 4 October 2026.
 - Committed verification evidence for the measured figures (see Evidence and
   uncertainties) before the status moves to Accepted.
-- Issue #11 (BE-01) was closed on 4 October 2026 ahead of this PR's merge,
-  at Neb-iyu's direction; the owner decides whether it stays closed.
-- BE-08 (#21) builds the adapters; BE-03 (#15) owns the production contract,
+- Issue #11 (BE-01) was closed on 4 October 2026 at Neb-iyu's direction. The
+  owner decided on 4 October 2026 that it stays closed; its unfinished items
+  moved to #20, #21, #25, #27, #29 and #35.
+- BE-08 (#25) builds the adapters; BE-03 (#15) owns the production contract,
   which this experiment schema does not change; RES-03 measures semantic
-  accuracy; hosting entitlement and deployment are #21 and the pending
-  BC-D03 confirmation, not this record.
+  accuracy; hosting entitlement and deployment are #21, not this record.
 
 ## Rejected alternatives and why
 
@@ -229,4 +231,4 @@ Build contract section 5 (BC-D03) and section 4; RFC-D31, RFC-D41 to RFC-D43;
 the Voxide route, which the #11 checklist also cites but which this record does
 not redefine; [backend README, BE-01 router experiment](../../backend/README.md#be-01-router-experiment);
 `backend/services/experiments/`; `backend/tests/test_router_experiment.py`;
-`backend/tests/test_extraction_contract.py`; issues #11, #15, #21; PR #84.
+`backend/tests/test_extraction_contract.py`; issues #11, #15, #21, #25; PR #84.
