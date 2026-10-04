@@ -39,6 +39,15 @@ def test_invalid_database_url(value):
         ("job_retry_unknown_outcome_attempts", 11),
         ("job_retry_backoff_seconds", 61),
         ("job_retry_max_backoff_seconds", 3601),
+        ("retention_data_seconds", 59),
+        ("retention_data_seconds", 2592001),
+        ("retention_tombstone_seconds", 59),
+        ("retention_tombstone_seconds", 7776001),
+        ("retention_poll_seconds", 0),
+        ("retention_poll_seconds", 3601),
+        ("retention_batch_size", 0),
+        ("retention_batch_size", 1001),
+        ("retention_enabled", "maybe"),
     ],
 )
 def test_invalid_options(field, value):
@@ -91,3 +100,23 @@ def test_environment_enables_worker(monkeypatch, tmp_path):
     monkeypatch.setenv("OVRLY_DATABASE_URL", URL)
     monkeypatch.setenv("OVRLY_EMBED_WORKER", "1")
     assert load_settings().embed_worker
+
+
+def test_retention_defaults_are_opt_in_and_bounds_are_inclusive():
+    defaults = Settings(database_url=URL, _env_file=None)
+    assert defaults.retention_enabled is False
+    assert defaults.retention_data_seconds == 86400
+    assert defaults.retention_tombstone_seconds == 604800
+    for data, tombstone, poll, batch in ((60, 60, 1, 1), (2592000, 7776000, 3600, 1000)):
+        settings = Settings(
+            database_url=URL,
+            _env_file=None,
+            retention_data_seconds=data,
+            retention_tombstone_seconds=tombstone,
+            retention_poll_seconds=poll,
+            retention_batch_size=batch,
+        )
+        assert settings.retention_data_seconds == data
+        assert settings.retention_tombstone_seconds == tombstone
+        assert settings.retention_poll_seconds == poll
+        assert settings.retention_batch_size == batch

@@ -13,6 +13,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
+from services.logging import request_log_id
+
 logger = logging.getLogger(__name__)
 
 Action = Literal["none", "retry", "authenticate", "fix_request", "upload_again"]
@@ -101,6 +103,7 @@ def install(app: FastAPI) -> None:
         request_id = request_id_of(request)
         response = await call_next(request)
         response.headers.setdefault(REQUEST_ID_HEADER, request_id)
+        logger.info("Request %s completed (%d)", request_log_id(request_id), response.status_code)
         return response
 
     @app.exception_handler(ApiError)
@@ -129,7 +132,9 @@ def install(app: FastAPI) -> None:
     @app.exception_handler(SQLAlchemyError)
     @app.exception_handler(TimeoutError)
     async def database_error(request: Request, exc: Exception) -> JSONResponse:
-        logger.warning("Request %s failed: database unavailable", request_id_of(request))
+        logger.warning(
+            "Request %s failed: database unavailable", request_log_id(request_id_of(request))
+        )
         return error_response(
             request,
             503,
@@ -141,7 +146,9 @@ def install(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
-        logger.error("Request %s failed: %s", request_id_of(request), type(exc).__name__)
+        logger.error(
+            "Request %s failed: %s", request_log_id(request_id_of(request)), "INTERNAL_ERROR"
+        )
         return error_response(request, 500, "INTERNAL_ERROR", "An internal error occurred")
 
 

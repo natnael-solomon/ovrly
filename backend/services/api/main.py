@@ -14,6 +14,8 @@ from services.jobs.faults import FaultInjector
 from services.jobs.handlers import JobHandler, default_handlers
 from services.jobs.queue import JobQueue
 from services.jobs.retries import RetryPolicy
+from services.logging import configure_logging
+from services.privacy import RETENTION_STAGE, Retention
 from services.settings import Settings, load_settings
 from services.worker.runtime import Worker
 
@@ -28,17 +30,25 @@ def create_app(
     dispatcher: InvestigationDispatcher | None = None,
     id_token_verifier: IdTokenVerifier | None = None,
 ) -> FastAPI:
+    configure_logging()
     config = settings if settings is not None else load_settings()
     stage_handlers = handlers if handlers is not None else default_handlers()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         database = Database(config)
+        retention = Retention(database, config, app.state.upload_store)
+        active_handlers = dict(stage_handlers)
+        if config.retention_enabled:
+            active_handlers[RETENTION_STAGE] = retention.run
+        else:
+            logger.warning("Retention policy disabled; no automatic deletion")
         worker = (
             Worker(
                 database,
                 config.worker_shutdown_seconds,
-                handlers=stage_handlers,
+                handlers=active_handlers,
+                maintenance=retention.schedule if config.retention_enabled else None,
                 faults=faults,
                 lease_seconds=config.job_lease_seconds,
                 poll_seconds=config.job_poll_seconds,

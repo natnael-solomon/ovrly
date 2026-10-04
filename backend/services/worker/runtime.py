@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import socket
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from uuid import UUID, uuid4
 
@@ -13,6 +13,7 @@ from services.jobs.faults import Checkpoint, FaultInjector, NoFaults
 from services.jobs.handlers import CancellationRequested, JobContext, JobHandler
 from services.jobs.queue import ClaimedJob, JobQueue, Lease, LeaseLost, PublishRejected
 from services.jobs.retries import RetryableError, RetryPolicy, UnknownOutcome
+from services.logging import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,9 @@ class Worker:
         poll_seconds: float = 1,
         retry_policy: RetryPolicy | None = None,
         worker_id: str | None = None,
+        maintenance: Callable[[], Awaitable[None]] | None = None,
     ):
+        configure_logging()
         self.database = database
         self.shutdown_seconds = shutdown_seconds
         self.handlers: Mapping[str, JobHandler] = dict(handlers or {})
@@ -42,6 +45,7 @@ class Worker:
         self.retry_policy = retry_policy if retry_policy is not None else RetryPolicy()
         self.worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}-{uuid4().hex[:8]}"
         self.queue = JobQueue(database)
+        self.maintenance = maintenance
         self._owned: dict[UUID, Lease] = {}
         self._stop = asyncio.Event()
         self._started = asyncio.Event()
@@ -65,6 +69,8 @@ class Worker:
         stages = list(self.handlers)
         logger.info("Worker ready (%s, %d stage handlers)", self.worker_id, len(stages))
         while not self._stop.is_set():
+            if self.maintenance is not None:
+                await self.maintenance()
             job = await self.queue.claim(self.worker_id, stages, self.lease_seconds)
             if job is None:
                 with suppress(TimeoutError):
