@@ -1,0 +1,26 @@
+{
+  "synthetic": true,
+  "description": "queue_retry accepted against an owned job. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "valid",
+    "response": "valid"
+  },
+  "request": {
+    "request_id": "req_synthetic_0004",
+    "action": "queue_retry",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0002"
+    }
+  },
+  "response": {
+    "request_id": "req_synthetic_0004",
+    "result": "accepted",
+    "action": "queue_retry",
+    "target": {
+      "kind": "job",
+      "id": "job_synthetic_0002"
+    },
+    "message": "Retrying the failed check."
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "synthetic": true,
+  "description": "open_check for an investigation id that does not exist. The request is well-formed; the server denies it with VOICE_TARGET_NOT_FOUND. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "valid",
+    "response": "valid",
+    "error_code": "VOICE_TARGET_NOT_FOUND"
+  },
+  "request": {
+    "request_id": "req_synthetic_0104",
+    "action": "open_check",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_missing"
+    }
+  },
+  "response": {
+    "request_id": "req_synthetic_0104",
+    "result": "denied",
+    "action": "open_check",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_missing"
+    },
+    "message": "I could not find that check.",
+    "error": {
+      "code": "VOICE_TARGET_NOT_FOUND",
+      "message": "No investigation with id inv_synthetic_missing is visible to the caller.",
+      "retryable": false,
+      "action": "fix_request",
+      "request_id": "req_synthetic_0104"
+    }
+  }
+}

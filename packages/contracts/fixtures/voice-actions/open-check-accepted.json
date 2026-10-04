@@ -1,0 +1,26 @@
+{
+  "synthetic": true,
+  "description": "open_check accepted against an owned investigation. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "valid",
+    "response": "valid"
+  },
+  "request": {
+    "request_id": "req_synthetic_0001",
+    "action": "open_check",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_0001"
+    }
+  },
+  "response": {
+    "request_id": "req_synthetic_0001",
+    "result": "accepted",
+    "action": "open_check",
+    "target": {
+      "kind": "investigation",
+      "id": "inv_synthetic_0001"
+    },
+    "message": "Opened the check."
+  }
+}

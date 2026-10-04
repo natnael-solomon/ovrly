@@ -184,7 +184,9 @@ produce that check. PostgreSQL and Python setup are not started for docs-only
 changes in this Backend CI workflow; the separate Quality checks job still runs.
 
 The validation job uses Python 3.11, pinned setup-uv, the frozen lockfile, Ruff,
-strict MyPy with the Pydantic plugin, PostgreSQL 16, migration upgrade/drift
+strict MyPy with the Pydantic plugin, the
+[contracts package](../packages/contracts/README.md#validation) validator and
+tests, PostgreSQL 16, migration upgrade/drift
 checks and the real test suite. Only pushes to `main` save uv caches; PRs can read
 them. Dependabot checks the `/backend` uv project weekly with grouped minor/patch
 updates. There are no production secrets or live providers in this workflow.

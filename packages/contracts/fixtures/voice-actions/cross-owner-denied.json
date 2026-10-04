@@ -1,0 +1,34 @@
+{
+  "synthetic": true,
+  "description": "save_report on a report owned by a different caller. The request is well-formed; the server denies it with VOICE_TARGET_NOT_OWNED and does not reveal the owner. Synthetic fixture for the voice-actions contract; no real investigation, report, job or user exists behind these identifiers.",
+  "expect": {
+    "request": "valid",
+    "response": "valid",
+    "error_code": "VOICE_TARGET_NOT_OWNED"
+  },
+  "request": {
+    "request_id": "req_synthetic_0103",
+    "action": "save_report",
+    "target": {
+      "kind": "report",
+      "id": "rep_synthetic_other_owner"
+    }
+  },
+  "response": {
+    "request_id": "req_synthetic_0103",
+    "result": "denied",
+    "action": "save_report",
+    "target": {
+      "kind": "report",
+      "id": "rep_synthetic_other_owner"
+    },
+    "message": "That report is not yours to save.",
+    "error": {
+      "code": "VOICE_TARGET_NOT_OWNED",
+      "message": "The caller does not own report rep_synthetic_other_owner.",
+      "retryable": false,
+      "action": "none",
+      "request_id": "req_synthetic_0103"
+    }
+  }
+}
