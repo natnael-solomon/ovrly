@@ -711,106 +711,23 @@ semantic fidelity and extraction recall require a separate model evaluation.
 The schema records uncertain attribution/context but does not verify their
 truth. Approximate envelopes remain source metadata, not generated word timing.
 
-### BE-01 provider and hosting decisions
+### Provider, hosting and BE-08 decisions
 
-Decision update: **2026-10-04**, including the user's later removal of Gemini
-and instruction to close BE-01 with hosting/account compatibility assumed.
-These are BE-01 research decisions, not deployed adapters or amendments to the
-shared production contract. Raw account evidence, requests, transcripts,
-permission records and recordings remain local and ignored.
+The provider order (Scholarxiv `auto:cheap`, then Groq `openai/gpt-oss-20b`
+as the only claim fallback; Gemini not selected), the EthioDeploy Free hosting
+choice, the limited BE-08 development go and the account, entitlement and
+hosting evidence behind them are recorded in
+[BC-D03](../docs/decisions/BC-D03-provider-hosting.md). That record is
+Proposed: authored from this experiment by Neb-iyu (BE-01 owner) on
+2026-10-04 and awaiting confirmation by the product owner, natnael-solomon.
+This README keeps the runner, its inputs and the measurement procedure. The
+original #11 checklist also cites BC-D04; that reference does not redefine the
+canonical [BC-D04 Voxide decision](../docs/decisions/BC-D04-voxide-route.md).
+No provider switching has been added to the API, worker or this runner;
+adapter orchestration belongs to BE-08 and must keep the same validation
+contract on every route.
 
-The original #11 checklist associates this evidence with BC-D03 / BC-D04.
-Those issue references do not redefine the canonical
-[BC-D04 Voxide decision](../docs/decisions/BC-D04-voxide-route.md).
-Cross-cutting decision records follow the [decision log](../docs/decisions/README.md).
-
-| Stage | Selected order | Verification and boundary |
-| --- | --- | --- |
-| Claim extraction | Scholarxiv `auto:cheap`, then Groq `openai/gpt-oss-20b` with `strict: true` JSON Schema | Groq is the only selected fallback. It accepts the experimental schema but still makes semantic/source-reference errors. Gemini was removed by the user; there is no selected second fallback. |
-| Speech-to-text | Groq Whisper candidates, separately from the claim fallback chain | `whisper-large-v3` and `whisper-large-v3-turbo` both transcribed the authorized non-social development excerpt. This does not select an ASR fallback chain. |
-| Hosting | EthioDeploy Free Web Service with embedded background work and Postgres | Selected by the user; project/addon provisioning and deployment are not verified. The durable job engine and local recovery coverage are described above; hosted recovery is not verified. |
-
-Neither Gemini nor OpenRouter is part of the selected chain. No provider switching
-has been added to the API, worker or fixed Scholarxiv comparison runner; actual
-adapter orchestration belongs to BE-08. Production integration must preserve the
-same validation contract on every route, report which provider/model answered,
-and surface exhausted/unavailable routes as errors, never as an empty successful
-extraction. Provider selection alone does not authorize sending real data to
-another provider. [Groq's structured-output support](https://console.groq.com/docs/structured-outputs)
-is not a semantic-quality guarantee.
-
-For BE-08, validate JSON, required fields, source IDs/roles/spans, finish reason
-and semantic fidelity independently of provider guarantees. Bound repairs and
-retries, respect rate-limit cooldowns, and retain failure diagnostics. A fallback
-does not automatically detect plausible but unsupported claims; the present
-structural validator is not a semantic detector. Groq serving both ASR and claim
-extraction also leaves both stages dependent on one provider.
-
-Account and entitlement evidence, checked 2026-10-03/04:
-
-| Item | Observation | Remaining limitation |
-| --- | --- | --- |
-| Scholarxiv keys/profile | User confirms separate backend/experiment keys and no Free dashboard model-selection controls | Account-wide cost ceiling is not established; this is user-reported configuration, not a dashboard audit |
-| Router plan boundary | Authenticated cheap completion succeeded; paid-model probe returned 403 | Historical access does not guarantee future availability or remaining quota |
-| Undocumented JSON mode | Compared with/without `response_format: {"type":"json_object"}`; fenced output still occurred | Unsupported behavior, not a correctness guarantee or production dependency |
-| Papers | Authenticated title and advanced search succeeded; federated search returned 403 on Free | Live federated partial failure cannot be reproduced with this account |
-| Groq strict output | Current v2 schema accepted by GPT-OSS 20B; local validation caught a span error | Strict JSON does not guarantee grounding, rejection stance, or hypothetical framing |
-| Whisper | Two HTTP 200 responses with nonempty transcripts and seven timestamped segments each on one 31.819 s excerpt | English sample only; account dashboard, no-card status and upload-cap boundary not tested |
-| Sponsor offers | Public STARK sponsors/prizes pages advertise participant Voxide sessions; Scholarxiv/EthioDeploy paid perks are winner offers | Credit allocation, expiry and restrictions are not established by the offer; do not budget winner perks as current Free entitlement |
-
-The [Papers federated-search documentation](https://www.scholarxiv.com/developers/docs/papers-api/federated-search.md)
-states that a failed source reports `{count: 0, hasMore: false}` instead of
-failing the entire request. That can be indistinguishable from genuine empty
-results. Do not infer "no evidence exists" from it. A provider-confirmed replay
-or an authorized Go+ account is needed for live reproduction; a mocked failure
-would be client-test evidence only. No upgrade or induced upstream outage is
-part of this work.
-
-Open-access routes have positive access evidence, with per-article licensing:
-
-| Route/sample | Result | License and scope |
-| --- | --- | --- |
-| [arXiv 2501.10868](https://arxiv.org/abs/2501.10868), abstract and PDF | HTTP 200; bounded complete PDF download with signature/EOF checks | Article links CC BY 4.0; not a universal arXiv license or passage-extraction test |
-| [Europe PMC PMC3258128 full text](https://www.ebi.ac.uk/europepmc/webservices/rest/PMC3258128/fullTextXML) | HTTP 200; article body and 40 paragraph tags present | Article permissions specify CC BY-NC 3.0; attribution and noncommercial restrictions apply |
-| Unpaywall lookup for DOI `10.1093/nar/gkr715` | HTTP 200; OA location and publisher PDF link returned using an authorized contact email | `cc-by-nc`; metadata discovery is not proof that every linked PDF is accessible or reusable |
-
-The Whisper input was a roughly 1.02 MB, 16 kHz mono WAV derived from the
-non-social development clip, with source hashes and CC BY 4.0 attribution
-retained locally. Both responses matched the 90-word subtitle reference after
-case/punctuation normalization except `favor` versus `favour`. This is subtitle
-agreement, not independently certified WER. Single request times were 11.2 s
-and 14.8 s respectively; they do not establish a model speed ranking.
-[Groq's speech-to-text documentation](https://console.groq.com/docs/speech-to-text)
-lists a 25 MB Free upload cap; the small test does not verify that boundary or
-the account's audio quotas.
-
-EthioDeploy's background-work and quota answers were supplied by the user,
-not independently authenticated support correspondence:
-
-- One Free project; web container 256 MB RAM / 0.5 CPU; 50 GB-hours and
-  20 CPU-hours monthly.
-- Web sleep occurs after 30 minutes without incoming HTTP. Outbound requests
-  and CPU work do not reset it; sleep kills in-progress jobs. Polling resets
-  the timer but is not a durability guarantee.
-- Postgres is separate compute: 256 MB RAM / 0.25 CPU and 512 MB total storage,
-  not charged against the web compute quota.
-
-Use external inference rather than local Whisper/LLM weights in this web
-container. Persist job state/checkpoints, make processing idempotent, and recover
-unfinished jobs on startup. A sub-30-minute job is not protected from crashes,
-OOM, restarts or quota exhaustion. Public
-[billing docs](https://ethiodeploy.com/docs/billing) also state that Free quota
-exhaustion stops a project until the next month. The HTTP body limit, HTTP
-timeout, region and web disk allowance remain unanswered; no default is assumed.
-
-### RFC-D31: measured result and limited go
-
-On 2026-10-04 the user accepted **a limited go for BE-08 development**, using
-the proposed **at least 90% post-single-repair structural-validity gate**, the
-selected fallback order, and explicit deferral of the unfinished model
-comparison. This does not approve production accuracy or declare every BE-01
-check complete. Historical run summaries retain `pending_team_approval`;
-this later decision supplements them rather than rewriting them.
+### Measured result (local run)
 
 The fixed v2 prompt/schema were measured on 50 authorized real development
 windows from seven sources, with temperature 0 and `max_tokens: 8192`.
@@ -835,57 +752,35 @@ The final recovery left 399 cases unattempted in that recovery sequence.
 They are explicitly deferred, not passed. Earlier synthetic runs used a
 different 2048-token ceiling and cannot be pooled with these measurements.
 
+The figures in this table come from an uncommitted local run. Its recordings
+live under ignored `.scratch/router/<run-id>/` (manifest, `attempts.jsonl`,
+`results.json` and `summary.json`) and are not in the repository, so a reviewer
+cannot verify them from this checkout. Before BC-D03 moves from Proposed to
+Accepted, a redacted metrics-only `summary.json` (no transcripts, requests or
+responses) or the run id together with the manifest SHA-256 and summary
+SHA-256 must be committed and linked from the record. Run summaries keep
+`decision: pending_team_approval`; the proposed go in BC-D03 supplements them
+rather than rewriting them.
+
 Semantic review found missed claims, incorrect rejection/negation, and
 hypothetical context promoted to fact, including in structurally valid output.
 Quote-reference and prompt-revision pilots did not establish a consistent
 held-aside improvement and were not adopted. Their provisional reference labels
 are agent-authored, not independent human gold.
 
-A separate current-contract **direct Groq** synthetic precheck made five HTTP
-requests: four 200s and one 429. Negation passed; a rejected-quotation response
-failed span bounds, then its repair was rate-limited. After the cooldown, a
-separately recorded continuation repaired the bounds and tested hypothetical
-context. Both passed structural checks but still misrepresented source meaning:
-the rejection was lost, its citation narrowed to an insufficient fragment,
-and explicit hypothetical context was ignored. Thus access/schema compatibility
-is verified, not semantic readiness. The original 429 and failures are retained.
+Cassettes stay local; fixture publication requires rights and privacy review
+and explicit authorization. No real transcripts or account identifiers have
+been promoted into committed fixtures.
 
-### User-directed closure and retained limitations
+Offline validation of this runner is the focused command above, which passed
+212 tests on 2026-10-04 from `backend/`:
 
-On 2026-10-04 the user instructed closure of #11, removed Gemini, and accepted
-hosting and account compatibility **as assumptions without further evidence**.
-This supersedes the earlier requirement to keep BE-01 open for those checks.
-It does not establish missing facts, erase failed experiments, or approve
-production reliability. The limited development go and previously approved
-comparison deferral remain unchanged.
+```sh
+uv run --frozen pytest -q tests/test_router_experiment.py tests/test_extraction_contract.py
+```
 
-The following remain unverified or undelivered despite the closure instruction:
-
-- Groq's dated live Limits dashboard and no-card account status are unverified.
-  The probe observed an 8,000 TPM rejection; response headers are not a substitute
-  for all request/token/audio limits on the account.
-- EthioDeploy Free project/addon confirmation and the unanswered hosting limits
-  above are assumed suitable for planning, not measured or provider-confirmed.
-- Papers partial-failure reproduction remains Free-plan blocked. Do not mark
-  documentation or a mocked response as live reproduction.
-- Cassettes are saved locally; fixture publication requires rights/privacy
-  review and explicit authorization. No real transcripts or account identifiers
-  have been promoted into committed fixtures.
-- At issue closure, the experiment changes were local and uncommitted.
-  Repository delivery is a separate step requiring authorized commit/push/PR,
-  required CI and another developer's review. Issue closure alone does not
-  authorize these actions or satisfy those requirements.
-
-Gemini account/model/schema checks are no longer in the selected scope. No
-upgrade, deployment, new transcript upload or public cassette release is implied
-by accepting the account/hosting assumptions.
-
-Local validation on 2026-10-04: 267 backend tests passed against the pinned
-PostgreSQL 16 container, including migration/lifecycle tests; Ruff lint/format,
-strict MyPy and source/wheel builds passed. WSL could not reach Docker's
-published loopback port, so the full suite ran in a temporary Python 3.11
-container sharing the database container's network namespace. These are local
-results, not a required-CI result or a newly measured coverage comparison.
+The full PostgreSQL suite, migrations and the coverage comparison against
+`main` run in **Backend checks**; see [Local checks](#local-checks).
 
 ## Stack record and boundaries
 
@@ -895,7 +790,8 @@ Python 3.11, uv, FastAPI/Uvicorn, PostgreSQL 16, SQLAlchemy asyncio/Psycopg and
 Alembic, with a single Python codebase for API and worker. The issue associates
 this stack with `BC-D03` / `RFC-D41-D43`. This records the implemented stack,
 not approval of the remaining infrastructure or hosting decisions. The full
-decision-log task remains #5; provider/hosting evidence remains #11 and #21.
+decision-log task remains #5; provider/hosting evidence is proposed in
+[BC-D03](../docs/decisions/BC-D03-provider-hosting.md) and continues in #21.
 
 Keep provider credentials and private media out of Git; future media uploads
 require explicit consent and a retention policy. No hosting entitlement or
