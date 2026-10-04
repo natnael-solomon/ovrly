@@ -1,0 +1,46 @@
+{
+  "synthetic": true,
+  "description": "Media validation rejected the input (non-retriable), so the investigation failed with the stored subset of the shared error shape and no report. A failure is never a finding: there are no claims, evidence or assessments to read. Synthetic fixture.",
+  "expect": {
+    "payload": "valid",
+    "processing_status": "failed",
+    "state": "failed",
+    "claim_count": 0,
+    "assessment_count": 0,
+    "error_code": "MEDIA_UNSUPPORTED"
+  },
+  "investigation": {
+    "id": "00000000-0000-4000-8000-000000000003",
+    "state": "failed",
+    "stage": "media_validation",
+    "coverage": {
+      "status": "not_started",
+      "covered_ms": null,
+      "total_ms": null
+    },
+    "version": 1,
+    "error": {
+      "code": "MEDIA_UNSUPPORTED",
+      "message": "Processing failed",
+      "retryable": false
+    },
+    "source": {
+      "kind": "url",
+      "url": "https://video.example/synthetic/clip-0001"
+    },
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:00:08Z",
+    "processing_status": "failed",
+    "job": {
+      "id": "00000000-0000-4000-8000-000000000103",
+      "state": "failed",
+      "stage": "media_validation",
+      "cancel_requested": false,
+      "attempts": 1,
+      "retry_class": "non_retriable_input",
+      "available_at": "2026-10-04T12:00:00Z",
+      "updated_at": "2026-10-04T12:00:08Z"
+    },
+    "report": null
+  }
+}

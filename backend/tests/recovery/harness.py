@@ -8,7 +8,7 @@ import httpx
 import pytest
 from sqlalchemy import select, text
 
-from services.api.auth import load_owned, owned_rows
+from services.api.auth import Principal, load_owned, owned_rows
 from services.api.auth.dependency import create_guest_principal
 from services.api.errors import ApiError
 from services.api.main import create_app
@@ -124,12 +124,14 @@ class Harness:
         self.databases.append(database)
         return database
 
-    def worker(self, handler, *, faults=None, worker_id=None, retry_policy=None, **overrides):
+    def worker(
+        self, handler, *, faults=None, worker_id=None, retry_policy=None, stages=None, **overrides
+    ):
         settings = self.settings(**overrides)
         worker = Worker(
             self.database(**overrides),
             settings.worker_shutdown_seconds,
-            handlers={self.stage: handler},
+            handlers=stages if stages is not None else {self.stage: handler},
             faults=faults,
             lease_seconds=settings.job_lease_seconds,
             poll_seconds=settings.job_poll_seconds,
@@ -139,10 +141,11 @@ class Harness:
         self.workers.append(worker)
         return worker
 
-    def app(self, handler, *, faults=None, **overrides):
+    def app(self, handler, *, faults=None, stages=None, **overrides):
+        """Embedded-worker app; ``stages`` replaces the test stage with real handlers."""
         return create_app(
             self.settings(embed_worker=True, **overrides),
-            handlers={self.stage: handler},
+            handlers=stages if stages is not None else {self.stage: handler},
             faults=faults,
         )
 
@@ -196,6 +199,22 @@ class Harness:
                 if record is not None and record.status.state in states:
                     return record
                 await asyncio.sleep(0.02)
+
+    async def job_id_for(self, key):
+        """The job created under a stage key by production code, such as the intake hand-off."""
+        async with self.control.engine.connect() as connection:
+            return await connection.scalar(
+                select(jobs.c.id).where(
+                    jobs.c.version == key.version,
+                    jobs.c.stage == key.stage,
+                    jobs.c.input_hash == key.input_hash,
+                )
+            )
+
+    async def wait_for_state_by_key(self, key, *states, seconds=5):
+        job_id = await self.job_id_for(key)
+        assert job_id is not None, f"No job exists for stage key {key}"
+        return await self.wait_for_state(job_id, *states, seconds=seconds)
 
     async def wait_until(self, predicate, seconds=5):
         async with asyncio.timeout(seconds):
@@ -254,9 +273,18 @@ class Harness:
         return record
 
     async def assert_no_cross_owner_read(self, job_id):
+        """The job's recorded owner can load it; the outsider can neither read nor mutate it.
+
+        Jobs enqueued by ``self.enqueue`` belong to ``self.owner``; jobs the production
+        intake dispatcher created belong to the API guest that recorded the investigation.
+        Either way the row must carry an owner and that owner must not be the outsider.
+        """
         async with self.control.engine.connect() as connection:
-            owner = await load_owned(connection, jobs, job_id, self.owner)
-            assert owner.owner_id == self.owner.id
+            row = (await connection.execute(select(jobs).where(jobs.c.id == job_id))).one()
+            assert row.owner_id is not None, "Every job in the recovery suite has an owner"
+            assert row.owner_id != self.outsider.id
+            owner = Principal(id=row.owner_id, kind="guest")
+            assert (await load_owned(connection, jobs, job_id, owner)).owner_id == owner.id
             assert (
                 await connection.execute(owned_rows(jobs, self.outsider).where(jobs.c.id == job_id))
             ).first() is None

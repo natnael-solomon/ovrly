@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "description": "A completion request carrying a field. The body is pinned empty so a future field is a visible contract change. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "upload-complete-request.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "force"
+  },
+  "payload": {
+    "force": true
+  }
+}

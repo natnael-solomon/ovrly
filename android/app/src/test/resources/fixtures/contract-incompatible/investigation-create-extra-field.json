@@ -1,0 +1,16 @@
+{
+  "synthetic": true,
+  "description": "A create request with a field the schema does not define. The server validates with additionalProperties false, so the client rejects it before sending. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "investigation-create-request.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "priority"
+  },
+  "payload": {
+    "source": {
+      "kind": "url",
+      "url": "https://video.example/synthetic/clip-0001"
+    },
+    "priority": "high"
+  }
+}

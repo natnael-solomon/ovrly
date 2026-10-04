@@ -1,0 +1,123 @@
+{
+  "synthetic": true,
+  "description": "A complete check whose only claim could not be settled: one retracted study read at abstract level and one metadata-only news item, both related as insufficient, so the overall assessment is insufficient_evidence. That describes the evidence, not the claim's truth, and is distinct from processing failure. Synthetic fixture.",
+  "expect": {
+    "payload": "valid",
+    "processing_status": "complete",
+    "state": "completed",
+    "claim_count": 1,
+    "assessment_count": 1
+  },
+  "investigation": {
+    "id": "00000000-0000-4000-8000-000000000005",
+    "state": "completed",
+    "stage": "publication",
+    "coverage": {
+      "status": "complete",
+      "covered_ms": 42000,
+      "total_ms": 42000
+    },
+    "version": 1,
+    "error": null,
+    "source": {
+      "kind": "url",
+      "url": "https://video.example/synthetic/clip-0001",
+      "duration_ms": 42000
+    },
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:04:00Z",
+    "processing_status": "complete",
+    "job": {
+      "id": "00000000-0000-4000-8000-000000000105",
+      "state": "published",
+      "stage": "publication",
+      "cancel_requested": false,
+      "attempts": 1,
+      "retry_class": null,
+      "available_at": "2026-10-04T12:00:00Z",
+      "updated_at": "2026-10-04T12:04:00Z"
+    },
+    "report": {
+      "id": "rpt_synthetic_0005_v1",
+      "investigation_id": "00000000-0000-4000-8000-000000000005",
+      "version": 1,
+      "created_at": "2026-10-04T12:04:00Z",
+      "provisional": false,
+      "change_summary": "First published version: all eligible media checked.",
+      "supersedes": null,
+      "claims": [
+        {
+          "id": "clm_synthetic_0005",
+          "occurrence_id": "occ_synthetic_0005",
+          "interval": {
+            "start_ms": 2000,
+            "end_ms": 7500,
+            "timebase": "media"
+          },
+          "modality": "both",
+          "original_text": "this one supplement doubles your reaction speed in a week",
+          "proposition": "Taking this supplement for one week doubles reaction speed.",
+          "correction": null
+        }
+      ],
+      "evidence": [
+        {
+          "id": "evd_synthetic_0005",
+          "claim_id": "clm_synthetic_0005",
+          "source": {
+            "id": "src_synthetic_0005",
+            "title": "Synthetic source 5",
+            "publisher": "Synthetic Publisher",
+            "url": "https://sources.example/synthetic/0005",
+            "published_at": "2024-04-17T12:00:00Z"
+          },
+          "source_type": "peer_reviewed",
+          "inspection_level": "abstract_only",
+          "retrieval_relevance": "medium",
+          "retraction_status": "retracted",
+          "excerpt": null,
+          "retrieved_at": "2026-10-04T12:02:00Z"
+        },
+        {
+          "id": "evd_synthetic_0006",
+          "claim_id": "clm_synthetic_0005",
+          "source": {
+            "id": "src_synthetic_0006",
+            "title": "Synthetic source 6",
+            "publisher": "Synthetic Publisher",
+            "url": "https://sources.example/synthetic/0006",
+            "published_at": null
+          },
+          "source_type": "news",
+          "inspection_level": "metadata_only",
+          "retrieval_relevance": "low",
+          "retraction_status": "none",
+          "excerpt": null,
+          "retrieved_at": "2026-10-04T12:02:00Z"
+        }
+      ],
+      "assessments": [
+        {
+          "id": "asm_synthetic_0005",
+          "claim_id": "clm_synthetic_0005",
+          "version": 1,
+          "relations": [
+            {
+              "evidence_id": "evd_synthetic_0005",
+              "relation": "insufficient",
+              "note": "The only study found was retracted; its abstract cannot carry the claim."
+            },
+            {
+              "evidence_id": "evd_synthetic_0006",
+              "relation": "insufficient",
+              "note": "Only the headline was inspected and it does not address reaction speed."
+            }
+          ],
+          "overall": "insufficient_evidence",
+          "provisional": false,
+          "summary": "No sound evidence was found for or against this claim; it remains unverified."
+        }
+      ]
+    }
+  }
+}

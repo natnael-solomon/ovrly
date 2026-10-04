@@ -1,9 +1,29 @@
 # Evaluation contract and review workflow
 
-**Status: contract plus a provisional eleven-clip draft.**
+**Status: contract, a provisional eleven-clip draft and a rights-pending
+local snapshot. The RES-01 frozen corpus is still pending.**
+[`corpus-local/`](corpus-local/README.md), version
+`res01-local-frozen-2026-10-04`, is a locally validated reduced-scope snapshot
+(`kind: frozen-local`, validated with `--frozen-local`). It preserves the
+7 dev / 4 test split, 259 original occurrences and 264 final decisions. Every
+clip row still records `rights.clearance: pending`, every coverage array is
+unconfirmed and every pass and adjudication remains `provisional`. The owner
+accepted the clip selection for local use on 2026-10-04; rights clearance,
+credits and permission evidence remain pending per the clip rows. It is not
+the RES-01 frozen corpus, and `--frozen` rejects it by design.
+
+The following snapshots are historical, not outstanding approval requests:
+[`freeze-candidate/`](freeze-candidate/README.md) is the preceding content
+revision: 106 social speech intervals reconciled, four EPI inset assertions and
+a qualitative meme premise added, and the AP/clip-f questions resolved. It
+retains its draft status; the subsequent owner acceptance is in `corpus-local/`.
+[`reviewed-draft/`](reviewed-draft/README.md) records the 2026-10-04 user
+confirmations for d/k/i/m and supplied-card reconciliation. It preserves the
+historical draft and does not constitute a frozen corpus.
 [RES-06](https://github.com/natnael-solomon/ovrly/issues/65) adds
 [`draft/`](draft/README.md) to the infrastructure delivered by
-[RES-05](https://github.com/natnael-solomon/ovrly/issues/48). It does not complete
+[RES-05](https://github.com/natnael-solomon/ovrly/issues/48). Neither it nor
+the local snapshot completes
 [RES-01](https://github.com/natnael-solomon/ovrly/issues/8).
 `examples/` contains invented text, not clips, consent, independent human
 judgments, or measured results. Neither examples nor draft validation yields
@@ -20,6 +40,12 @@ python evaluation/validate.py
 python -m unittest discover -s evaluation/tests -p "test_*.py" -v
 python evaluation/validate.py evaluation/draft --draft
 python evaluation/validate.py evaluation/draft --draft --media-root evaluation/media
+python evaluation/validate.py evaluation/reviewed-draft --draft
+python evaluation/validate.py evaluation/reviewed-draft --draft --media-root evaluation/media
+python evaluation/validate.py evaluation/freeze-candidate --draft
+python evaluation/validate.py evaluation/freeze-candidate --draft --media-root evaluation/media
+python evaluation/validate.py evaluation/corpus-local --frozen-local
+python evaluation/validate.py evaluation/corpus-local --frozen-local --media-root evaluation/media
 python evaluation/validate.py evaluation/corpus --frozen
 python evaluation/validate.py evaluation/corpus --frozen --media-root evaluation/media
 ```
@@ -28,11 +54,11 @@ The last two commands require the future `evaluation/corpus/`. Without `--media-
 
 | File | Content |
 | --- | --- |
-| `dataset.json` | Schema version, dataset version, `examples`/`draft`/`frozen` kind, byte hashes of all included JSONL files; explicit limitations required for drafts |
+| `dataset.json` | Schema version, dataset version, `examples`/`draft`/`frozen`/`frozen-local` kind, byte hashes of included JSONL files; explicit limitations required for drafts and local snapshots |
 | `clips.jsonl` | One clip per line: provenance, rights, language, duration/style, grouping, split, media identity, coverage |
 | `annotations.jsonl` | Exactly one whole-clip occurrence annotation pass per clip, with occurrence IDs and explicit review provenance |
 | `adjudications.jsonl` | One final review per clip, referencing its sole pass, with reviewer provenance, original-to-reference mapping and resolution notes |
-| `main-arguments.jsonl` | Required for drafts, optional otherwise: exactly one separately attributed assessment per clip, original human note where present, evidence and source-reading limits |
+| `main-arguments.jsonl` | Required for drafts and local snapshots, optional otherwise: exactly one separately attributed assessment per clip, original human note where present, evidence and source-reading limits |
 
 Version-2 JSON Schemas are in `schemas/`. Record-format and validator-maintenance details follow the review process below.
 
@@ -85,7 +111,7 @@ pass may also use `false` when it was not independent or model-blind. Software
 checks declared consistency, not the truth of the review history.
 
 The pass lists every candidate factual occurrence and relevant exclusions.
-Outside draft mode, an empty `occurrences` array means the recorded workflow
+In full-coverage frozen mode, an empty `occurrences` array means the recorded workflow
 reviewed the whole clip and found none. A provisional empty draft does not
 certify this; a missing pass never means no claims. Keep repeated occurrences
 rather than deduplicating them before review.
@@ -132,7 +158,7 @@ reference for an adjudicator-discovered occurrence; explicitly explain discoveri
 reference multiple occurrences; splits may reuse an original reference across
 gold decisions, with an explanation. Use a common `proposition_id` and identical
 normalized text for repeated occurrences of the same proposition in a clip.
-Outside a provisional draft, an empty `decisions` array plus `review_note`
+Outside preserved provisional records, an empty `decisions` array plus `review_note`
 confirms reviewed no-claim gold.
 The `no-assessable-claims` tag must agree with the final eligible decisions.
 
@@ -177,10 +203,18 @@ not that the clip has none of the listed scenarios.
 Both pass and adjudication require `review_status: provisional|complete`.
 Keep provisional status whenever whole-media review is incomplete, even after
 reconciling every supplied row. `language: unverified` and occurrence
-`modality: unverified` are draft-only values; a complete review cannot certify
+`modality: unverified` are provisional-record values; a complete review cannot certify
 unknown modality or unknown clip language. A provisional pass or adjudication
 cannot use the `no-assessable-claims` coverage tag, even with zero decisions.
 The `user-reported-negative` main-argument basis is likewise unconfirmed.
+
+`user-confirmed-negative` separately records an explicit user confirmation of
+no assessable claims, with its provenance and remaining limitations. It requires
+no eligible final decisions. It does not make an original provisional pass
+complete, certify language or rights, or automatically add the whole-review
+`no-assessable-claims` coverage tag. A later revision can therefore record a
+confirmed negative without rewriting the original pass or pretending the entire
+clip has freeze approval.
 
 Every draft source occurrence requires a `source` object (opaque reference,
 SHA-256 and source units), and both originals and decisions require
@@ -190,15 +224,50 @@ prove accurate transcription or visibility; the validator does not possess
 or verify those source files. Corrected input hashes belong in resolution
 notes while the original pass retains the input hash used to draft it.
 
-Frozen validation still rejects pending rights/credits, provisional review,
+Full-coverage `--frozen` validation still rejects pending rights/credits, provisional review,
 unverified language/modality, provisional timing bases and an unconfirmed
 negative assessment. It still requires all coverage scenarios and 10-20 clips.
 Do not promote a draft by deleting limitations or changing flags: complete the
 underlying review, retain the historical draft, then create a new snapshot
 with documented corrections and approvals. Neither schema validation nor
 the word "complete" can attest that a person actually performed that work.
+`frozen-local` below is a separately named snapshot kind that applies the
+draft rules to preserved rows; it does not promote a draft and does not
+satisfy section 5.
 
-## 5. Freeze and hand off the real corpus
+## Owner-accepted local snapshot
+
+Use `kind: frozen-local` with the explicit `--frozen-local` command for the
+reduced-scope local evaluation snapshot whose clip selection the project owner
+accepted for local use. This is a distinct mode, never automatic fallback from
+strict validation, and it is not the RES-01 freeze. It requires 10-20 real
+clips, the exact accepted clip list, a timezone-bearing acceptance date, the
+private rights-checklist hash, source-manifest hash, the schema constant
+`credits_signoff: approved` and explicit limitations. That constant is a
+schema requirement, not evidence that credits were completed; the clip rows
+record the actual rights and credit state. The recorded scope is fixed to local
+evaluation without training, hosted processing or redistribution.
+
+This mode retains original review statuses and timing/language limitations
+instead of rewriting history. It applies the draft provenance checks to the
+preserved rows, so pending rights, provisional reviews, unverified language
+and empty coverage arrays pass, and additionally requires known final
+modalities and explicit user-confirmed negative assessments for clips with no
+eligible decisions. Integrity, media containment/hashes, all-occurrence
+traceability and split isolation remain mandatory. Coverage is accepted as
+recorded; missing or unconfirmed slices cannot be claimed as evaluated.
+
+The acceptance is the project owner's agreement to use this fixed set
+locally, not a rights clearance, a third-party license or a claim of
+independent review. Rights clearance, credits and permission evidence remain
+pending per the clip rows until they are completed and recorded there. The
+schema cannot verify the truth of the underlying private evidence.
+`freeze_approval` is required only in this mode and rejected in all others.
+Keep the snapshot immutable and preserve its private acceptance receipt;
+changes need a new version. A valid `--frozen-local` result is not benchmark
+certification and does not close RES-01.
+
+## 5. Full-coverage freeze and handoff
 
 1. Supply 10-20 rights-cleared English clips, both route types as suitable, all coverage tags and nonempty isolated dev/test splits. Obtain human sign-off on provenance, coverage and near-duplicate isolation.
 2. Complete one provenance-labeled pass and final adjudication for every clip. Preserve original decisions and correction history; do not reuse synthetic examples as real annotations or claim review that did not occur.
@@ -206,9 +275,16 @@ the word "complete" can attest that a person actually performed that work.
 4. Run strict metadata validation and then validation with `--media-root`. Record commands, outcomes, dataset version, rights/review sign-off and repository commit. Successful checks are not freeze approval or measured accuracy/latency.
 5. Freeze the files together in a reviewed PR. Corrections require a new version, change history and re-review. Do not refresh hashes to conceal edits; hashes detect inconsistency, not deliberate rewrites.
 
-CI tests the validator, examples and draft metadata, plus frozen metadata when `evaluation/corpus/` exists. It fetches no media and runs no models. Keep holdout labels out of prompt tuning and routine regression. RES-03 will score dev in CI; formal held-out evaluation requires separate authorization.
+CI tests the validator, examples, historical draft, review revision, candidate and local snapshot metadata,
+plus frozen metadata when `evaluation/corpus/` exists. It fetches no media and
+runs no models. Keep holdout labels out of prompt tuning and routine regression.
+RES-03 will score dev in CI; formal held-out evaluation requires separate authorization.
 
-There is no scoring harness, threshold, ASR/OCR benchmark or network service here. RES-01 closes only when the reviewed set is delivered. RES-06 delivers the reduced-scope draft, not the parent freeze or pipeline.
+There is no scoring harness, threshold, ASR/OCR benchmark or network service here.
+RES-01 closes only when the reviewed set is delivered through this section's
+steps. The `frozen-local` snapshot is a reduced-scope local reference with
+pending rights; it is not that delivery. RES-06 remains the historical draft
+delivery.
 
 ## Record format and validator maintenance
 

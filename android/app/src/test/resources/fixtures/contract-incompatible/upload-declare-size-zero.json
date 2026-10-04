@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "description": "An upload declaration of zero bytes. size_bytes must be positive. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "upload-declare-request.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "size_bytes"
+  },
+  "payload": {
+    "size_bytes": 0,
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "content_type": "video/mp4"
+  }
+}

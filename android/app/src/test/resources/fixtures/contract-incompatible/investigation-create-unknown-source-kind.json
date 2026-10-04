@@ -1,0 +1,15 @@
+{
+  "synthetic": true,
+  "description": "A create request whose source kind is a value outside the union. Requests are strict: an unknown discriminator is rejected, never mapped to UNKNOWN and sent. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "investigation-create-request.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "source.kind"
+  },
+  "payload": {
+    "source": {
+      "kind": "stream",
+      "url": "https://video.example/synthetic/clip-0001"
+    }
+  }
+}

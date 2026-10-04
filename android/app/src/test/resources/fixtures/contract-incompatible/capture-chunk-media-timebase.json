@@ -1,0 +1,23 @@
+{
+  "synthetic": true,
+  "description": "A chunk acknowledgement whose interval is on the media timebase. Capture intervals must use the capture timebase. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "capture-chunk.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "capture"
+  },
+  "payload": {
+    "session_id": "00000000-0000-4000-8000-000000000951",
+    "seq": 2,
+    "interval": {
+      "start_ms": 20000,
+      "end_ms": 30000,
+      "timebase": "media"
+    },
+    "size_bytes": 401408,
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "disposition": "stored",
+    "received_at": "2026-10-04T12:00:00Z",
+    "gaps": []
+  }
+}

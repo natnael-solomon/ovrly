@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). POST /v1/uploads/{id}/complete takes no body today; this schema pins that so a future field is a visible contract change.",
+  "title": "UploadCompleteRequest",
+  "description": "Request body for POST /v1/uploads/{id}/complete. Empty: the server re-reads the stored bytes and compares them with the declaration. A client may send no body or an empty JSON object; any field is a validation error.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}

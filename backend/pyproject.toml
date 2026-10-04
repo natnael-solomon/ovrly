@@ -6,6 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.16,<2",
     "fastapi>=0.115,<1",
+    "google-auth[requests]>=2.40,<3",
+    "httpx>=0.28,<1",
     "psycopg[binary]>=3.2,<4",
     "pydantic-settings>=2.8,<3",
     "sqlalchemy[asyncio]>=2.0,<3",
@@ -15,7 +17,6 @@ dependencies = [
 [dependency-groups]
 dev = [
     "coverage>=7.10,<8",
-    "httpx>=0.28,<1",
     "hypothesis>=6.100,<7",
     "mypy>=1.15,<3",
     "pytest>=8,<10",
@@ -27,6 +28,10 @@ quality = [
     "pip-audit==2.10.1",
     "pre-commit==4.6.2",
     "zizmor==1.30.1",
+]
+# Contract checks only: validates packages/contracts/openapi.json. Not a runtime dependency.
+contracts = [
+    "openapi-spec-validator>=0.7,<1",
 ]
 
 [build-system]

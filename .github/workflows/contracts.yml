@@ -1,0 +1,219 @@
+name: Contract CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contracts-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  OASDIFF_VERSION: '1.33.0'
+  OASDIFF_SHA256: 43a4e328e2d13ba1552d760aa68d2485c75c5621f309f6ff64ae895188345247
+  SPECTRAL_VERSION: '6.17.0'
+
+jobs:
+  server:
+    name: Validate contract (server)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.9.21'
+          python-version: '3.11'
+          working-directory: backend
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+          save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      - name: Install locked dependencies
+        working-directory: backend
+        run: uv sync --frozen --group contracts
+
+      - name: Lint and type-check the contract tooling
+        working-directory: backend
+        run: >-
+          uv run --frozen ruff check ../packages/contracts
+          && uv run --frozen ruff format --check ../packages/contracts
+          && uv run --frozen mypy --strict ../packages/contracts/validate.py
+          ../packages/contracts/roundtrip.py ../packages/contracts/openapi_check.py
+          ../packages/contracts/compat.py ../packages/contracts/tests
+
+      - name: Validate JSON Schemas and fixtures
+        run: python3 packages/contracts/validate.py
+
+      - name: Validate the OpenAPI document and contract rules
+        working-directory: backend
+        run: uv run --frozen python ../packages/contracts/openapi_check.py
+
+      - name: Server round-trip (fixtures match the Pydantic models)
+        working-directory: backend
+        run: uv run --frozen python ../packages/contracts/roundtrip.py --check
+
+      - name: Contract tests
+        working-directory: backend
+        run: >-
+          uv run --frozen pytest -q -p no:cacheprovider ../packages/contracts/tests
+          tests/test_contract_roundtrip.py
+          --junitxml=reports/contracts-junit.xml
+
+      - name: Set up Node for spectral
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Lint the OpenAPI document with spectral
+        run: >-
+          npx --yes "@stoplight/spectral-cli@${SPECTRAL_VERSION}" lint
+          --fail-severity warn
+          --ruleset packages/contracts/.spectral.yaml
+          packages/contracts/openapi.json
+
+      - name: Install pinned oasdiff
+        run: |
+          archive="oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --output "/tmp/${archive}" \
+            "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/${archive}"
+          echo "${OASDIFF_SHA256}  /tmp/${archive}" | sha256sum --check --strict
+          mkdir -p /tmp/oasdiff
+          tar -xzf "/tmp/${archive}" -C /tmp/oasdiff oasdiff
+          /tmp/oasdiff/oasdiff --version
+
+      - name: Resolve comparison base
+        id: base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [[ -n "$BASE_SHA" ]]; then
+            base="$BASE_SHA"
+          elif [[ -n "$BEFORE_SHA" && "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]]; then
+            base="$BEFORE_SHA"
+          else
+            base="$(git rev-parse HEAD~1 2>/dev/null || true)"
+          fi
+          if [[ -z "$base" ]] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::error::Cannot resolve the comparison base commit"
+            exit 1
+          fi
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+          echo "Comparing against $base" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Breaking changes require a version bump (oasdiff)
+        working-directory: backend
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          rm -rf /tmp/base && mkdir -p /tmp/base
+          if git -C .. cat-file -e "${BASE_SHA}:packages/contracts/openapi.json" 2>/dev/null; then
+            git -C .. archive "$BASE_SHA" packages/contracts | tar -x -C /tmp/base
+          fi
+          uv run --frozen python ../packages/contracts/compat.py \
+            --base /tmp/base/packages/contracts --oasdiff /tmp/oasdiff/oasdiff
+
+      - name: Upload contract test report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: contracts-report
+          path: backend/reports/contracts-junit.xml
+          retention-days: 7
+          if-no-files-found: warn
+
+  android:
+    name: Validate contract (Android)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Ensure required Android SDK packages
+        run: |
+          missing=()
+          if [[ ! -f "$ANDROID_HOME/platforms/android-37.0/android.jar" ]]; then
+            missing+=("platforms;android-37.0")
+          fi
+          if [[ ! -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" ]]; then
+            missing+=("build-tools;36.0.0")
+          fi
+          if (( ${#missing[@]} )); then
+            sdkmanager --install "${missing[@]}"
+          else
+            echo "Required SDK packages are already installed."
+          fi
+
+      - name: Set up Gradle and validate wrappers
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: enhanced
+          cache-read-only: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+
+      - name: Android contract models and fixture compatibility tests
+        working-directory: android
+        run: >-
+          sh gradlew --no-daemon --console=plain --build-cache
+          --dependency-verification=strict
+          :app:testDebugUnitTest --tests 'app.ovrly.contract.*'
+
+      - name: Upload Android contract test report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-contract-report
+          path: |
+            android/app/build/test-results/testDebugUnitTest/*.xml
+            android/app/build/reports/tests/testDebugUnitTest/
+          retention-days: 7
+          if-no-files-found: warn
+
+  result:
+    name: Contract checks
+    if: ${{ always() }}
+    needs: [server, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      SERVER: ${{ needs.server.result }}
+      ANDROID: ${{ needs.android.result }}
+    steps:
+      - name: Report contract result
+        shell: bash
+        run: |
+          if [[ "$SERVER" == success && "$ANDROID" == success ]]; then
+            echo "Server and Android contract checks passed against the same fixtures." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Contract checks failed, were cancelled, or did not run (server=$SERVER, android=$ANDROID)."
+            exit 1
+          fi

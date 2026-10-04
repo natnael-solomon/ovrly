@@ -2,12 +2,12 @@
 
 Python 3.11 / uv / FastAPI foundation with PostgreSQL, Alembic, a shared worker
 lifecycle and a durable PostgreSQL job queue with typed retry classes. The API
-mints guest principals, accepts uploads and records investigations behind
-bearer authentication (see [Identity and intake API](#identity-and-intake-api)).
-No research processing or account linking is implemented, recorded
-investigations are not yet handed to the queue, and no pipeline stage handlers
-exist, so the worker claims nothing in production; it proves startup,
-supervision, lease draining, retries and shutdown. See
+mints guest principals, links them to a Google account (BC-D07), accepts
+uploads and records investigations behind bearer authentication (see
+[Identity and intake API](#identity-and-intake-api)). Each recorded
+investigation is handed to the queue as an `intake` job in the same
+transaction; the worker's `intake` stage only confirms the record today, so no
+research processing happens yet (BE-07, #20). See
 [Durable jobs and recovery](#durable-jobs-and-recovery).
 
 ## Local setup (Linux / WSL)
@@ -87,6 +87,7 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_JOB_RETRY_UNKNOWN_OUTCOME_ATTEMPTS` | 3; 0 to 10. Reconciliation attempts for the `unknown_outcome` class |
 | `OVRLY_JOB_RETRY_BACKOFF_SECONDS` | 1; positive, at most 60. Base of the exponential backoff |
 | `OVRLY_JOB_RETRY_MAX_BACKOFF_SECONDS` | 60; positive, at most 3600 and at least the base. Caps backoff and provider retry-after hints |
+| `OVRLY_GOOGLE_CLIENT_ID` | Empty; Google Web client ID that linked ID tokens must be issued for (BC-D07). Configuration, not a secret. Empty leaves `POST /v1/principals/link` unavailable with 503 `ACCOUNT_LINK_UNAVAILABLE` |
 
 The helper checks for at least 2 GiB free on the checkout filesystem before and
 after dependency/image setup and after database startup. It stops further work if
@@ -124,10 +125,12 @@ owned database resources and drain their lease on shutdown. Worker failures are
 visible and are not automatically restarted. Migration `0001` only establishes
 Alembic history; `0002_jobs` creates the `jobs` and `job_results` tables,
 `0003_identity_intake` creates the principal, credential, upload, investigation
-and idempotency tables defined in `services/models.py`, and `0004_job_retries`
+and idempotency tables defined in `services/models.py`, `0004_job_retries`
 adds the retry class, per-class retry counters and the provider request id to
-`jobs`. Future schema changes require a reviewed migration and
-upgrade/downgrade coverage, not `create_all()` during API startup.
+`jobs`, `0005_account_link` adds `google_sub` (unique), `merged_into` and
+`merged_at` to `principals`, and `0006_job_ownership` adds the nullable
+`owner_id` and `cancel_outcome` columns to `jobs`. Future schema changes require a reviewed migration
+and upgrade/downgrade coverage, not `create_all()` during API startup.
 
 ### Durable jobs and recovery
 
@@ -158,13 +161,27 @@ fault-injection hooks used only by tests.
 | `invalid_model_schema` | `InvalidModelSchema` | Backoff; `OVRLY_JOB_RETRY_SCHEMA_REPAIR_ATTEMPTS` repair attempts, visible to the handler through `retry_counts` |
 | `unknown_outcome` | `UnknownOutcome` (provider timeout) | Backoff only when a request id was recorded; `OVRLY_JOB_RETRY_UNKNOWN_OUTCOME_ATTEMPTS` reconciliation attempts; never a silent re-call |
 
-Workers execute only the stages they have handlers for; `default_handlers()` is
-empty until pipeline tasks register stages. Handlers receive a `JobContext`
+Workers execute only the stages they have handlers for. `default_handlers()`
+registers the `intake` stage from `services/pipeline/intake.py`: it checks that
+the investigation still exists and belongs to the owner in the job payload,
+confirms `queued` at stage `intake` with the coverage placeholder and publishes
+a result row; a missing or foreign investigation is `NonRetriableInput`. Media
+stages arrive with BE-07 (#20). Handlers receive a `JobContext`
 whose `heartbeat()` must be called by long stages. Other handler exceptions
 mark the job `failed` with the exception type only; messages are never
 persisted or logged. The owner-scoped cancel/delete API uses the same
 `request_cancel` and `delete` primitives inside the authorization transaction;
 see [Job actions](#job-actions).
+
+`services/api/intake.py` hands each new investigation to the queue.
+`QueueDispatcher` runs inside the transaction that writes the investigation and
+idempotency rows and calls `JobQueue.enqueue` with stage key
+`(1, "intake", sha256("investigation:<id>"))` and payload
+`{investigation_id, owner_id}`. A dispatcher failure rolls back the
+investigation, the key and the job together; a replayed `Idempotency-Key`
+never reaches the dispatcher, and the stage-key uniqueness would reject a
+second job anyway. `RecordOnlyDispatcher` remains for tests that isolate the
+API from the queue (`create_app(dispatcher=...)`).
 
 `tests/recovery/` holds the in-process API + worker harness with
 `ScriptedFaults` checkpoints (`claimed`, `before_publish`, `after_publish`,
@@ -195,6 +212,13 @@ integrated yet, so those stages are stubs registered only in tests. Covered:
 - Duplicate provider callback with the same request id (`test_idempotency.py`):
   concurrent and late duplicates publish once; a callback for a deleted job is
   dropped.
+- Intake hand-off (`test_intake_handoff.py`): a dispatcher failure rolls back
+  the investigation and the job together; sequential and concurrent replays of
+  one `Idempotency-Key` yield exactly one job; the embedded worker killed
+  before publishing the `intake` result is re-leased by a standalone worker
+  with the production stage table and the investigation is published once,
+  reporting `running` meanwhile; a job for a missing or foreign investigation
+  fails as `non_retriable_input`.
 - Negative invariants: duplicate publish, publish after cancel, publish after
   delete, stale fencing token, stale lease retry or request-id write.
 
@@ -213,8 +237,9 @@ OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0
 ```
 
 Not covered here: external-provider erasure, upload/artifact retention and
-backup expiry (#77); chunk `(session, seq)` idempotency belongs to #24.
-Investigation POST idempotency is covered by the intake API tests.
+backup expiry (#77); the chunk `(session, seq)` idempotency test belongs to
+the capture intake endpoint that introduces that resource. Investigation POST
+idempotency is covered by `test_intake_handoff.py` and `tests/test_intake_api.py`.
 
 ### Job actions
 
@@ -240,15 +265,21 @@ external artifact or backup deletion is claimed. Tombstone identity and fencing
 metadata remain so late callbacks cannot resurrect content. There is no
 general job-read endpoint in this slice.
 
-Migration `0005_job_ownership` adds nullable `owner_id` and `cancel_outcome`.
-Legacy jobs remain ownerless and API-inaccessible; ownership is never inferred
-from payload data. Future enqueue callers pass the authenticated principal via
-`JobQueue.enqueue(..., owner_id=principal.id)` in their business transaction.
-The existing global stage key must not be reused across principals: a collision
-fails explicitly instead of returning another owner's job.
+Migration `0006_job_ownership` adds nullable `owner_id` and `cancel_outcome`.
+The `QueueDispatcher` in `services/api/intake.py` passes the investigation's
+owner to `JobQueue.enqueue(..., owner_id=...)`, so every `intake` job created
+by `POST /v1/investigations` can be cancelled or deleted by that owner; the
+recovery suite proves it and that another principal gets 404. Jobs enqueued
+before the migration remain ownerless and API-inaccessible; ownership is never
+inferred from payload data. Other enqueue callers pass the authenticated
+principal the same way in their business transaction. The existing global
+stage key must not be reused across principals: a collision fails explicitly
+instead of returning another owner's job, while a replay by the same owner
+still returns the existing job.
 
 Shared request-path/response schemas and synthetic receipts live in
-`packages/contracts`; all failures reuse its unchanged error schema. Backend
+`packages/contracts`; all failures reuse its unchanged error schema, and
+`openapi.json` publishes both operations. Backend
 recovery tests compare actual API output with these fixtures and test replay,
 concurrent requests, rollback, invalid input and delayed publication. Android
 parsing and both-side contract review remain coordinated through #15/#62.
@@ -272,16 +303,18 @@ schema with the contracts validator.
 | Route | Behavior |
 | --- | --- |
 | `POST /v1/principals/guest` | Mints a guest principal and an opaque bearer token (`ovk_` prefix, 256 random bits). Only a SHA-256 digest is stored; the token is returned once and never logged. 201. |
+| `POST /v1/principals/link` | Body `{"provider": "google", "id_token": ...}`, bearer-authenticated as the calling guest ([BC-D07](../docs/decisions/BC-D07-account-link.md)). The token is verified against `OVRLY_GOOGLE_CLIENT_ID`. Unknown subject: the caller is upgraded in place (`kind` becomes `account`, credential stays valid, every object keeps its owner) and the response is `200 {principal_id, kind, linked: true, merged_saved_reports, credential: null}`; repeating it is the same 200. Subject already owned by another principal A: in one transaction the caller's explicitly saved reports move to A (`transfer_saved_reports`, zero until #33 adds the table), the caller's credentials are revoked, `merged_into` is recorded, and the response carries `principal_id = A` plus a new `credential` for A. Investigations, uploads and idempotency keys stay with the revoked guest. Already linked to a different subject: 409 `ACCOUNT_ALREADY_LINKED`. Bad token: 401 `INVALID_ID_TOKEN`. No client ID configured: 503 `ACCOUNT_LINK_UNAVAILABLE`. |
 | `POST /v1/uploads` | Declares `size_bytes`, `sha256` and optional `content_type`; returns a scoped `target`, `max_bytes` and `expires_at`. Over the byte limit: 413 `UPLOAD_TOO_LARGE`. |
 | `PUT /v1/uploads/{id}/content` | Streams raw bytes to the target while holding the upload row lock, so a concurrent completion waits for the whole body. Exceeding the smaller of the limit and the declared size discards the partial content with 413. Expired: 410 `UPLOAD_EXPIRED`. |
 | `POST /v1/uploads/{id}/complete` | Re-reads the stored bytes and compares size and SHA-256 with the declaration. Mismatch deletes the bytes and returns 409 `UPLOAD_MISMATCH`; missing bytes return 409 `UPLOAD_CONTENT_MISSING`. Completing twice returns the same 200. |
-| `POST /v1/investigations` | Requires `Idempotency-Key` (400 if missing or longer than 200 characters). Body: `{"source": {"kind": "url", "url": ...}}` or `{"source": {"kind": "upload", "upload_id": ...}}`, each with optional `duration_ms`. Writes the investigation and the key in one transaction before answering 202. Same key and body replays the original 202 body; same key with a different body is 409 `IDEMPOTENCY_KEY_REUSED`. Keys are scoped per owner. |
+| `POST /v1/investigations` | Requires `Idempotency-Key` (400 if missing or longer than 200 characters). Body: `{"source": {"kind": "url", "url": ...}}` or `{"source": {"kind": "upload", "upload_id": ...}}`, each with optional `duration_ms`. Writes the investigation, the key and the `intake` job in one transaction before answering 202. Same key and body replays the original 202 body; same key with a different body is 409 `IDEMPOTENCY_KEY_REUSED`. Keys are scoped per owner. |
 | `GET /v1/investigations` | Newest-first list of the caller's investigations (at most 100). |
-| `GET /v1/investigations/{id}` | `state`, `stage`, a coverage placeholder, `version` and a safe `error` object or `null`. |
+| `GET /v1/investigations/{id}` | `state`, `stage`, a coverage placeholder, `version` and a safe `error` object or `null`. `state` reflects the intake job: `queued` or `leased` read as `queued`, `running` as `running`, `failed` as `failed` with a `PROCESSING_FAILED` error unless a specific code was recorded, `cancelled` or `deleted` as `cancelled`; a published job leaves the stored state. Lease owners, fencing tokens, retry classes and failure types are never exposed. |
 
 Every route except guest minting requires `Authorization: Bearer <token>`.
 Missing credentials return 401 `AUTHENTICATION_REQUIRED`; malformed, unknown or
-revoked ones return 401 `INVALID_CREDENTIAL`, both with `WWW-Authenticate`.
+revoked ones (including a guest credential revoked by a second-device link)
+return 401 `INVALID_CREDENTIAL`, both with `WWW-Authenticate`.
 Identity comes only from the credential: `user_id`, `owner_id` or `principal_id`
 in a body, query string or `X-User-Id`-style header is rejected with
 `CLIENT_IDENTITY_REJECTED`. Object routes load rows through the owner-scoped
@@ -296,14 +329,26 @@ to `OVRLY_STORAGE_DIR` through the `UploadStore` interface in
 decided. Uploaded media is development data on the local disk, not a retention
 policy or consent record.
 
-Recorded investigations stay `queued` at stage `intake`. Handing them to the
-job engine (#16), account linking (BC-D07), quotas beyond the two limits and
-deletion are the second BE-05 PR. `services/api/intake.py` defines the
-`InvestigationDispatcher` hook that runs inside the creating transaction; the
-default records nothing beyond the investigation row. `packages/contracts`
-holds the shared error shape and the draft voice-actions schemas; the intake
-request and response models in `services/api/schemas.py` remain backend-owned
-Pydantic until #15 exports them there.
+Recorded investigations are handed to the queue as described under
+[Durable jobs and recovery](#durable-jobs-and-recovery); until BE-07 (#20)
+adds media stages they stay `queued` at stage `intake` after the intake job
+publishes. Account linking follows
+[BC-D07](../docs/decisions/BC-D07-account-link.md): identity is verified
+server-side from the Google ID token (`services/api/auth/google.py`), and
+`services/api/auth/linking.py` performs the upgrade or second-device merge in
+one transaction, with every write restricted to the calling principal. Quotas
+beyond the two limits and deletion remain open (#77 retention, #75 user
+deletion). `packages/contracts` holds the shared error shape, the voice-actions schemas
+and, from BE-03 (#15), the upload, investigation, job, capture, report, claim,
+evidence and assessment schemas with their enums and the OpenAPI document. The
+intake and account-link request and response models in `services/api/schemas.py`
+are mirrored there; the new read models (`Claim`, `Evidence`, `Assessment`,
+`ReportVersion`, `JobSummary`, `InvestigationReadModel`) generate the six
+result fixtures through `packages/contracts/roundtrip.py`, and
+`tests/test_contract_roundtrip.py` fails when a model and its fixture drift.
+No route emits the read models yet: `GET /v1/investigations/{id}` still returns
+`InvestigationResponse`, and adopting `InvestigationReadModel` (adding
+`processing_status`, `job` and `report`) is #33 work.
 
 ## Local checks
 
@@ -335,10 +380,14 @@ safe failure responses, both worker modes, signal shutdown, cancellation and
 resource cleanup, the job queue invariants, the recovery harness,
 startup-helper negative paths, and the intake API: guest credentials, rejected
 client identity, cross-owner 404s, idempotent replay and 409, upload limits,
-expiry and hash mismatch, and the shared error shape validated against
-`packages/contracts/schemas/error.schema.json`. The test database is migrated
-to `head` once per session. No provider keys or personal media are needed;
-upload tests use synthetic bytes in a temporary directory.
+expiry and hash mismatch, the job-state view of investigations, account
+linking with an injected token verifier (in-place upgrade, idempotent repeat,
+second-device merge, the owner invariant and the Google verifier's outcome
+mapping with a patched library call), and the shared error shape validated
+against `packages/contracts/schemas/error.schema.json`. The test database is
+migrated to `head` once per session. No provider keys, Google calls or
+personal media are needed; upload tests use synthetic bytes in a temporary
+directory.
 
 Ruff includes security rules (`S`) and rejects bare `type: ignore` comments
 (`PGH003`); MyPy also enables `ignore-without-code`. Only pytest's `S101`
@@ -347,7 +396,10 @@ line-specific, explained `S603` annotations; production code has no security-rul
 exemptions.
 
 The optional `quality` group adds locked pre-commit, actionlint, zizmor and
-pip-audit tooling without changing runtime dependencies. From the repository root:
+pip-audit tooling without changing runtime dependencies; the optional
+`contracts` group adds `openapi-spec-validator` for the
+[contracts package](../packages/contracts/README.md#validation) OpenAPI check.
+From the repository root:
 
 ```sh
 uv sync --project backend --frozen --group quality
@@ -388,6 +440,8 @@ changes in this Backend CI workflow; the separate Quality checks job still runs.
 The validation job uses Python 3.11, pinned setup-uv, the frozen lockfile, Ruff,
 strict MyPy with the Pydantic plugin, the
 [contracts package](../packages/contracts/README.md#validation) validator and
+server round-trip check (the full contract gate, including OpenAPI, spectral,
+oasdiff and the Android tests, is the separate **Contract checks** workflow),
 tests, PostgreSQL 16, migration upgrade/drift
 checks and the real test suite. Only pushes to `main` save uv caches; PRs can read
 them. Dependabot checks the `/backend` uv project weekly with grouped minor/patch
@@ -444,6 +498,335 @@ The cancel/delete API and cross-owner recovery cases implement
 retry classes and recovery cases are described under
 [Durable jobs and recovery](#durable-jobs-and-recovery).
 
+## BE-01 router experiment
+
+`uv run --frozen python -m services.experiments.router` is an isolated research
+runner, never started by the API or worker. Its tests use HTTP mocks, not provider
+keys. It prepares the experiment in [BE-01 / #11](https://github.com/natnael-solomon/ovrly/issues/11);
+it does **not** establish free-tier entitlements or complete that issue.
+The existing locked HTTPX dependency is also a runtime dependency for this CLI.
+
+### Inputs and approval
+
+Store inputs under ignored root `.scratch/`, not in evaluation fixtures.
+The input is one JSON object:
+
+```json
+{
+  "schema_version": "be01-experimental-v2",
+  "version": "pilot-v2",
+  "kind": "synthetic",
+  "split": "dev",
+  "hosted_processing_approved": false,
+  "provenance": "Invented local example; not real transcript evidence",
+  "windows": [
+    {
+      "window_id": "window-one",
+      "context_status": "window-only",
+      "observations": [
+        {
+          "id": "segment-one",
+          "role": "target",
+          "text": "The sample contains ten seeds.",
+          "source_type": "supplied-caption",
+          "speaker_id": null,
+          "envelope": {
+            "start_ms": 0,
+            "end_ms": 5000,
+            "basis": "user-timed-caption-not-media-verified"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Provide 1-50 windows with unique window IDs and distinct target transcript text.
+Each window needs at least one target observation and unique observation IDs.
+Reused observation IDs across windows must retain identical text/source metadata;
+their role may differ. IDs identify supplied observations, not retrieved papers.
+`source_type` is `supplied-caption` or `source-subtitle`; these experiment inputs
+do not establish that ASR ran or that captions agree with media. The example's
+text and timing are invented, not a real recording or timing measurement.
+
+`speaker_id` preserves a supplied speaker label or is explicitly null; do not
+infer a person's name. `envelope` has an exclusive end greater than its start.
+Timing bases are `user-timed-caption-not-media-verified`,
+`coarse-parent-envelope-not-subwindow-timing`, or
+`source-subtitle-cue-not-media-verified`. Subdividing a coarse block does not
+justify narrowing its time envelope.
+
+Keep the initial 50-window comparison `window-only`: do not silently append
+previous passages or guessed visual context. The fixed prompt flags missing
+context rather than inventing it. A separately versioned experiment may supply
+observations with `role: context` and `context_status: additional-context-supplied`.
+Context assists interpretation but is not another extraction target.
+
+`split` must be `dev`: never feed the frozen holdout or its labels to prompt
+tuning. The two invented few-shot examples are embedded in the fixed prompt,
+separate from evaluation material. Use `kind: real` only for actual transcript
+windows, with provenance identifying the approved dataset/version and selection
+method. Select short/simple through long/many-claim windows. The repository's
+RES-06 draft has neither full transcripts nor hosted-processing clearance;
+do not turn its normalized annotations into purported transcript data.
+
+Version 2 replaces the old `transcript`/`evidence_ids` input and `claims` output.
+The runner rejects v1 or unversioned inputs; there is no silent conversion.
+To migrate locally, preserve the original snapshot, construct observations from
+its actual source spans, verify exact text reconstruction, and write a new
+dataset version with `schema_version: be01-experimental-v2`. Keep the original
+source hashes, parent envelopes, family/overlap records and permission status
+in the accompanying private provenance. Do not fabricate fine-grained timing.
+
+`hosted_processing_approved: true` is an operator attestation, not automated
+rights verification. Obtain permission for the selected provider's processing
+and retention terms before setting it. Plan mode accepts unapproved inputs and
+does not read a key, create recordings or contact any provider.
+
+### Plan, then explicitly execute
+
+From `backend/`, after saving the input as root `.scratch/be01-windows.json`:
+
+```sh
+uv run --frozen python -m services.experiments.router ../.scratch/be01-windows.json
+```
+
+For 50 windows the matrix has **525 cases / at most 1,050 requests**:
+350 baseline cases across `auto:cheap`, `auto:quality` and five pinned candidates,
+plus 175 paired `/no_think` cases on alternating input windows (25 per route).
+Input ordering determines the paired subset. Pinning uses `model: auto:cheap`
+with a singleton `models` list; an unexpected executor fails that attempt.
+Only documented request fields are used. No `response_format`, tools, feedback,
+provider fallback, automatic HTTP retry or production integration is enabled.
+
+Before executing, use a dedicated experiment key and verify the account's plan
+and available spending controls. The team reports that its Free account has no
+dashboard model-selection controls; do not require or claim a nonexistent
+allow-list. A singleton `models` request is a per-request selection, not an
+account-wide billing ceiling. Keep subscription-backed Free access; do not
+enable self-funded routing or upgrade billing as an experiment workaround.
+Inspect remaining account quota: the request bound is not a token, money or
+shared-account quota guarantee.
+Export `SCHOLARXIV_EXPERIMENT_API_KEY` through a secret manager or non-echoing
+shell input; never put its value in a command, document or Git. Obtain the exact
+HTTPS completion URL from the team's verified provider setup. The runner checks
+URL shape, not domain ownership or account entitlements. Do not use an untrusted
+endpoint: it will receive the key and approved transcript text.
+The observed canonical endpoint is
+`https://www.scholarxiv.com/api/v1/router/chat/completions`; the non-`www`
+address redirects, which this runner deliberately does not follow.
+If using ignored `backend/.env.experiments`, explicitly load it with
+`uv run --frozen --env-file .env.experiments ...`; ordinary `uv run` does not
+automatically load that filename.
+
+```sh
+uv run --frozen python -m services.experiments.router ../.scratch/be01-windows.json \
+  --execute --endpoint "$SCHOLARXIV_ROUTER_COMPLETIONS_URL" \
+  --run-id be01-approved-run-01 --max-requests 1050 --max-tokens 2048
+```
+
+`--max-requests` must cover the worst-case matrix before any call; smaller pilot
+inputs need a smaller bound printed by plan mode. Temperature is always zero;
+max tokens defaults to 2048 (accepted range 300-8192), with a 60-second HTTPX
+timeout and redirects/environment proxies disabled. Calls are sequential.
+Interrupt to stop; partial recordings are retained but never yield a completed
+summary. HTTP errors are recorded as failed cases without retries or downgrade.
+Use a new run ID for a new run; existing recordings are never overwritten.
+
+### What is measured
+
+The **experimental** `be01-experimental-v2` schema is implemented in
+`services/experiments/schema.py`; the fixed prompt is `be01-window-only-v2`.
+The output is `{"occurrences":[...]}`, with these required fields per occurrence:
+
+| Field | Meaning |
+| --- | --- |
+| `proposition` | Claim preserving polarity, quantities, units, conditions and attribution |
+| `taxonomy` | `empirical`, `causal`, `documentary`, `predictive`, `normative`, `mixed`, `unclear` |
+| `source_refs` | Nonempty list of target observation text spans |
+| `context_refs` | Context observation spans, or `[]` when none are used |
+| `assertion_mode` | `asserted`, `reported`, `questioned`, `hypothetical`, `counterfactual`, `unclear` |
+| `speaker_commitment` | `endorsed`, `rejected`, `uncommitted`, `unclear` |
+| `attributed_to` | Person/group explicitly identifiable in supplied text, otherwise null |
+| `eligibility_reason` | `factual-claim`, `factual-premise`, `opinion`, `quoted-not-endorsed`, `insufficient-context`, `not-a-claim` |
+| `uncertainty_flags` | Any of `unresolved-reference`, `missing-context`, `ambiguous-attribution`, `ambiguous-commitment`, `ambiguous-meaning`, `source-text-conflict`; otherwise `[]` |
+
+Every reference has `observation_id`, `start_char`, and `end_char`. Offsets count
+Unicode code points in the exact observation text, zero-based and end-exclusive;
+they are not UTF-8 bytes or Kotlin/Java UTF-16 indices. No text normalization is
+performed. The validator rejects unknown IDs, role mismatches, empty/inverted or
+out-of-bounds spans, whitespace-only selections, duplicate references within an
+occurrence, and target spans combining distinct supplied speakers. Repeated
+occurrences remain separate; no reconciliation is performed.
+
+Extra fields, missing fields and coercions fail. Pure normative judgments,
+questions and invented scenarios cannot use an eligible factual reason.
+`quoted-not-endorsed` cannot accompany `endorsed`, and uncertainty flags cannot
+repeat. Counterfactual claims may be eligible if their conditions are retained.
+Missing evidence alone is not missing context. Relevant exclusions are retained;
+this is not an exhaustive annotation of every nonclaim sentence.
+
+The backend can derive quotations, supplied speaker labels and time envelopes
+from validated references. The model must not generate those fields, occurrence
+IDs, revisions, confidence scores or truth verdicts. JSON Schema enforces shape;
+Pydantic and source checks enforce additional consistency, not semantic support.
+`{"occurrences":[]}` means no relevant candidates in that window, not a failure
+fallback or proof of whole-clip review.
+
+This connects the draft to the isolated experiment, **not** the BE-03/BE-08
+production contract. Agree the experiment schema/prompt before the real run;
+production promotion still requires the shared contract review. Structural
+validity does not measure claim correctness, semantic fidelity, extraction
+recall, timestamps or evidence quality.
+
+Recordings retain the request and raw response, executor, decision ID, usage,
+response length in characters, latency, raw JSON validity, thinking/fence flags,
+truncation, post-hygiene JSON validity, Pydantic validity, enum/schema errors and
+source-reference errors. `evidence_id_hallucination` now means an unknown
+observation ID in either reference list. Leading closed `<think>` blocks,
+surrounding Markdown fences and
+preamble before the first object are removed for the post-hygiene measurement.
+Duplicate JSON keys, NaN/infinity constants, trailing prose, schema errors,
+invented IDs, invalid source grounding and truncation fail closed. One invalid
+output gets exactly one repair, with validation diagnostics and the same original
+observations; HTTP/protocol failures do not. Unknown completion finish reasons fail.
+The expected non-streaming envelope requires `model`, `decision_id`, `usage`
+and exactly one `choices` entry with text `message.content` and `finish_reason`;
+incompatibility is explicit failure, not a silently accepted response.
+
+`summary.json` reports first-pass (after hygiene) and post-single-repair validity,
+fail-closed percentage, per-route/condition metrics, actual-executor attempt
+validity, and nearest-rank p50/p95 end-to-end case latency including repair.
+Actual-executor counts separate first/repair attempts because routing may change
+on repair; they are not falsely attributed to the originally requested model.
+Requests and reported tokens are quota proxies only; missing usage is counted.
+The proposed 90% threshold uses the 50 baseline cases per eligible route, not a
+pool of routes or the `/no_think` condition. Fewer than 50 windows or synthetic
+inputs are always `pilot_only`, never a go/no-go observation.
+Even a qualifying real run leaves `decision: pending_team_approval`.
+
+Results stay under ignored `.scratch/router/<run-id>/`: a manifest with dataset
+and runner/schema-module hashes, schema/prompt versions, a fixed prompt-template
+hash, input/output schemas, timestamps and completion state; flushed
+`attempts.jsonl` cassettes; `results.json`; and `summary.json`.
+Authorization headers are never recorded and the configured key is redacted,
+but transcripts and responses remain sensitive. This is **not** a general PII
+or secret sanitizer. Review rights, redact other sensitive data and obtain
+approval before promoting any cassette into BE-08/RES-03 fixtures or publishing
+an evidence table. Keep raw account evidence and private references out of Git.
+Exit codes: 0 = complete with every case valid, 1 = complete with failed cases
+(inspect the threshold separately), 2 = invalid configuration/input or local
+failure. An interrupted run is incomplete, irrespective of partial successes.
+
+The runner executes locally; model inference is hosted. No web-service deployment
+is required, but `--execute` sends the approved observation text to the provider.
+Plan mode and the focused offline checks send nothing.
+
+Focused offline check:
+
+```sh
+uv run --frozen pytest -q tests/test_router_experiment.py tests/test_extraction_contract.py
+```
+
+### Fixed experiment contract and offline coverage
+
+Version `be01-experimental-v2` and prompt `be01-window-only-v2` are the fixed
+contract for the next model experiment. Regression tests pin their canonical
+JSON fingerprints. A deliberate schema/prompt change requires a new version,
+reviewed fixture expectations and a separate run; do not overwrite historical
+inputs, recordings or results. This experiment lock is not a production
+BE-03 contract, hosted-processing approval or a provider go/no-go decision.
+
+`tests/test_extraction_contract.py` supplies thirteen invented contract cases:
+negation, rejected quotation, hypothetical, counterfactual, normative/factual
+premises, missing context, correction/repetition, reported belief, distinct
+speakers/quantities, explicitly supplied hypothetical context, no claims,
+instruction-like text, and Unicode source text. They are separate from the two
+prompt examples and from both real evaluation splits. These are authored
+expected structures, not recorded model outputs or independently reviewed
+evaluation labels.
+
+Offline checks establish that the contract can represent these cases, rejects
+missing required fields, round-trips its values and preserves input text.
+They do not establish that a model will extract them correctly or resist
+instruction-like source text. A regression test explicitly demonstrates that
+an incorrect strengthened proposition can still pass structural validation;
+semantic fidelity and extraction recall require a separate model evaluation.
+The schema records uncertain attribution/context but does not verify their
+truth. Approximate envelopes remain source metadata, not generated word timing.
+
+### Provider, hosting and BE-08 decisions
+
+The provider order (Scholarxiv `auto:cheap`, then Groq `openai/gpt-oss-20b`
+as the only claim fallback; Gemini not selected), the EthioDeploy Free hosting
+choice, the limited BE-08 development go and the account, entitlement and
+hosting evidence behind them are recorded in
+[BC-D03](../docs/decisions/BC-D03-provider-hosting.md). That record is
+Proposed: authored from this experiment by Neb-iyu (BE-01 owner) on
+2026-10-04 and awaiting confirmation by the product owner, natnael-solomon.
+This README keeps the runner, its inputs and the measurement procedure. The
+original #11 checklist also cites BC-D04; that reference does not redefine the
+canonical [BC-D04 Voxide decision](../docs/decisions/BC-D04-voxide-route.md).
+No provider switching has been added to the API, worker or this runner;
+adapter orchestration belongs to BE-08 and must keep the same validation
+contract on every route.
+
+### Measured result (local run)
+
+The fixed v2 prompt/schema were measured on 50 authorized real development
+windows from seven sources, with temperature 0 and `max_tokens: 8192`.
+Windows overlap and source/topic families are correlated; these are not 50
+independent clips or a holdout evaluation.
+
+| Cohort | First-pass structural validity | Post-repair structural validity | Interpretation |
+| --- | --- | --- | --- |
+| `auto:cheap`, all 50 baseline windows | 44/50 (88%) | 48/50 (96%) | Meets the selected structural gate; two cases fail closed |
+| Matched cheap subset, no suffix | 21/25 | 25/25 | Same 25 windows as the next row |
+| Matched cheap subset, `/no_think` | 17/25 | 21/25 | No improvement; do not adopt the suffix |
+| `auto:quality`, original baseline | 9/50 | 9/50 | Only nine baseline cases returned HTTP 200; remaining failures do not establish model quality |
+| Pinned routes, original/resumed matrix | Not meaningfully measured | Not meaningfully measured | No HTTP responses for pinned routes in that cohort; do not rank their quality as zero |
+| GPT-OSS via Scholarxiv, first recovery baseline subset | 13/21 | 16/21 | Partial, separate recovery cohort, not a completed 50-window route or a direct Groq measurement |
+
+The complete cheap baseline used 56 requests and 123,122 reported tokens;
+case p50/p95 latency including repair was 2.35/10.90 s. Counts do not establish
+billed cost or remaining shared quota. The original plus first continuation
+recorded 525 cases / 539 requests, including 435 transport failures; later
+recoveries and timeout trials are separate cohorts, not overwritten results.
+The final recovery left 399 cases unattempted in that recovery sequence.
+They are explicitly deferred, not passed. Earlier synthetic runs used a
+different 2048-token ceiling and cannot be pooled with these measurements.
+
+The figures in this table come from an uncommitted local run. Its recordings
+live under ignored `.scratch/router/<run-id>/` (manifest, `attempts.jsonl`,
+`results.json` and `summary.json`) and are not in the repository, so a reviewer
+cannot verify them from this checkout. Before BC-D03 moves from Proposed to
+Accepted, a redacted metrics-only `summary.json` (no transcripts, requests or
+responses) or the run id together with the manifest SHA-256 and summary
+SHA-256 must be committed and linked from the record. Run summaries keep
+`decision: pending_team_approval`; the proposed go in BC-D03 supplements them
+rather than rewriting them.
+
+Semantic review found missed claims, incorrect rejection/negation, and
+hypothetical context promoted to fact, including in structurally valid output.
+Quote-reference and prompt-revision pilots did not establish a consistent
+held-aside improvement and were not adopted. Their provisional reference labels
+are agent-authored, not independent human gold.
+
+Cassettes stay local; fixture publication requires rights and privacy review
+and explicit authorization. No real transcripts or account identifiers have
+been promoted into committed fixtures.
+
+Offline validation of this runner is the focused command above, which passed
+212 tests on 2026-10-04 from `backend/`:
+
+```sh
+uv run --frozen pytest -q tests/test_router_experiment.py tests/test_extraction_contract.py
+```
+
+The full PostgreSQL suite, migrations and the coverage comparison against
+`main` run in **Backend checks**; see [Local checks](#local-checks).
+
 ## Stack record and boundaries
 
 This implements the infrastructure choice in
@@ -452,7 +835,8 @@ Python 3.11, uv, FastAPI/Uvicorn, PostgreSQL 16, SQLAlchemy asyncio/Psycopg and
 Alembic, with a single Python codebase for API and worker. The issue associates
 this stack with `BC-D03` / `RFC-D41-D43`. This records the implemented stack,
 not approval of the remaining infrastructure or hosting decisions. The full
-decision-log task remains #5; provider/hosting evidence remains #11 and #21.
+decision-log task remains #5; provider/hosting evidence is proposed in
+[BC-D03](../docs/decisions/BC-D03-provider-hosting.md) and continues in #21.
 
 Keep provider credentials and private media out of Git; future media uploads
 require explicit consent and a retention policy. No hosting entitlement or

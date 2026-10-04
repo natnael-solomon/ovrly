@@ -47,5 +47,8 @@ JobHandler = Callable[[ClaimedJob, JobContext], Awaitable[dict[str, Any]]]
 
 
 def default_handlers() -> Mapping[str, JobHandler]:
-    """Pipeline stages are introduced by later tasks; the worker claims no stages yet."""
-    return {}
+    """The production stage table: ``intake`` today, media stages when BE-07 adds them."""
+    # Imported here because the stage modules import JobContext from this module.
+    from services.pipeline.intake import INTAKE_STAGE, intake_stage
+
+    return {INTAKE_STAGE: intake_stage}

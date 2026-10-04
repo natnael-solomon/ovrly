@@ -110,13 +110,29 @@ class QualityConfigurationTest(unittest.TestCase):
         workflow = load_yaml(ROOT / ".github/workflows/telegram-notify.yml")
         self.assertEqual({"workflows": ["Android CI"], "types": ["completed"]},
                          workflow["on"]["workflow_run"])
+        self.assertEqual(["opened", "synchronize", "reopened", "ready_for_review", "closed"],
+                         workflow["on"]["pull_request"]["types"])
+        self.assertIn("schedule", workflow["on"])
+        self.assertIn("workflow_dispatch", workflow["on"])
         self.assertEqual({"contents": "read"}, workflow["permissions"])
+        self.assertNotIn("concurrency", workflow)
         steps = workflow["jobs"]["notify"]["steps"]
         self.assertEqual(2, len(steps))
+        self.assertNotIn("permissions", workflow["jobs"]["notify"])
         self.assertTrue(steps[0]["uses"].startswith("actions/checkout@"))
         self.assertEqual("${{ github.workflow_sha }}", steps[0]["with"]["ref"])
         self.assertEqual("false", steps[0]["with"]["persist-credentials"])
         self.assertEqual("python3 .github/scripts/telegram_notify.py", steps[1]["run"])
+        self.assertNotIn("GITHUB_TOKEN", steps[1]["env"])
+        # The catch-up job is the only one that lists pull requests, with the built-in token.
+        catch_up = workflow["jobs"]["catch-up"]
+        self.assertEqual({"contents": "read", "pull-requests": "read"}, catch_up["permissions"])
+        self.assertEqual("github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+                         catch_up["if"])
+        self.assertEqual(2, len(catch_up["steps"]))
+        self.assertEqual("false", catch_up["steps"][0]["with"]["persist-credentials"])
+        self.assertEqual("python3 .github/scripts/telegram_notify.py", catch_up["steps"][1]["run"])
+        self.assertEqual("${{ github.token }}", catch_up["steps"][1]["env"]["GITHUB_TOKEN"])
 
 
 class QualityToolTest(unittest.TestCase):

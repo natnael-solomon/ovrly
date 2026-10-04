@@ -6,7 +6,25 @@
   "properties": {
     "schema_version": {"const": 2},
     "dataset_version": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$"},
-    "kind": {"enum": ["examples", "draft", "frozen"]},
+    "kind": {"enum": ["examples", "draft", "frozen", "frozen-local"]},
+    "freeze_approval": {
+      "type": "object", "additionalProperties": false,
+      "required": ["approved_by", "approved_at", "scope", "rights_review_sha256", "source_manifest_sha256", "approved_clip_ids", "credits_signoff", "coverage_policy", "review_policy", "allows_hosted_processing", "allows_redistribution", "allows_training"],
+      "properties": {
+        "approved_by": {"const": "project-owner"},
+        "approved_at": {"type": "string", "minLength": 20},
+        "scope": {"const": "local-evaluation-only"},
+        "rights_review_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"},
+        "source_manifest_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}(?![\\s\\S])"},
+        "approved_clip_ids": {"type": "array", "minItems": 10, "maxItems": 20, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"}},
+        "credits_signoff": {"const": "approved"},
+        "coverage_policy": {"const": "as-recorded-no-additional-scenarios"},
+        "review_policy": {"const": "single-pass-preserve-recorded-limitations"},
+        "allows_hosted_processing": {"const": false},
+        "allows_redistribution": {"const": false},
+        "allows_training": {"const": false}
+      }
+    },
     "limitations": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
     "files": {
       "type": "object", "additionalProperties": false,

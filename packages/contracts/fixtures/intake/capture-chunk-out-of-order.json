@@ -1,0 +1,43 @@
+{
+  "synthetic": true,
+  "description": "Chunk 5 of a live capture session arrives while chunk 3 is still missing: the request declares a capture-relative interval and the acknowledgement stores it with disposition out_of_order and echoes the open gap. Synthetic fixture; no bytes or session exist.",
+  "schemas": {
+    "request": "capture-chunk-request.schema.json",
+    "response": "capture-chunk.schema.json"
+  },
+  "expect": {
+    "request": "valid",
+    "response": "valid"
+  },
+  "request": {
+    "session_id": "00000000-0000-4000-8000-000000000501",
+    "seq": 5,
+    "interval": {
+      "start_ms": 50000,
+      "end_ms": 60000,
+      "timebase": "capture"
+    },
+    "size_bytes": 393216,
+    "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+    "content_type": "video/mp4"
+  },
+  "response": {
+    "session_id": "00000000-0000-4000-8000-000000000501",
+    "seq": 5,
+    "interval": {
+      "start_ms": 50000,
+      "end_ms": 60000,
+      "timebase": "capture"
+    },
+    "size_bytes": 393216,
+    "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+    "disposition": "out_of_order",
+    "received_at": "2026-10-04T12:01:01Z",
+    "gaps": [
+      {
+        "from_seq": 3,
+        "to_seq": 3
+      }
+    ]
+  }
+}

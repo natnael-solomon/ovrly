@@ -1,0 +1,35 @@
+{
+  "synthetic": true,
+  "description": "A report version whose claim start_ms is the string 4200 instead of a JSON integer. The parser must not coerce quoted numbers. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "report-version.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "integer"
+  },
+  "payload": {
+    "id": "rpt_synthetic_0911_v1",
+    "investigation_id": "00000000-0000-4000-8000-000000000911",
+    "version": 1,
+    "created_at": "2026-10-04T12:00:00Z",
+    "provisional": true,
+    "change_summary": "First partial results while the capture continues. Synthetic.",
+    "supersedes": null,
+    "claims": [
+      {
+        "id": "clm_synthetic_0911",
+        "occurrence_id": "occ_synthetic_0911",
+        "interval": {
+          "start_ms": "4200",
+          "end_ms": 9800,
+          "timebase": "media"
+        },
+        "modality": "speech",
+        "original_text": "synthetic words as spoken",
+        "proposition": "Synthetic normalized proposition.",
+        "correction": null
+      }
+    ],
+    "evidence": [],
+    "assessments": []
+  }
+}

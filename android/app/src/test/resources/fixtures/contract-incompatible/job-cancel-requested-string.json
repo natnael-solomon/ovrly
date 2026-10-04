@@ -1,0 +1,37 @@
+{
+  "synthetic": true,
+  "description": "A nested job whose cancel_requested is the string false instead of a boolean. The parser must not coerce it. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "investigation.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "boolean"
+  },
+  "payload": {
+    "id": "00000000-0000-4000-8000-000000000901",
+    "state": "running",
+    "stage": "asr",
+    "coverage": {
+      "status": "not_started"
+    },
+    "version": 1,
+    "error": null,
+    "source": {
+      "kind": "url",
+      "url": "https://video.example/synthetic/clip-0001"
+    },
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:00:00Z",
+    "processing_status": "checking",
+    "job": {
+      "id": "00000000-0000-4000-8000-000000000992",
+      "state": "running",
+      "stage": "intake",
+      "cancel_requested": "false",
+      "attempts": 1,
+      "retry_class": null,
+      "available_at": "2026-10-04T12:00:00Z",
+      "updated_at": "2026-10-04T12:00:00Z"
+    },
+    "report": null
+  }
+}

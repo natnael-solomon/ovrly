@@ -33,4 +33,4 @@ async def test_store_rejects_unsafe_keys(tmp_path):
 
 
 async def test_record_only_dispatcher_is_a_no_op():
-    assert await RecordOnlyDispatcher().dispatch(None, None) is None
+    assert await RecordOnlyDispatcher().dispatch(None, None, None) is None

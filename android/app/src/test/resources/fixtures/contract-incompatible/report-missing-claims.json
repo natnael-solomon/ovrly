@@ -1,0 +1,20 @@
+{
+  "synthetic": true,
+  "description": "A report version without the required claims array. The parser must fail instead of defaulting to an empty list, which would read as no claims found. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "report-version.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "claims"
+  },
+  "payload": {
+    "id": "rpt_synthetic_0900_v1",
+    "investigation_id": "00000000-0000-4000-8000-000000000912",
+    "version": 1,
+    "created_at": "2026-10-04T12:00:00Z",
+    "provisional": false,
+    "change_summary": "No assessable factual claims were found in the checked media. Synthetic.",
+    "supersedes": null,
+    "evidence": [],
+    "assessments": []
+  }
+}

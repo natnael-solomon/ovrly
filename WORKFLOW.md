@@ -53,7 +53,8 @@ Record commands and outcomes, remaining limitations and, when applicable, device
 | --- | --- |
 | **Android checks** | On PRs to any branch, pushes to `main` and manual runs: Ubuntu 24.04, JDK 21, wrapper-based debug build/tests/lint, detekt/Compose/ktlint, unsigned release build with a ledger-style code, and real `apksigner`/`aapt2` verification using a temporary fixture key. Dependencies are checksum-verified; no production key or APK upload. |
 | **Evaluation contract checks** | On PRs, pushes to `main` and manual runs: standard-library validator tests, synthetic examples, explicit draft metadata and frozen metadata if `evaluation/corpus/` exists. No media downloads, provider keys or pipeline scoring. See [evaluation](evaluation/README.md). |
-| **Backend checks** | On PRs to any branch, edits/retargeting, `main` pushes and manual runs: change-detection tests, frozen Python 3.11/uv environment, Ruff, strict MyPy, the [contracts package](packages/contracts/README.md) validator and tests, PostgreSQL 16, Alembic upgrade/drift checks and service coverage. Validation has a 15-minute timeout. |
+| **Backend checks** | On PRs to any branch, edits/retargeting, `main` pushes and manual runs: change-detection tests, frozen Python 3.11/uv environment, Ruff, strict MyPy, the [contracts package](packages/contracts/README.md) validator and server round-trip check, PostgreSQL 16, Alembic upgrade/drift checks and service coverage. Validation has a 15-minute timeout. |
+| **Contract checks** | On PRs to any branch, edits/retargeting, `main` pushes and manual runs, no path filter: lint/type-check of the contract tooling, JSON Schema and fixture validation, the OpenAPI document (`openapi-spec-validator`, spectral with the error-shape and typed-enum rules), the server round trip in `--check` mode, the contract pytest suites, pinned checksum-verified `oasdiff` against the PR base (a breaking change fails without a `VERSION` bump), and the Android `app.ovrly.contract` unit tests against the same fixtures. One result from both jobs. See [Contract checks](packages/contracts/README.md#contract-checks-ci). |
 | **Backend recovery** | Same triggers and change detection as Backend checks, as a separate job: Alembic upgrade, then the Hypothesis job state-machine properties, retry-policy tests, queue invariant tests and the in-process API + worker recovery cases (worker killed before commit, after the provider call and after the artifact store, lease expiry with a live worker, cancel mid-retrieval, delete with a delayed callback, database connection drop, API lifespan restart, graceful and forced drain, every retry class, duplicate provider callbacks) against PostgreSQL 16. Documentation-only diffs skip execution but still report the check. |
 | **Quality checks** | On every PR target/edit, `main` push and manual run: shared pre-commit Android/backend gates, workflow analysis, secret and dependency scanning, and negative fixtures. Includes JDK/SDK setup; no path skips, PostgreSQL or product-provider calls. Thirty-minute timeout. |
 
@@ -147,7 +148,7 @@ Notification logic is tested Python in `.github/scripts/` (`telegram_*.py`); YAM
 
 | Workflow | Behavior |
 | --- | --- |
-| `telegram-notify.yml` | Loud posts for Android CI failure/timeout and published releases (first notes line). PR failures are removed after a later pass; `main` failures remain. Cancelled runs are ignored. One silent PR card is updated through draft/review/merge/close with linked `Closes #N` issues; Dependabot PRs are skipped. |
+| `telegram-notify.yml` | Loud posts for Android CI failure/timeout and published releases (first notes line). PR failures are removed after a later pass; `main` failures remain. Cancelled runs are ignored. One silent PR card is updated through draft/review/merge/close with linked `Closes #N` issues; Dependabot PRs are skipped. Each PR is announced once: the card recorded under its number in `TELEGRAM_NOTIFY_STATE` is the announcement, so `synchronize` and `reopened` post the card only when none is recorded (standing in for a delayed or dropped `opened` webhook), and an hourly catch-up job (also `workflow_dispatch`) lists open PRs with the built-in token and announces any without a recorded card. A webhook that arrives after the catch-up finds the card and edits it instead of posting again. A malformed state variable fails the job without posting; a missing one fails only the catch-up, `synchronize` and `reopened` paths, since those have no other duplicate guard. |
 | `telegram-board.yml` | Every 15 minutes, edits one pinned message for Ready, In progress, In review and `blocked` items. Posts silent summaries of status/priority/area changes, additions and removals. Ignores draft items. The first run establishes a baseline and posts "Board tracking started". Manual runs are supported. |
 | `telegram-apk.yml` | Manual build, owner-approved signing and delivery. Follow [release signing](docs/release-signing.md) for requests, approval, redelivery and setup. |
 
@@ -164,7 +165,7 @@ The notification workflows' `workflow_run` and `schedule` triggers use `main`; t
 
 For layout trials, temporarily point `TELEGRAM_CHAT_ID` at a private chat and open a draft PR; its `pull_request` events use the branch's workflow.
 
-The workflows maintain `TELEGRAM_NOTIFY_STATE` and `TELEGRAM_BOARD_STATE` for message IDs and board snapshots. Do not edit them manually. Deleting them resets state: the board re-baselines and PR cards start fresh.
+The workflows maintain `TELEGRAM_NOTIFY_STATE` and `TELEGRAM_BOARD_STATE` for message IDs and board snapshots. Do not edit them manually. Deleting them resets state: the board re-baselines and PR cards start fresh from the next `opened`, `ready_for_review` or `closed` event, while the notifier's catch-up, `synchronize` and `reopened` paths fail closed until a card has been recorded again. Runs that share a state variable are not serialised, so a PR opened during the few seconds a catch-up run is posting could receive two cards.
 
 PR titles, commit subjects, release notes and board titles are sent to Telegram; keep them free of private content. `.github/scripts/telegram_api.py` maps GitHub logins to team names in `DISPLAY_NAMES`.
 
@@ -178,6 +179,8 @@ Capture, overlay, voice and manifest paths trigger **Device evidence** and the `
 
 Every PR, including documentation, needs another developer's approval. Authors cannot approve their own work. Wait if no reviewer is available; resolve feedback and request another review after material changes.
 
+Contract changes (anything under `packages/contracts/`) need one Android reviewer and one backend reviewer, because both sides build from the same schemas and fixtures. `.github/CODEOWNERS` routes the directory to both; the owner is the Android reviewer today. A breaking contract change bumps `packages/contracts/VERSION` in the same PR (**Contract checks** fails otherwise), and a backend-only contract PR does not close #15 (see the [contracts README](packages/contracts/README.md#versioning)).
+
 ## 6. Merge
 
 Merge only when the PR is ready, another developer has approved, required checks pass, device evidence is present where required, and review discussions are resolved. Do not bypass these requirements for urgent changes.
@@ -186,7 +189,7 @@ Inspect the final squash author and full message, including automatically collec
 
 Squash into `main`, delete the merged branch and close linked issues with `Closes #123` where appropriate.
 
-The active `main` ruleset requires PRs, linear history, one approving review, stale-approval dismissal on push, resolved threads and up-to-date **Android checks** and **Device evidence**. Direct/force pushes and bypass actors are prohibited. Require **Backend checks** (REPO-04), **Backend recovery** (BE-04) and **Contract checks** (BE-03) when those workflows exist.
+The active `main` ruleset requires PRs, linear history, one approving review, stale-approval dismissal on push, resolved threads and up-to-date **Android checks**, **Device evidence**, **Backend checks**, **Backend recovery**, **Contract checks** and **Quality checks**. Direct/force pushes and bypass actors are prohibited.
 
 ## 7. Document and release
 

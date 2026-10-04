@@ -7,11 +7,13 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 
 /** A payload or model that violates the shared contract. The message names the first failure. */
 internal class ContractParseException(message: String, cause: Throwable? = null) :
@@ -19,7 +21,9 @@ internal class ContractParseException(message: String, cause: Throwable? = null)
 
 /**
  * Production parser and encoder for the voice-actions contract. This is the single entry
- * point for #18 (AN-03) and #35 (AN-09); do not add a second parser.
+ * point for #18 (AN-03) and #35 (AN-09); do not add a second parser. The read models of the
+ * other schemas use the same [ContractJson] configurations through [InvestigationCodec],
+ * [UploadCodec] and [CaptureCodec].
  *
  * Requests are strict: unknown keys fail because the server validates them with
  * `additionalProperties: false`. Responses tolerate unknown keys (an optional field is an
@@ -28,47 +32,25 @@ internal class ContractParseException(message: String, cause: Throwable? = null)
  */
 internal object VoiceActionCodec {
     /** Contract version these models implement; must equal `packages/contracts/VERSION`. */
-    const val CONTRACT_VERSION = "0.1.0-draft"
-
-    private val requestJson = Json {
-        ignoreUnknownKeys = false
-        isLenient = false
-        coerceInputValues = false
-        encodeDefaults = false
-    }
-
-    private val responseJson = Json {
-        ignoreUnknownKeys = true
-        isLenient = false
-        coerceInputValues = false
-        encodeDefaults = false
-    }
+    const val CONTRACT_VERSION = ContractJson.CONTRACT_VERSION
 
     fun parseRequest(payload: String): VoiceActionRequest =
-        parse("request") { requestJson.decodeFromString<VoiceActionRequest>(payload) }
+        ContractJson.parse("voice-action request") {
+            ContractJson.strict.decodeFromString(VoiceActionRequest.serializer(), payload)
+        }
 
     fun parseResponse(payload: String): VoiceActionResponse =
-        parse("response") { responseJson.decodeFromString<VoiceActionResponse>(payload) }
+        ContractJson.parse("voice-action response") {
+            ContractJson.tolerant.decodeFromString(VoiceActionResponse.serializer(), payload)
+        }
 
-    fun encodeRequest(request: VoiceActionRequest): String =
-        encode { requestJson.encodeToString(VoiceActionRequest.serializer(), request) }
-
-    /** Encodes a response, for fakes and tests; a response carrying UNKNOWN cannot be encoded. */
-    fun encodeResponse(response: VoiceActionResponse): String =
-        encode { responseJson.encodeToString(VoiceActionResponse.serializer(), response) }
-
-    private inline fun <T> parse(kind: String, decode: () -> T): T = try {
-        decode()
-    } catch (cause: SerializationException) {
-        throw ContractParseException("Invalid voice-action $kind: ${cause.message}", cause)
-    } catch (cause: IllegalArgumentException) {
-        throw ContractParseException("Invalid voice-action $kind: ${cause.message}", cause)
+    fun encodeRequest(request: VoiceActionRequest): String = ContractJson.encode {
+        ContractJson.strict.encodeToString(VoiceActionRequest.serializer(), request)
     }
 
-    private inline fun encode(write: () -> String): String = try {
-        write()
-    } catch (cause: SerializationException) {
-        throw IllegalArgumentException(cause.message, cause)
+    /** Encodes a response, for fakes and tests; a response carrying UNKNOWN cannot be encoded. */
+    fun encodeResponse(response: VoiceActionResponse): String = ContractJson.encode {
+        ContractJson.tolerant.encodeToString(VoiceActionResponse.serializer(), response)
     }
 }
 
@@ -120,10 +102,11 @@ internal object ContractErrorActionSerializer : WireEnumSerializer<ContractError
 )
 
 /**
- * JSON booleans only, used for `retryable` (the contract's only boolean): kotlinx would
- * otherwise accept the strings "true" and "false".
+ * JSON booleans only: kotlinx would otherwise accept the strings "true" and "false". [field]
+ * names the property in the failure when one serializer serves a single field.
  */
-internal object StrictBooleanSerializer : KSerializer<Boolean> {
+internal open class StrictBooleanSerializer(private val field: String? = null) :
+    KSerializer<Boolean> {
     override val descriptor: SerialDescriptor =
         PrimitiveSerialDescriptor("app.ovrly.contract.StrictBoolean", PrimitiveKind.BOOLEAN)
 
@@ -132,10 +115,52 @@ internal object StrictBooleanSerializer : KSerializer<Boolean> {
             ?: return decoder.decodeBoolean()
         val literal = element as? JsonPrimitive
         if (literal == null || literal.isString || literal.booleanOrNull == null) {
-            throw SerializationException("retryable must be a JSON boolean but was $element")
+            val subject = field?.let { "$it must be" } ?: "expected"
+            throw SerializationException("$subject a JSON boolean but was $element")
         }
         return literal.boolean
     }
 
     override fun serialize(encoder: Encoder, value: Boolean) = encoder.encodeBoolean(value)
 }
+
+/** `retryable` of the shared error shape. */
+internal object RetryableSerializer : StrictBooleanSerializer("retryable")
+
+/** Every other boolean of the contract (`cancel_requested`, `provisional`). */
+internal object ContractBooleanSerializer : StrictBooleanSerializer()
+
+/** JSON integers only: no quoted numbers, no fractions. Serves every `Long` of the contract. */
+internal object StrictLongSerializer : KSerializer<Long> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("app.ovrly.contract.StrictLong", PrimitiveKind.LONG)
+
+    override fun deserialize(decoder: Decoder): Long {
+        val element = (decoder as? JsonDecoder)?.decodeJsonElement()
+            ?: return decoder.decodeLong()
+        return requireNotNull(integerLiteral(element)?.longOrNull) {
+            "expected a JSON integer but was $element"
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: Long) = encoder.encodeLong(value)
+}
+
+/** JSON integers only, for the counters and version numbers typed `Int`. */
+internal object StrictIntSerializer : KSerializer<Int> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("app.ovrly.contract.StrictInt", PrimitiveKind.INT)
+
+    override fun deserialize(decoder: Decoder): Int {
+        val element = (decoder as? JsonDecoder)?.decodeJsonElement()
+            ?: return decoder.decodeInt()
+        return requireNotNull(integerLiteral(element)?.intOrNull) {
+            "expected a JSON integer but was $element"
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: Int) = encoder.encodeInt(value)
+}
+
+private fun integerLiteral(element: JsonElement): JsonPrimitive? =
+    (element as? JsonPrimitive)?.takeUnless { it.isString }

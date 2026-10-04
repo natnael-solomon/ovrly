@@ -12,8 +12,10 @@ from services.api.routes.jobs import CancelResponse, DeleteResponse
 from services.jobs.models import jobs
 from services.jobs.queue import JobQueue, PublishRejected
 from services.jobs.states import JobState
+from services.pipeline.intake import intake_stage_key
 
 FIXTURES = Path(__file__).resolve().parents[3] / "packages/contracts/fixtures/jobs"
+URL_BODY = {"source": {"kind": "url", "url": "https://example.com/watch?v=job-actions"}}
 
 
 @pytest.fixture
@@ -158,6 +160,37 @@ async def test_cross_owner_stage_key_cannot_return_another_owners_job(harness):
     async with harness.control.engine.begin() as connection:
         with pytest.raises(ValueError, match="across job owners"):
             await harness.queue.enqueue(connection, key, {}, owner_id=harness.outsider.id)
+
+
+async def test_intake_job_of_a_new_investigation_is_owned_by_its_creator(harness, job_client):
+    """The production dispatcher enqueues with the investigation's owner, so the creator can
+    cancel and delete the job through the API while another principal sees 404."""
+    headers = {"Idempotency-Key": "job-actions-owned"}
+    created = await job_client.post("/v1/investigations", json=URL_BODY, headers=headers)
+    assert created.status_code == 202, created.text
+    investigation_id = uuid.UUID(created.json()["id"])
+    job_id = await harness.job_id_for(intake_stage_key(investigation_id))
+    assert job_id is not None, "the intake job was not enqueued"
+    harness.job_ids.append(job_id)
+    assert (await row(harness, job_id)).owner_id == harness.owner.id
+
+    replay = await job_client.post("/v1/investigations", json=URL_BODY, headers=headers)
+    assert replay.status_code == 202 and replay.json() == created.json()
+    assert await harness.job_id_for(intake_stage_key(investigation_id)) == job_id
+
+    app = create_app(harness.settings())
+    async with app.router.lifespan_context(app), harness.client(app, outsider=True) as outsider:
+        assert_error(await outsider.post(f"/v1/jobs/{job_id}/cancel"), 404, "NOT_FOUND")
+        assert_error(await outsider.delete(f"/v1/jobs/{job_id}"), 404, "NOT_FOUND")
+    assert (await row(harness, job_id)).state == JobState.QUEUED.value
+
+    assert_fixture(await job_client.post(f"/v1/jobs/{job_id}/cancel"), "cancel-effective", job_id)
+    after_cancel = await job_client.get(f"/v1/investigations/{investigation_id}")
+    assert after_cancel.status_code == 200 and after_cancel.json()["state"] == "cancelled"
+    assert_fixture(await job_client.delete(f"/v1/jobs/{job_id}"), "delete-complete", job_id)
+    await harness.assert_deleted(intake_stage_key(investigation_id), job_id)
+    after_delete = await job_client.get(f"/v1/investigations/{investigation_id}")
+    assert after_delete.status_code == 200 and after_delete.json()["state"] == "cancelled"
 
 
 async def test_failed_delete_rolls_back_tombstone_and_returns_shared_error(

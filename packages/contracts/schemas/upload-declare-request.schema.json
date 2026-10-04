@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py UploadCreateRequest field for field.",
+  "title": "UploadDeclareRequest",
+  "description": "Request body for POST /v1/uploads (BE-05, #19). The client declares the bytes it is about to send; the server answers with a scoped upload target and verifies size and hash at completion. size_bytes must be positive; the server enforces OVRLY_UPLOAD_MAX_BYTES and answers 413 UPLOAD_TOO_LARGE above it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["size_bytes", "sha256"],
+  "properties": {
+    "size_bytes": {
+      "type": "integer",
+      "description": "Exact byte length of the content that will be PUT to the target. Positive."
+    },
+    "sha256": {
+      "$ref": "common.schema.json#/$defs/sha256",
+      "description": "SHA-256 of the content, lowercase hexadecimal. Compared with the stored bytes on completion."
+    },
+    "content_type": {
+      "type": "string",
+      "description": "Media type of the content. Optional; the server defaults to application/octet-stream.",
+      "minLength": 3,
+      "maxLength": 128
+    }
+  }
+}
