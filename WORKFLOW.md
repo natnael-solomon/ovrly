@@ -41,7 +41,7 @@ Never commit credentials, signing keys, personal media, machine configuration, g
 | Change | Required evidence |
 | --- | --- |
 | Android code/build | Debug build, unit tests and lint; add or update tests for changed behavior. |
-| Backend | Frozen uv install, Ruff lint/format, strict MyPy, PostgreSQL tests, migrations and coverage checks in the [backend README](backend/README.md#local-checks). Android/evaluation checks do not replace Backend CI. |
+| Backend | Frozen uv install, Ruff lint/format, strict MyPy, PostgreSQL tests, migrations and coverage checks in the [backend README](backend/README.md#local-checks). Job-engine changes also run the [recovery suite](backend/README.md#durable-jobs-and-recovery). Android/evaluation checks do not replace Backend CI. |
 | Recording, permissions, overlay or voice behavior | Applicable automated checks and checks on an authorized physical device. |
 | Documentation only | Relevant documentation checks; no Android build required. |
 
@@ -54,6 +54,7 @@ Record commands and outcomes, remaining limitations and, when applicable, device
 | **Android checks** | On PRs to any branch, pushes to `main` and manual runs: Ubuntu 24.04, JDK 21, wrapper-based debug build/tests/lint, detekt/Compose/ktlint, unsigned release build with a ledger-style code, and real `apksigner`/`aapt2` verification using a temporary fixture key. Dependencies are checksum-verified; no production key or APK upload. |
 | **Evaluation contract checks** | On PRs, pushes to `main` and manual runs: standard-library validator tests, synthetic examples, explicit draft metadata and frozen metadata if `evaluation/corpus/` exists. No media downloads, provider keys or pipeline scoring. See [evaluation](evaluation/README.md). |
 | **Backend checks** | On PRs to any branch, edits/retargeting, `main` pushes and manual runs: change-detection tests, frozen Python 3.11/uv environment, Ruff, strict MyPy, the [contracts package](packages/contracts/README.md) validator and tests, PostgreSQL 16, Alembic upgrade/drift checks and service coverage. Validation has a 15-minute timeout. |
+| **Backend recovery** | Same triggers and change detection as Backend checks, as a separate job: Alembic upgrade, then the Hypothesis job state-machine properties, queue invariant tests and the in-process API + worker recovery cases (worker killed before commit, lease expiry with a live worker, graceful and forced drain) against PostgreSQL 16. Documentation-only diffs skip execution but still report the check. |
 | **Quality checks** | On every PR target/edit, `main` push and manual run: shared pre-commit Android/backend gates, workflow analysis, secret and dependency scanning, and negative fixtures. Includes JDK/SDK setup; no path skips, PostgreSQL or product-provider calls. Thirty-minute timeout. |
 
 Known documentation and isolated evaluation changes skip Android setup/Gradle but still report the check. Changes to Android change detection, unknown paths, initial pushes and manual runs use the full job. Change-detection tests always run. Do not add workflow-level path filters that leave required checks pending.
@@ -185,7 +186,7 @@ Inspect the final squash author and full message, including automatically collec
 
 Squash into `main`, delete the merged branch and close linked issues with `Closes #123` where appropriate.
 
-The active `main` ruleset requires PRs, linear history, one approving review, stale-approval dismissal on push, resolved threads and up-to-date **Android checks** and **Device evidence**. Direct/force pushes and bypass actors are prohibited. Require **Backend checks** (REPO-04) and **Contract checks** (BE-03) when those workflows exist.
+The active `main` ruleset requires PRs, linear history, one approving review, stale-approval dismissal on push, resolved threads and up-to-date **Android checks** and **Device evidence**. Direct/force pushes and bypass actors are prohibited. Require **Backend checks** (REPO-04), **Backend recovery** (BE-04) and **Contract checks** (BE-03) when those workflows exist.
 
 ## 7. Document and release
 

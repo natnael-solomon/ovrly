@@ -1,9 +1,11 @@
 # Backend
 
-Python 3.11 / uv / FastAPI foundation with PostgreSQL, Alembic and a shared worker
-lifecycle. No research, intake, authentication, uploads or durable jobs are
-implemented yet. The worker is explicitly idle: it proves startup, supervision
-and shutdown, not processing or lease draining.
+Python 3.11 / uv / FastAPI foundation with PostgreSQL, Alembic, a shared worker
+lifecycle and a durable PostgreSQL job queue. No research, intake,
+authentication or uploads are implemented yet, and no pipeline stage handlers
+exist, so the worker claims nothing in production; it proves startup,
+supervision, lease draining and shutdown. See
+[Durable jobs and recovery](#durable-jobs-and-recovery).
 
 ## Local setup (Linux / WSL)
 
@@ -69,7 +71,9 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_API_PORT` | Development helper's loopback API port, 8000 |
 | `OVRLY_EMBED_WORKER` | Off for ordinary API startup; helper explicitly enables it |
 | `OVRLY_DATABASE_TIMEOUT_SECONDS` | 3; positive, at most 30 |
-| `OVRLY_WORKER_SHUTDOWN_SECONDS` | 5; positive, at most 30 |
+| `OVRLY_WORKER_SHUTDOWN_SECONDS` | 5; positive, at most 30. Time a stopping worker may spend finishing its in-flight job before the lease is released |
+| `OVRLY_JOB_LEASE_SECONDS` | 30; positive, at most 600. Lease granted per claim; handlers extend it with heartbeats |
+| `OVRLY_JOB_POLL_SECONDS` | 1; positive, at most 60. Idle wait between claim attempts |
 
 The helper checks for at least 2 GiB free on the checkout filesystem before and
 after dependency/image setup and after database startup. It stops further work if
@@ -103,10 +107,56 @@ uv run --frozen --env-file .env.example python -m services.worker
 Do not start the standalone worker alongside an embedded worker for the same
 development session. The standalone entry point handles SIGINT/SIGTERM on
 Linux/WSL; native Windows signal handling is not implemented. Both modes close
-owned database resources. Worker failures are visible and are not automatically
-restarted. The current baseline only establishes Alembic history; it intentionally
-does not create product/job tables. Future schema changes require a reviewed
-migration and upgrade/downgrade coverage, not `create_all()` during API startup.
+owned database resources and drain their lease on shutdown. Worker failures are
+visible and are not automatically restarted. Migration `0001` only establishes
+Alembic history; `0002_jobs` creates the `jobs` and `job_results` tables. Future
+schema changes require a reviewed migration and upgrade/downgrade coverage, not
+`create_all()` during API startup.
+
+### Durable jobs and recovery
+
+`services/jobs` implements the BE-04 engine core. `queue.py` is the PostgreSQL
+queue, `states.py` the pure state machine, `handlers.py` the stage-handler
+protocol and `faults.py` the fault-injection hooks used only by tests.
+
+| Mechanism | Behaviour |
+| --- | --- |
+| Stage key | `(version, stage, input_hash)` is unique on `jobs` and `job_results`; re-enqueueing returns the existing job. `JobQueue.enqueue` takes the caller's connection so the business record and the queue row commit in one transaction. |
+| Claim | `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)`; each claim bumps the fencing token and attempt count, grants a lease and first returns expired leases to the queue (or makes a pending cancellation effective). |
+| Lease | Owner, expiry and a monotonically increasing fencing token. `heartbeat` extends it and reports a cancellation request; a lost lease raises `LeaseLost`. |
+| Publish | Compare-and-set on owner, fencing token, generation, `running` state and no pending cancellation; the result row is written in the same transaction. Any mismatch raises `PublishRejected`. |
+| Cancellation | `request_cancel` cancels a queued job immediately (effective) or sets `cancel_requested` for a leased one (requested); the worker observes it at start, through heartbeats or when the lease expires, and makes it effective. Both bump the generation. |
+| Deletion | `delete` tombstones the job, clears its payload, bumps the generation and removes the published result. |
+| States | queued, leased, running, published, cancelled, deleted, failed. Terminal states only move to deleted; deleted is absorbing. `tests/test_job_states.py` checks random legal and illegal sequences with Hypothesis. |
+| Shutdown | Stop requests end claiming; the in-flight job finishes and publishes within `OVRLY_WORKER_SHUTDOWN_SECONDS`, otherwise the task is cancelled and its lease is released, so a job is neither lost nor run twice by the same worker. |
+
+Workers execute only the stages they have handlers for; `default_handlers()` is
+empty until pipeline tasks register stages. Handlers receive a `JobContext`
+whose `heartbeat()` must be called by long stages. Handler exceptions mark the
+job `failed` with the exception type only; messages are never persisted or
+logged. Retry classes, backoff, `POST .../cancel` and `DELETE` endpoints and
+the remaining fault cases are the next BE-04 change.
+
+`tests/recovery/` holds the in-process API + worker harness with
+`ScriptedFaults` checkpoints (`claimed`, `before_publish`, `after_publish`).
+Covered now: worker killed before the state commit (re-leased, completes exactly
+once), lease expiry while the original worker is alive (stale publish rejected
+by the fencing token), graceful drain in embedded and standalone (SIGTERM)
+modes, forced drain releasing the lease, cancellation before and during a stage,
+lost leases, and the negative invariants (duplicate publish, publish after
+cancel, publish after delete). After each case the harness asserts exactly one
+publication, no lost job, matching stage key, fencing token and generation, and
+no held leases. CI runs this as the separate **Backend recovery** job:
+
+```sh
+OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0.0.1:55432/ovrly' \
+  uv run --frozen pytest -q tests/test_job_states.py tests/test_job_queue.py tests/recovery
+```
+
+Not covered yet: kill after provider call or artifact store, cancel during
+retrieval, delete with a delayed callback, database connection drop, API
+restart with in-flight requests, cross-owner reads and the idempotency tests for
+chunks, investigation POSTs and provider callbacks.
 
 ## Local checks
 
@@ -135,8 +185,9 @@ Ordinary options such as `sslmode` remain supported.
 
 Coverage includes real PostgreSQL readiness, migration round trips and drift,
 safe failure responses, both worker modes, signal shutdown, cancellation and
-resource cleanup, and startup-helper negative paths. No provider keys or
-personal media are needed.
+resource cleanup, the job queue invariants, the recovery harness and
+startup-helper negative paths. The test database is migrated to `head` once per
+session. No provider keys or personal media are needed.
 
 Ruff includes security rules (`S`) and rejects bare `type: ignore` comments
 (`PGH003`); MyPy also enables `ignore-without-code`. Only pytest's `S101`
@@ -237,8 +288,11 @@ implementations; a maintainer must add **Backend checks** to the main ruleset
 after the workflow lands and reports successfully. This PR does not change
 protection settings or complete the whole issue.
 
-Durable jobs, leases and drain/recovery assertions remain
-[BE-04 / #16](https://github.com/natnael-solomon/ovrly/issues/16).
+Durable job retry classes, cancel/delete endpoints and the remaining
+fault-injection cases remain
+[BE-04 / #16](https://github.com/natnael-solomon/ovrly/issues/16); the engine
+core and the first recovery cases are described under
+[Durable jobs and recovery](#durable-jobs-and-recovery).
 
 ## Stack record and boundaries
 

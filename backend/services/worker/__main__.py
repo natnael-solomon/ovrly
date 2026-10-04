@@ -5,6 +5,7 @@ import signal
 from sqlalchemy.exc import SQLAlchemyError
 
 from services.database import Database
+from services.jobs.handlers import default_handlers
 from services.settings import load_settings
 from services.worker.runtime import Worker
 
@@ -12,7 +13,13 @@ from services.worker.runtime import Worker
 async def serve() -> None:
     settings = load_settings()
     database = Database(settings)
-    worker = Worker(database, settings.worker_shutdown_seconds)
+    worker = Worker(
+        database,
+        settings.worker_shutdown_seconds,
+        handlers=default_handlers(),
+        lease_seconds=settings.job_lease_seconds,
+        poll_seconds=settings.job_poll_seconds,
+    )
     loop = asyncio.get_running_loop()
     installed = []
     try:

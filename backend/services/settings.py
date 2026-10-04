@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, gt=0, le=65535)
     database_timeout_seconds: float = Field(default=3, gt=0, le=30)
     worker_shutdown_seconds: float = Field(default=5, gt=0, le=30)
+    job_lease_seconds: float = Field(default=30, gt=0, le=600)
+    job_poll_seconds: float = Field(default=1, gt=0, le=60)
 
     @field_validator("database_url")
     @classmethod
