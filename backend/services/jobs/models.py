@@ -36,11 +36,18 @@ jobs = Table(
     Column("available_at", TIMESTAMP(timezone=True), nullable=False, server_default=func.now()),
     Column("payload", JSONB, nullable=False),
     Column("failure", Text),
+    # Class of the last scheduled retry or of the terminal failure.
+    Column("retry_class", Text),
+    # Scheduled retries per retry class; independent of ``attempts`` (claims).
+    Column("retry_counts", JSONB, nullable=False, server_default="{}"),
+    # Recorded by the handler before a provider call so an unknown outcome reconciles by id.
+    Column("provider_request_id", Text),
     Column("created_at", TIMESTAMP(timezone=True), nullable=False, server_default=func.now()),
     Column("updated_at", TIMESTAMP(timezone=True), nullable=False, server_default=func.now()),
     UniqueConstraint("version", "stage", "input_hash", name="uq_jobs_stage_key"),
     Index("ix_jobs_claimable", "stage", "state", "available_at"),
     Index("ix_jobs_lease_expiry", "lease_expires_at"),
+    Index("ix_jobs_provider_request_id", "provider_request_id"),
 )
 
 job_results = Table(

@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from services.database import Database
 from services.jobs.handlers import default_handlers
+from services.jobs.retries import RetryPolicy
 from services.settings import load_settings
 from services.worker.runtime import Worker
 
@@ -19,6 +20,7 @@ async def serve() -> None:
         handlers=default_handlers(),
         lease_seconds=settings.job_lease_seconds,
         poll_seconds=settings.job_poll_seconds,
+        retry_policy=RetryPolicy.from_settings(settings),
     )
     loop = asyncio.get_running_loop()
     installed = []

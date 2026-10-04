@@ -4,10 +4,13 @@ import asyncio
 import uuid
 from contextlib import suppress
 
+from sqlalchemy import text
+
 from services.api.main import create_app
 from services.database import Database
 from services.jobs.faults import Checkpoint, SimulatedCrash
 from services.jobs.queue import JobQueue, StageKey
+from services.jobs.retries import UnknownOutcome
 from services.settings import Settings
 from services.worker.runtime import Worker
 
@@ -29,6 +32,47 @@ class ScriptedFaults:
             raise SimulatedCrash(f"simulated crash at {name}")
 
 
+class StubProvider:
+    """In-test stand-in for a hosted model call; no network, no credentials.
+
+    ``call`` records the request id and returns a result. With ``timeout_next`` set, the
+    next call raises ``UnknownOutcome`` after the work was accepted, so the following
+    attempt must reconcile through ``lookup`` instead of calling again.
+    """
+
+    def __init__(self):
+        self.calls = []
+        self.accepted = {}
+        self.timeout_next = False
+        self.lookups = []
+
+    async def call(self, request_id, payload):
+        self.calls.append(request_id)
+        result = {"request_id": request_id, "text": f"result for {payload.get('input')}"}
+        self.accepted[request_id] = result
+        if self.timeout_next:
+            self.timeout_next = False
+            raise UnknownOutcome("provider timed out")
+        return result
+
+    async def lookup(self, request_id):
+        self.lookups.append(request_id)
+        return self.accepted.get(request_id)
+
+
+class StubArtifactStore:
+    """Idempotent artifact writes keyed by the stage key."""
+
+    def __init__(self):
+        self.writes = []
+        self.artifacts = {}
+
+    async def put(self, key, content):
+        self.writes.append(key)
+        self.artifacts.setdefault(key, content)
+        return f"artifact://{key.stage}/{key.input_hash}"
+
+
 class Harness:
     def __init__(self, database_url):
         self.database_url = database_url
@@ -38,6 +82,8 @@ class Harness:
         self.control = self.database()
         self.queue = JobQueue(self.control)
         self.calls = []
+        self.provider = StubProvider()
+        self.artifacts = StubArtifactStore()
 
     def settings(self, **overrides):
         values = {
@@ -55,7 +101,7 @@ class Harness:
         self.databases.append(database)
         return database
 
-    def worker(self, handler, *, faults=None, worker_id=None, **overrides):
+    def worker(self, handler, *, faults=None, worker_id=None, retry_policy=None, **overrides):
         settings = self.settings(**overrides)
         worker = Worker(
             self.database(**overrides),
@@ -64,6 +110,7 @@ class Harness:
             faults=faults,
             lease_seconds=settings.job_lease_seconds,
             poll_seconds=settings.job_poll_seconds,
+            retry_policy=retry_policy,
             worker_id=worker_id,
         )
         self.workers.append(worker)
@@ -89,6 +136,30 @@ class Harness:
         async def handler(job, context):
             self.calls.append((job.attempts, job.lease.worker_id))
             return result if result is not None else {"attempt": job.attempts}
+
+        return handler
+
+    def provider_handler(self, *, store_artifact=False):
+        """Stub stage: record a request id, call the provider once, reconcile on re-lease,
+        optionally store an artifact under the stage key, then return the result."""
+
+        async def handler(job, context):
+            self.calls.append((job.attempts, job.lease.worker_id))
+            request_id = job.provider_request_id
+            if request_id is None:
+                request_id = f"req-{job.id.hex[:8]}-{job.attempts}"
+                await context.record_request_id(request_id)
+                result = await self.provider.call(request_id, job.payload)
+                await context.checkpoint(Checkpoint.AFTER_PROVIDER_CALL, job)
+            else:
+                result = await self.provider.lookup(request_id)
+                if result is None:
+                    raise UnknownOutcome("provider has no record of the request")
+            if store_artifact:
+                location = await self.artifacts.put(job.key, result)
+                await context.checkpoint(Checkpoint.AFTER_ARTIFACT_STORE, job)
+                result = {**result, "artifact": location}
+            return result
 
         return handler
 
@@ -126,9 +197,36 @@ class Harness:
             assert worker.owned_leases == frozenset()
         return result
 
+    async def assert_deleted(self, key, job_id):
+        """Tombstoned, payload cleared, no published result, no held lease."""
+        record = await self.queue.get(job_id)
+        assert record is not None, "A tombstone must remain"
+        assert record.status.state.value == "deleted", record.status
+        assert record.lease_owner is None and record.lease_expires_at is None
+        assert await self.queue.published(key) == [], "Deleted content was resurrected"
+        async with self.control.engine.connect() as connection:
+            payload = await connection.scalar(
+                text("SELECT payload FROM jobs WHERE id = :id"), {"id": job_id}
+            )
+        assert payload == {}, "A tombstone must not keep its payload"
+        for worker in self.workers:
+            assert job_id not in worker.owned_leases
+        return record
+
+    async def assert_failed(self, key, job_id, retry_class, *, failure=None):
+        record = await self.queue.get(job_id)
+        assert record is not None, "The job was lost"
+        assert record.status.state.value == "failed", record.status
+        assert record.retry_class is retry_class
+        if failure is not None:
+            assert record.failure == failure
+        assert record.lease_owner is None
+        assert await self.queue.published(key) == []
+        return record
+
     async def close(self):
         for worker in self.workers:
-            with suppress(Exception):
+            with suppress(Exception, SimulatedCrash):
                 await worker.stop()
         for database in self.databases:
             await database.close()

@@ -1,7 +1,8 @@
 import logging
 from pathlib import Path
+from typing import Self
 
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
@@ -25,6 +26,18 @@ class Settings(BaseSettings):
     upload_target_seconds: int = Field(default=900, gt=0, le=86400)
     max_shared_duration_seconds: int = Field(default=600, gt=0)
     storage_dir: Path = Path(".data/uploads")
+    job_retry_transient_attempts: int = Field(default=5, ge=0, le=20)
+    job_retry_rate_limited_attempts: int = Field(default=5, ge=0, le=20)
+    job_retry_schema_repair_attempts: int = Field(default=2, ge=0, le=10)
+    job_retry_unknown_outcome_attempts: int = Field(default=3, ge=0, le=10)
+    job_retry_backoff_seconds: float = Field(default=1, gt=0, le=60)
+    job_retry_max_backoff_seconds: float = Field(default=60, gt=0, le=3600)
+
+    @model_validator(mode="after")
+    def backoff_bounds(self) -> Self:
+        if self.job_retry_max_backoff_seconds < self.job_retry_backoff_seconds:
+            raise ValueError("job_retry_max_backoff_seconds must be at least the base backoff")
+        return self
 
     @field_validator("database_url")
     @classmethod

@@ -1,12 +1,13 @@
 # Backend
 
 Python 3.11 / uv / FastAPI foundation with PostgreSQL, Alembic, a shared worker
-lifecycle and a durable PostgreSQL job queue. The API mints guest principals,
-accepts uploads and records investigations behind bearer authentication (see
-[Identity and intake API](#identity-and-intake-api)). No research processing or
-account linking is implemented, recorded investigations are not yet handed to
-the queue, and no pipeline stage handlers exist, so the worker claims nothing in
-production; it proves startup, supervision, lease draining and shutdown. See
+lifecycle and a durable PostgreSQL job queue with typed retry classes. The API
+mints guest principals, accepts uploads and records investigations behind
+bearer authentication (see [Identity and intake API](#identity-and-intake-api)).
+No research processing or account linking is implemented, recorded
+investigations are not yet handed to the queue, and no pipeline stage handlers
+exist, so the worker claims nothing in production; it proves startup,
+supervision, lease draining, retries and shutdown. See
 [Durable jobs and recovery](#durable-jobs-and-recovery).
 
 ## Local setup (Linux / WSL)
@@ -80,6 +81,12 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_UPLOAD_TARGET_SECONDS` | 900; how long an upload target accepts bytes and completion, at most 86400 |
 | `OVRLY_MAX_SHARED_DURATION_SECONDS` | 600; declared shared-media duration limit from BC-D01 |
 | `OVRLY_STORAGE_DIR` | `.data/uploads`, relative to `backend/` and Git-ignored; local filesystem upload store |
+| `OVRLY_JOB_RETRY_TRANSIENT_ATTEMPTS` | 5; 0 to 20. Scheduled retries for the `transient` class before the job fails |
+| `OVRLY_JOB_RETRY_RATE_LIMITED_ATTEMPTS` | 5; 0 to 20. Retries for the `rate_limited` class |
+| `OVRLY_JOB_RETRY_SCHEMA_REPAIR_ATTEMPTS` | 2; 0 to 10. Repair attempts for the `invalid_model_schema` class |
+| `OVRLY_JOB_RETRY_UNKNOWN_OUTCOME_ATTEMPTS` | 3; 0 to 10. Reconciliation attempts for the `unknown_outcome` class |
+| `OVRLY_JOB_RETRY_BACKOFF_SECONDS` | 1; positive, at most 60. Base of the exponential backoff |
+| `OVRLY_JOB_RETRY_MAX_BACKOFF_SECONDS` | 60; positive, at most 3600 and at least the base. Caps backoff and provider retry-after hints |
 
 The helper checks for at least 2 GiB free on the checkout filesystem before and
 after dependency/image setup and after database startup. It stops further work if
@@ -115,56 +122,98 @@ development session. The standalone entry point handles SIGINT/SIGTERM on
 Linux/WSL; native Windows signal handling is not implemented. Both modes close
 owned database resources and drain their lease on shutdown. Worker failures are
 visible and are not automatically restarted. Migration `0001` only establishes
-Alembic history; `0002_jobs` creates the `jobs` and `job_results` tables and
+Alembic history; `0002_jobs` creates the `jobs` and `job_results` tables,
 `0003_identity_intake` creates the principal, credential, upload, investigation
-and idempotency tables defined in `services/models.py`. Future schema changes
-require a reviewed migration and upgrade/downgrade coverage, not `create_all()`
-during API startup.
+and idempotency tables defined in `services/models.py`, and `0004_job_retries`
+adds the retry class, per-class retry counters and the provider request id to
+`jobs`. Future schema changes require a reviewed migration and
+upgrade/downgrade coverage, not `create_all()` during API startup.
 
 ### Durable jobs and recovery
 
-`services/jobs` implements the BE-04 engine core. `queue.py` is the PostgreSQL
+`services/jobs` implements the BE-04 engine. `queue.py` is the PostgreSQL
 queue, `states.py` the pure state machine, `handlers.py` the stage-handler
-protocol and `faults.py` the fault-injection hooks used only by tests.
+protocol, `retries.py` the retry classes and policy, and `faults.py` the
+fault-injection hooks used only by tests.
 
 | Mechanism | Behaviour |
 | --- | --- |
 | Stage key | `(version, stage, input_hash)` is unique on `jobs` and `job_results`; re-enqueueing returns the existing job. `JobQueue.enqueue` takes the caller's connection so the business record and the queue row commit in one transaction. |
-| Claim | `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)`; each claim bumps the fencing token and attempt count, grants a lease and first returns expired leases to the queue (or makes a pending cancellation effective). |
+| Claim | `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)`; each claim bumps the fencing token and attempt count, grants a lease and first returns expired leases to the queue (or makes a pending cancellation effective). Only jobs whose `available_at` has passed are claimable. |
 | Lease | Owner, expiry and a monotonically increasing fencing token. `heartbeat` extends it and reports a cancellation request; a lost lease raises `LeaseLost`. |
 | Publish | Compare-and-set on owner, fencing token, generation, `running` state and no pending cancellation; the result row is written in the same transaction. Any mismatch raises `PublishRejected`. |
+| Retry | A handler raises a typed outcome (table below). The policy either schedules the job through `available_at`, recording the class and a per-class counter in `retry_counts`, or declares the class exhausted so the job fails with `retry_class` set. A pending cancellation wins over a retry. |
+| Request id | `JobContext.record_request_id` persists the provider request id before the call (fenced). A re-leased attempt sees it on `ClaimedJob.provider_request_id` and reconciles instead of calling again; `find_by_request_id` routes callbacks. The policy refuses to retry an `UnknownOutcome` when no id was recorded. |
+| Infrastructure errors | Database, socket and timeout errors raised during a stage leave the outcome unknown: the worker never marks the job failed, hands the lease back if it can and otherwise lets it expire, so the job is re-leased. The worker loop survives. |
 | Cancellation | `request_cancel` cancels a queued job immediately (effective) or sets `cancel_requested` for a leased one (requested); the worker observes it at start, through heartbeats or when the lease expires, and makes it effective. Both bump the generation. |
-| Deletion | `delete` tombstones the job, clears its payload, bumps the generation and removes the published result. |
+| Deletion | `delete` tombstones the job, clears its payload, bumps the generation and removes the published result. The tombstone keeps `provider_request_id` so a late callback is routed to nothing. |
 | States | queued, leased, running, published, cancelled, deleted, failed. Terminal states only move to deleted; deleted is absorbing. `tests/test_job_states.py` checks random legal and illegal sequences with Hypothesis. |
 | Shutdown | Stop requests end claiming; the in-flight job finishes and publishes within `OVRLY_WORKER_SHUTDOWN_SECONDS`, otherwise the task is cancelled and its lease is released, so a job is neither lost nor run twice by the same worker. |
 
+| Retry class | Raised as | Schedule |
+| --- | --- | --- |
+| `transient` | `Transient` (provider 5xx, resets) | Exponential backoff with full jitter from `OVRLY_JOB_RETRY_BACKOFF_SECONDS`, capped by the maximum; `OVRLY_JOB_RETRY_TRANSIENT_ATTEMPTS` retries |
+| `rate_limited` | `RateLimited(retry_after_seconds)` (provider 429) | The provider's hint clamped to the maximum backoff, otherwise backoff; `OVRLY_JOB_RETRY_RATE_LIMITED_ATTEMPTS` retries |
+| `non_retriable_input` | `NonRetriableInput` | Never; the job fails on the first outcome |
+| `invalid_model_schema` | `InvalidModelSchema` | Backoff; `OVRLY_JOB_RETRY_SCHEMA_REPAIR_ATTEMPTS` repair attempts, visible to the handler through `retry_counts` |
+| `unknown_outcome` | `UnknownOutcome` (provider timeout) | Backoff only when a request id was recorded; `OVRLY_JOB_RETRY_UNKNOWN_OUTCOME_ATTEMPTS` reconciliation attempts; never a silent re-call |
+
 Workers execute only the stages they have handlers for; `default_handlers()` is
 empty until pipeline tasks register stages. Handlers receive a `JobContext`
-whose `heartbeat()` must be called by long stages. Handler exceptions mark the
-job `failed` with the exception type only; messages are never persisted or
-logged. Retry classes, backoff, `POST .../cancel` and `DELETE` endpoints and
-the remaining fault cases are the next BE-04 change.
+whose `heartbeat()` must be called by long stages. Other handler exceptions
+mark the job `failed` with the exception type only; messages are never
+persisted or logged. `POST /v1/jobs/{id}/cancel`, `DELETE /v1/jobs/{id}` and
+the cross-owner-read invariant are
+[BE-04 part 3 / #75](https://github.com/natnael-solomon/ovrly/issues/75), built
+on the BE-05 (#19) error shape and identity; the queue primitives they call
+(`request_cancel`, `delete`) are already here.
 
 `tests/recovery/` holds the in-process API + worker harness with
-`ScriptedFaults` checkpoints (`claimed`, `before_publish`, `after_publish`).
-Covered now: worker killed before the state commit (re-leased, completes exactly
-once), lease expiry while the original worker is alive (stale publish rejected
-by the fencing token), graceful drain in embedded and standalone (SIGTERM)
-modes, forced drain releasing the lease, cancellation before and during a stage,
-lost leases, and the negative invariants (duplicate publish, publish after
-cancel, publish after delete). After each case the harness asserts exactly one
-publication, no lost job, matching stage key, fencing token and generation, and
-no held leases. CI runs this as the separate **Backend recovery** job:
+`ScriptedFaults` checkpoints (`claimed`, `before_publish`, `after_publish`,
+plus the stage-level `after_provider_call` and `after_artifact_store` that stub
+stages hit through `JobContext.checkpoint`). No provider or artifact store is
+integrated yet, so those stages are stubs registered only in tests. Covered:
+
+- Worker killed before the state commit, after the provider call (request id
+  recorded, reconciled on re-lease, provider called once) and after the
+  artifact store (idempotent write under the stage key); each re-leased and
+  completed exactly once.
+- Lease expiry while the original worker is alive (stale publish rejected by
+  the fencing token); lost leases detected by heartbeats and at start.
+- Graceful drain in embedded and standalone (SIGTERM) modes, forced drain
+  releasing the lease, and an API lifespan restart with an in-flight request
+  and a running stage (released, re-leased by the new lifespan, completed once).
+- Cancellation before a stage, during a stage and mid-retrieval (no further
+  chunk fetched); deletion with a delayed provider callback (late publish
+  rejected, no resurrected content, tombstone kept). #75 adds the API-driven
+  variants.
+- Database connection dropped mid-stage with `pg_terminate_backend`, and the
+  variant where the release fails too (lease expires); the worker survives and
+  the job is never marked failed.
+- Every retry class through the worker (`test_retries.py`): success after
+  backoff, exhaustion with the class recorded, the clamped rate-limit hint,
+  immediate failure for non-retriable input, bounded schema repair, unknown
+  outcome reconciled by request id, exhausted, or refused without an id.
+- Duplicate provider callback with the same request id (`test_idempotency.py`):
+  concurrent and late duplicates publish once; a callback for a deleted job is
+  dropped.
+- Negative invariants: duplicate publish, publish after cancel, publish after
+  delete, stale fencing token, stale lease retry or request-id write.
+
+After each case the harness asserts exactly one publication (or none for
+cancelled, deleted and failed jobs), no lost job, matching stage key, fencing
+token and generation, no held leases and, for deletions, an empty payload and
+no result. CI runs this as the separate **Backend recovery** job:
 
 ```sh
 OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0.0.1:55432/ovrly' \
-  uv run --frozen pytest -q tests/test_job_states.py tests/test_job_queue.py tests/recovery
+  uv run --frozen pytest -q tests/test_job_states.py tests/test_job_retries.py \
+  tests/test_job_queue.py tests/recovery
 ```
 
-Not covered yet: kill after provider call or artifact store, cancel during
-retrieval, delete with a delayed callback, database connection drop, API
-restart with in-flight requests, cross-owner reads and the idempotency tests for
-chunks, investigation POSTs and provider callbacks.
+Not covered here: the cancel/delete endpoints and cross-owner reads (#75), and
+the idempotency tests for chunk `(session, seq)` and investigation POSTs, which
+belong to the intake endpoints that introduce those resources.
 
 ## Identity and intake API
 
@@ -351,10 +400,10 @@ implementations; a maintainer must add **Backend checks** to the main ruleset
 after the workflow lands and reports successfully. This PR does not change
 protection settings or complete the whole issue.
 
-Durable job retry classes, cancel/delete endpoints and the remaining
-fault-injection cases remain
-[BE-04 / #16](https://github.com/natnael-solomon/ovrly/issues/16); the engine
-core and the first recovery cases are described under
+Durable job cancel/delete endpoints and the cross-owner-read invariant remain
+[BE-04 part 3 / #75](https://github.com/natnael-solomon/ovrly/issues/75) under
+[BE-04 / #16](https://github.com/natnael-solomon/ovrly/issues/16); the engine,
+retry classes and recovery cases are described under
 [Durable jobs and recovery](#durable-jobs-and-recovery).
 
 ## Stack record and boundaries

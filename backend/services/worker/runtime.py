@@ -12,8 +12,12 @@ from services.database import Database
 from services.jobs.faults import Checkpoint, FaultInjector, NoFaults
 from services.jobs.handlers import CancellationRequested, JobContext, JobHandler
 from services.jobs.queue import ClaimedJob, JobQueue, Lease, LeaseLost, PublishRejected
+from services.jobs.retries import RetryableError, RetryPolicy, UnknownOutcome
 
 logger = logging.getLogger(__name__)
+
+# Infrastructure failures leave the stage outcome unknown; the job is never marked failed.
+INFRASTRUCTURE_ERRORS = (SQLAlchemyError, OSError, TimeoutError)
 
 
 class Worker:
@@ -26,6 +30,7 @@ class Worker:
         faults: FaultInjector | None = None,
         lease_seconds: float = 30,
         poll_seconds: float = 1,
+        retry_policy: RetryPolicy | None = None,
         worker_id: str | None = None,
     ):
         self.database = database
@@ -34,6 +39,7 @@ class Worker:
         self.faults: FaultInjector = faults if faults is not None else NoFaults()
         self.lease_seconds = lease_seconds
         self.poll_seconds = poll_seconds
+        self.retry_policy = retry_policy if retry_policy is not None else RetryPolicy()
         self.worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}-{uuid4().hex[:8]}"
         self.queue = JobQueue(database)
         self._owned: dict[UUID, Lease] = {}
@@ -78,7 +84,7 @@ class Worker:
                 else:
                     logger.warning("Job %s lease lost before it started", job.id)
                 return
-            context = JobContext(self.queue, lease, self.lease_seconds)
+            context = JobContext(self.queue, lease, self.lease_seconds, self.faults)
             try:
                 result = await self.handlers[job.key.stage](job, context)
             except CancellationRequested:
@@ -87,6 +93,15 @@ class Worker:
                 return
             except LeaseLost:
                 logger.warning("Job %s lease lost during stage %s", job.id, job.key.stage)
+                return
+            except RetryableError as outcome:
+                await self._retry(job, outcome)
+                return
+            except INFRASTRUCTURE_ERRORS:
+                # The stage outcome is unknown; hand the lease back or let it expire so the
+                # job is re-leased. The worker itself keeps running.
+                logger.warning("Job %s infrastructure error in stage %s", job.id, job.key.stage)
+                await self._release(lease)
                 return
             except Exception as error:
                 # Only the exception type is recorded; messages may contain private details.
@@ -103,16 +118,49 @@ class Worker:
         except asyncio.CancelledError:
             # Forced shutdown: hand the lease back so the job is neither lost nor duplicated.
             with suppress(TimeoutError):
-                await asyncio.wait_for(asyncio.shield(self._release(lease)), self.shutdown_seconds)
+                await asyncio.wait_for(
+                    asyncio.shield(self._release(lease, reason="during shutdown")),
+                    self.shutdown_seconds,
+                )
             raise
         finally:
             self._owned.pop(job.id, None)
 
-    async def _release(self, lease: Lease) -> None:
+    async def _retry(self, job: ClaimedJob, outcome: RetryableError) -> None:
+        """Schedule the next attempt per the retry class, or fail with the class recorded."""
+        recorded = job.provider_request_id is not None
+        if not recorded and isinstance(outcome, UnknownOutcome):
+            # The handler records the id during this attempt; the claim predates it.
+            record = await self.queue.get(job.id)
+            recorded = record is not None and record.provider_request_id is not None
+        decision = self.retry_policy.decide(outcome, job.retry_counts, request_id_recorded=recorded)
+        retry_class = decision.retry_class
+        if decision.delay_seconds is None:
+            logger.error(
+                "Job %s failed in stage %s (%s, retries exhausted after %d)",
+                job.id,
+                job.key.stage,
+                retry_class.value,
+                decision.count - 1,
+            )
+            await self.queue.fail(job.lease, type(outcome).__name__, retry_class)
+            return
+        if await self.queue.retry(job.lease, retry_class, decision.delay_seconds):
+            logger.info(
+                "Job %s retry %d (%s) scheduled in %.2fs",
+                job.id,
+                decision.count,
+                retry_class.value,
+                decision.delay_seconds,
+            )
+        else:
+            logger.warning("Job %s lease lost before retry %s", job.id, retry_class.value)
+
+    async def _release(self, lease: Lease, *, reason: str = "after an error") -> None:
         try:
             if await self.queue.release(lease):
-                logger.info("Job %s lease released during shutdown", lease.job_id)
-        except (SQLAlchemyError, OSError, TimeoutError):
+                logger.info("Job %s lease released %s", lease.job_id, reason)
+        except INFRASTRUCTURE_ERRORS:
             logger.error("Job %s lease could not be released; it will expire", lease.job_id)
 
     def _finished(self, task: asyncio.Task[None]) -> None:

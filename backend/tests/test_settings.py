@@ -31,6 +31,14 @@ def test_invalid_database_url(value):
         ("upload_max_bytes", 0),
         ("upload_target_seconds", 86401),
         ("max_shared_duration_seconds", -1),
+        ("job_lease_seconds", 601),
+        ("job_poll_seconds", 0),
+        ("job_retry_transient_attempts", -1),
+        ("job_retry_rate_limited_attempts", 21),
+        ("job_retry_schema_repair_attempts", 11),
+        ("job_retry_unknown_outcome_attempts", 11),
+        ("job_retry_backoff_seconds", 61),
+        ("job_retry_max_backoff_seconds", 3601),
     ],
 )
 def test_invalid_options(field, value):
@@ -44,6 +52,23 @@ def test_intake_limit_defaults():
     assert settings.upload_target_seconds == 900
     assert settings.max_shared_duration_seconds == 600
     assert str(settings.storage_dir) == str(Path(".data/uploads"))
+
+
+def test_retry_defaults_and_backoff_ordering():
+    settings = Settings(database_url=URL, _env_file=None)
+    assert settings.job_retry_transient_attempts == 5
+    assert settings.job_retry_rate_limited_attempts == 5
+    assert settings.job_retry_schema_repair_attempts == 2
+    assert settings.job_retry_unknown_outcome_attempts == 3
+    assert settings.job_retry_backoff_seconds == 1
+    assert settings.job_retry_max_backoff_seconds == 60
+    with pytest.raises(ValidationError, match="at least the base backoff"):
+        Settings(
+            database_url=URL,
+            _env_file=None,
+            job_retry_backoff_seconds=10,
+            job_retry_max_backoff_seconds=5,
+        )
 
 
 def test_missing_settings_error_is_safe(monkeypatch, tmp_path, caplog):
