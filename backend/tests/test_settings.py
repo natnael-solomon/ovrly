@@ -52,6 +52,9 @@ def test_intake_limit_defaults():
     assert settings.upload_target_seconds == 900
     assert settings.max_shared_duration_seconds == 600
     assert str(settings.storage_dir) == str(Path(".data/uploads"))
+    assert settings.google_client_id == ""
+    with pytest.raises(ValidationError):
+        Settings(database_url=URL, _env_file=None, google_client_id="x" * 257)
 
 
 def test_retry_defaults_and_backoff_ordering():

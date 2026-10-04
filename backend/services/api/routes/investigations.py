@@ -22,15 +22,32 @@ from services.api.schemas import (
     InvestigationResponse,
     UploadSource,
 )
+from services.jobs.models import jobs
 from services.models import idempotency_keys, investigations, uploads
+from services.pipeline.intake import (
+    COVERAGE_PLACEHOLDER,
+    INITIAL_STATE,
+    INTAKE_STAGE,
+    INTAKE_VERSION,
+    intake_stage_key,
+)
 
 router = APIRouter(tags=["investigations"])
 
 IDEMPOTENCY_HEADER = "Idempotency-Key"
 _LIST_LIMIT = 100
-INITIAL_STATE = "queued"
-INITIAL_STAGE = "intake"
-COVERAGE_PLACEHOLDER: dict[str, Any] = {"status": "not_started"}
+INITIAL_STAGE = INTAKE_STAGE
+# Job states as seen by the client. Worker internals (leases, retries, failure types)
+# never appear; a failed job without a recorded cause reports this generic code.
+_JOB_STATE_TO_INVESTIGATION = {
+    "queued": "queued",
+    "leased": "queued",
+    "running": "running",
+    "failed": "failed",
+    "cancelled": "cancelled",
+    "deleted": "cancelled",
+}
+PROCESSING_FAILED = "PROCESSING_FAILED"
 
 
 def _source(row: Row[Any]) -> dict[str, Any]:
@@ -44,18 +61,45 @@ def _source(row: Row[Any]) -> dict[str, Any]:
     return source
 
 
-def investigation_response(row: Row[Any]) -> InvestigationResponse:
+def investigation_response(row: Row[Any], job_state: str | None = None) -> InvestigationResponse:
+    """Build the client view; ``job_state`` (when a job exists) overrides the stored state.
+
+    A published job means the stage finished and the stored state stands.
+    """
+    state = row.state
+    error_code = row.error_code
+    if job_state is not None and job_state != "published":
+        state = _JOB_STATE_TO_INVESTIGATION[job_state]
+        if state == "failed" and error_code is None:
+            error_code = PROCESSING_FAILED
     return InvestigationResponse(
         id=row.id,
-        state=row.state,
+        state=state,
         stage=row.stage,
         coverage=COVERAGE_PLACEHOLDER,
         version=row.version,
-        error=safe_error(row.error_code),
+        error=safe_error(error_code),
         source=_source(row),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+async def job_states(
+    connection: AsyncConnection, investigation_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """State of each investigation's intake job, keyed by investigation id."""
+    if not investigation_ids:
+        return {}
+    keys = {intake_stage_key(identifier).input_hash: identifier for identifier in investigation_ids}
+    rows = await connection.execute(
+        select(jobs.c.input_hash, jobs.c.state).where(
+            jobs.c.version == INTAKE_VERSION,
+            jobs.c.stage == INTAKE_STAGE,
+            jobs.c.input_hash.in_(list(keys)),
+        )
+    )
+    return {keys[row.input_hash]: row.state for row in rows}
 
 
 def request_hash(body: InvestigationCreateRequest) -> str:
@@ -160,7 +204,7 @@ async def _create(
         )
     )
     dispatcher: InvestigationDispatcher = request.app.state.dispatcher
-    await dispatcher.dispatch(connection, row.id)
+    await dispatcher.dispatch(connection, row.id, principal.id)
     return 202, response
 
 
@@ -202,7 +246,10 @@ async def list_investigations(
     )
     async with engine(request).connect() as connection:
         rows = (await connection.execute(query)).all()
-    return InvestigationListResponse(items=[investigation_response(row) for row in rows])
+        states = await job_states(connection, [row.id for row in rows])
+    return InvestigationListResponse(
+        items=[investigation_response(row, states.get(row.id)) for row in rows]
+    )
 
 
 @router.get("/investigations/{investigation_id}", response_model=InvestigationResponse)
@@ -211,4 +258,5 @@ async def get_investigation(
 ) -> InvestigationResponse:
     async with engine(request).connect() as connection:
         row = await load_owned(connection, investigations, investigation_id, principal)
-    return investigation_response(row)
+        states = await job_states(connection, [row.id])
+    return investigation_response(row, states.get(row.id))

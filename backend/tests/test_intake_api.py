@@ -12,7 +12,9 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 
 from services.api.main import create_app
+from services.jobs.models import jobs
 from services.models import credentials, idempotency_keys, investigations, uploads
+from services.pipeline.intake import intake_stage_key
 from services.settings import Settings
 
 ERROR_FIELDS = {"code", "message", "retryable", "action", "request_id"}
@@ -146,6 +148,11 @@ async def test_client_supplied_identity_is_rejected_everywhere(client, kwargs, s
     )
     listing = await client.get("/v1/investigations", params={"owner_id": "x"}, headers=headers)
     assert_error(listing, 400, "CLIENT_IDENTITY_REJECTED")
+    link = {**kwargs, "headers": {**headers, **kwargs.get("headers", {})}}
+    link["json"] = {"provider": "google", "id_token": "synthetic", **kwargs.get("json", {})}
+    assert_error(
+        await client.post("/v1/principals/link", **link), status, "CLIENT_IDENTITY_REJECTED"
+    )
 
 
 async def test_missing_or_invalid_bearer(client, app):
@@ -439,6 +446,11 @@ async def test_safe_error_field_and_list_order(client, app):
             .where(investigations.c.id == uuid.UUID(ids[0]))
             .values(state="failed", error_code="SOURCE_UNAVAILABLE")
         )
+        await connection.execute(
+            update(jobs)
+            .where(jobs.c.input_hash == intake_stage_key(uuid.UUID(ids[0])).input_hash)
+            .values(state="failed", failure="ValueError")
+        )
     listing = await client.get("/v1/investigations", headers=headers)
     items = listing.json()["items"]
     assert [item["id"] for item in items] == list(reversed(ids))
@@ -449,24 +461,94 @@ async def test_safe_error_field_and_list_order(client, app):
         "message": "Processing failed",
         "retryable": False,
     }
+    assert "ValueError" not in listing.text
+
+
+async def test_investigation_create_enqueues_exactly_one_intake_job(client, app):
+    headers = {**(await guest(client)), "Idempotency-Key": "handoff"}
+    first = await client.post("/v1/investigations", json=URL_BODY, headers=headers)
+    assert first.status_code == 202, first.text
+    replay = await client.post("/v1/investigations", json=URL_BODY, headers=headers)
+    assert replay.status_code == 202 and replay.json() == first.json()
+    investigation_id = uuid.UUID(first.json()["id"])
+    key = intake_stage_key(investigation_id)
+    async with app.state.database.engine.connect() as connection:
+        rows = (
+            await connection.execute(select(jobs).where(jobs.c.input_hash == key.input_hash))
+        ).all()
+        owner_id = await connection.scalar(
+            select(investigations.c.owner_id).where(investigations.c.id == investigation_id)
+        )
+    assert len(rows) == 1
+    (job,) = rows
+    assert job.stage == "intake" and job.version == 1 and job.state == "queued"
+    assert job.payload == {"investigation_id": str(investigation_id), "owner_id": str(owner_id)}
+
+
+@pytest.mark.parametrize(
+    "job_state,expected_state,expected_error",
+    [
+        ("queued", "queued", None),
+        ("leased", "queued", None),
+        ("running", "running", None),
+        ("published", "queued", None),
+        ("failed", "failed", "PROCESSING_FAILED"),
+        ("cancelled", "cancelled", None),
+        ("deleted", "cancelled", None),
+    ],
+)
+async def test_investigation_state_reflects_job_state(
+    client, app, job_state, expected_state, expected_error
+):
+    headers = await guest(client)
+    created = await client.post(
+        "/v1/investigations", json=URL_BODY, headers={**headers, "Idempotency-Key": "state"}
+    )
+    investigation_id = uuid.UUID(created.json()["id"])
+    async with app.state.database.engine.begin() as connection:
+        await connection.execute(
+            update(jobs)
+            .where(jobs.c.input_hash == intake_stage_key(investigation_id).input_hash)
+            .values(
+                state=job_state,
+                lease_owner="worker-host-1234",
+                failure="PrivateExceptionType",
+                retry_class="transient",
+            )
+        )
+    fetched = await client.get(f"/v1/investigations/{investigation_id}", headers=headers)
+    assert fetched.status_code == 200, fetched.text
+    body = fetched.json()
+    assert body["state"] == expected_state and body["stage"] == "intake"
+    if expected_error is None:
+        assert body["error"] is None
+    else:
+        assert body["error"]["code"] == expected_error
+    for internal in ("worker-host-1234", "PrivateExceptionType", "transient", "leased", "lease"):
+        assert internal not in fetched.text
+    listed = await client.get("/v1/investigations", headers=headers)
+    assert listed.json()["items"][0]["state"] == expected_state
 
 
 async def test_dispatcher_runs_in_the_same_transaction(database_url, tmp_path):
     seen = []
 
     class RecordingDispatcher:
-        async def dispatch(self, connection, investigation_id):
+        async def dispatch(self, connection, investigation_id, owner_id):
             row = (
                 await connection.execute(
                     select(investigations).where(investigations.c.id == investigation_id)
                 )
             ).one()
+            assert row.owner_id == owner_id
             seen.append(row.id)
             if len(seen) == 2:
                 raise RuntimeError("dispatch failed")
 
-    app = create_app(Settings(database_url=database_url, storage_dir=tmp_path, _env_file=None))
-    app.state.dispatcher = RecordingDispatcher()
+    app = create_app(
+        Settings(database_url=database_url, storage_dir=tmp_path, _env_file=None),
+        dispatcher=RecordingDispatcher(),
+    )
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),

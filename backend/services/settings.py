@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     job_retry_unknown_outcome_attempts: int = Field(default=3, ge=0, le=10)
     job_retry_backoff_seconds: float = Field(default=1, gt=0, le=60)
     job_retry_max_backoff_seconds: float = Field(default=60, gt=0, le=3600)
+    # Google Web client ID whose audience linked ID tokens must carry (BC-D07). Empty
+    # disables account linking; it is configuration, not a secret.
+    google_client_id: str = Field(default="", max_length=256)
 
     @model_validator(mode="after")
     def backoff_bounds(self) -> Self:
