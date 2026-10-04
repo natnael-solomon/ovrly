@@ -9,8 +9,8 @@ evidence, and what would reverse it.
 | --- | --- | --- |
 | [0001: confirmed product scope](0001-confirmed-product-scope.md) | Accepted | The two journeys and their boundaries, from the owner's 19 September 2026 brief. |
 | [0002: task tracking](0002-task-tracking.md) | Accepted | GitHub Project replaces the Linear proposal; AC, BC-D and RFC-D namespaces. |
-| [0003: CP2 scope review](0003-scope-review-cp2.md) | Open | Explicit submission decision for AC08 and AC10 with disclosure wording. |
-| [BC-D03: provider, hosting and BE-08 go](BC-D03-provider-hosting.md) | Proposed | Scholarxiv `auto:cheap` with Groq GPT-OSS 20B as the only fallback, EthioDeploy Free hosting and a limited BE-08 development go; proposed by Neb-iyu from BE-01, awaiting the product owner. |
+| [0003: CP2 scope review](0003-scope-review-cp2.md) | Accepted | AC10 ships complete with on-device export; AC08 ships guest checking and saved reports, and second-device recovery is disclosed unless verified on two devices before the freeze. |
+| [BC-D03: provider, hosting and BE-08 go](BC-D03-provider-hosting.md) | Conditional | Scholarxiv `auto:cheap` with Groq GPT-OSS 20B as the only fallback, EthioDeploy Free hosting and a limited BE-08 development go; proposed by Neb-iyu from BE-01, confirmed by the product owner on 4 October 2026, Accepted once the metrics summary is committed. |
 | [BC-D04: Voxide route and allowlist](BC-D04-voxide-route.md) | Accepted, allowlist conditional | Native route confirmed with the sponsor; session budget; action allowlist pending #35. |
 | [BC-D06: demo retention](BC-D06-retention.md) | Proposed | Opt-in workspace lifetime and deletion receipts; no approval or quota decision inferred. |
 | [BC-D07: account link flow](BC-D07-account-link.md) | Accepted | Google sign-in only; guest upgraded in place; second device merges saved reports and continues as the account. |

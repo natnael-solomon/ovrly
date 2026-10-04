@@ -861,11 +861,12 @@ different 2048-token ceiling and cannot be pooled with these measurements.
 The figures in this table come from an uncommitted local run. Its recordings
 live under ignored `.scratch/router/<run-id>/` (manifest, `attempts.jsonl`,
 `results.json` and `summary.json`) and are not in the repository, so a reviewer
-cannot verify them from this checkout. Before BC-D03 moves from Proposed to
-Accepted, a redacted metrics-only `summary.json` (no transcripts, requests or
-responses) or the run id together with the manifest SHA-256 and summary
-SHA-256 must be committed and linked from the record. Run summaries keep
-`decision: pending_team_approval`; the proposed go in BC-D03 supplements them
+cannot verify them from this checkout. BC-D03 was confirmed by the product
+owner on 4 October 2026 and stays Conditional until a redacted metrics-only
+`summary.json` (no transcripts, requests or responses) or the run id together
+with the manifest SHA-256 and summary SHA-256 is committed and linked from the
+record; then it moves to Accepted. Run summaries keep
+`decision: pending_team_approval`; the confirmed go in BC-D03 supplements them
 rather than rewriting them.
 
 Semantic review found missed claims, incorrect rejection/negation, and
