@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py Assessment and EvidenceRelation.",
+  "title": "Assessment",
+  "description": "The pipeline's reading of one claim against its evidence in one report version: one relation per piece of evidence consulted, an overall aggregate, and whether the aggregate is still provisional (more evidence or media may follow). There is no report-level verdict. insufficient and insufficient_evidence describe the evidence, not the truth of the claim, and never describe a processing failure: a failed investigation has no assessments at all.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "claim_id", "version", "relations", "overall", "provisional", "summary"],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/opaque_id" },
+    "claim_id": {
+      "$ref": "common.schema.json#/$defs/opaque_id",
+      "description": "The assessed claim; refers to a claim in the same report version."
+    },
+    "version": {
+      "type": "integer",
+      "description": "Report version this assessment belongs to. A correction or expansion creates a new version with new assessments; earlier ones are not edited."
+    },
+    "relations": {
+      "type": "array",
+      "description": "One entry per piece of evidence the assessment consulted. May be empty when nothing relevant was found, in which case overall is insufficient_evidence.",
+      "items": { "$ref": "#/$defs/evidence_relation" }
+    },
+    "overall": { "$ref": "enums.schema.json#/$defs/overall_assessment" },
+    "provisional": {
+      "type": "boolean",
+      "description": "True while the investigation may still change this assessment (live capture in progress, partial coverage, expansion pending)."
+    },
+    "summary": {
+      "type": "string",
+      "description": "One or two plain-English sentences for the overlay or report. Must not imply a blanket true or false verdict about the video.",
+      "minLength": 1,
+      "maxLength": 600
+    }
+  },
+  "$defs": {
+    "evidence_relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "relation", "note"],
+      "properties": {
+        "evidence_id": {
+          "$ref": "common.schema.json#/$defs/opaque_id",
+          "description": "Refers to an evidence item in the same report version."
+        },
+        "relation": { "$ref": "enums.schema.json#/$defs/relation" },
+        "note": {
+          "description": "Why the evidence relates as stated, or null.",
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 600 }]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "synthetic": true,
+  "description": "Creating an investigation from a shared video URL with a declared duration (POST /v1/investigations with an Idempotency-Key header), and the 202 Investigation read model at intake: queued, stage intake, coverage not started, no job yet and no report. Synthetic fixture; the URL serves nothing.",
+  "schemas": {
+    "request": "investigation-create-request.schema.json",
+    "response": "investigation.schema.json"
+  },
+  "expect": {
+    "request": "valid",
+    "response": "valid"
+  },
+  "request": {
+    "source": {
+      "kind": "url",
+      "url": "https://video.example/synthetic/clip-0001",
+      "duration_ms": 185000
+    }
+  },
+  "response": {
+    "id": "00000000-0000-4000-8000-000000000401",
+    "state": "queued",
+    "stage": "intake",
+    "coverage": {
+      "status": "not_started"
+    },
+    "version": 1,
+    "error": null,
+    "source": {
+      "kind": "url",
+      "url": "https://video.example/synthetic/clip-0001",
+      "duration_ms": 185000
+    },
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:00:00Z",
+    "processing_status": "waiting",
+    "job": null,
+    "report": null
+  }
+}

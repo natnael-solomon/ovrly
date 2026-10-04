@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py InvestigationCreateRequest and the UrlSource | UploadSource union discriminated on kind, field for field.",
+  "title": "InvestigationCreateRequest",
+  "description": "Request body for POST /v1/investigations (BE-05, #19). Requires the Idempotency-Key header: the same key with the same body replays the original 202, the same key with a different body is 409 IDEMPOTENCY_KEY_REUSED. Exactly one source: a complete accessible video by URL, or a completed upload. A declared duration above OVRLY_MAX_SHARED_DURATION_SECONDS is 422 DURATION_LIMIT_EXCEEDED.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source"],
+  "properties": {
+    "source": { "$ref": "#/$defs/source" }
+  },
+  "$defs": {
+    "source": {
+      "description": "Discriminated union on kind. Branches differ structurally (url versus upload_id), so the shape stays unambiguous even where enum checks are relaxed.",
+      "oneOf": [{ "$ref": "#/$defs/url_source" }, { "$ref": "#/$defs/upload_source" }]
+    },
+    "duration_ms": {
+      "$ref": "common.schema.json#/$defs/nullable_integer",
+      "description": "Client-declared media duration in milliseconds, positive when present. Optional and nullable, as in the Pydantic model; the server checks it against the shared-media limit."
+    },
+    "url_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "url"],
+      "properties": {
+        "kind": { "const": "url", "$ref": "enums.schema.json#/$defs/source_kind" },
+        "url": {
+          "type": "string",
+          "description": "Absolute http or https URL of the complete video (Pydantic AnyHttpUrl). The server does not download it at intake.",
+          "minLength": 8,
+          "maxLength": 2048,
+          "pattern": "^https?://[^\\s]+(?![\\s\\S])"
+        },
+        "duration_ms": { "$ref": "#/$defs/duration_ms" }
+      }
+    },
+    "upload_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "upload_id"],
+      "properties": {
+        "kind": { "const": "upload", "$ref": "enums.schema.json#/$defs/source_kind" },
+        "upload_id": {
+          "$ref": "common.schema.json#/$defs/uuid",
+          "description": "An upload owned by the caller in state completed; otherwise 409 UPLOAD_INCOMPLETE or 404."
+        },
+        "duration_ms": { "$ref": "#/$defs/duration_ms" }
+      }
+    }
+  }
+}

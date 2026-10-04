@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Hand-authored: no backend model or endpoint exists yet. Metadata the client sends with one chunk of a live capture session; the bytes travel separately in the request body, like upload content.",
+  "title": "CaptureChunkRequest",
+  "description": "Declaration of one capture chunk. (session_id, seq) is the idempotency key: resending it with the same bytes is safe and replays the acknowledgement. Intervals are on the capture timebase and must be contiguous with the client's chunking: chunk n covers [n * chunk_duration_ms, (n + 1) * chunk_duration_ms) except the last. Requests are validated strictly; an unknown field or timebase is a validation error.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "seq", "interval", "size_bytes", "sha256", "content_type"],
+  "properties": {
+    "session_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "seq": {
+      "type": "integer",
+      "description": "Zero-based position of the chunk in the session. Not reused within a session."
+    },
+    "interval": {
+      "description": "Capture-relative interval this chunk covers; timebase must be capture.",
+      "allOf": [
+        { "$ref": "common.schema.json#/$defs/interval" },
+        { "properties": { "timebase": { "const": "capture" } } }
+      ]
+    },
+    "size_bytes": { "type": "integer" },
+    "sha256": { "$ref": "common.schema.json#/$defs/sha256" },
+    "content_type": { "type": "string", "minLength": 3, "maxLength": 128 }
+  }
+}

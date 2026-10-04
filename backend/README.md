@@ -293,10 +293,17 @@ server-side from the Google ID token (`services/api/auth/google.py`), and
 `services/api/auth/linking.py` performs the upgrade or second-device merge in
 one transaction, with every write restricted to the calling principal. Quotas
 beyond the two limits and deletion remain open (#77 retention, #75 user
-deletion). `packages/contracts` holds the shared error shape and the draft
-voice-actions schemas; the intake and account-link request and response models
-in `services/api/schemas.py` remain backend-owned Pydantic until #15 exports
-them there.
+deletion). `packages/contracts` holds the shared error shape, the voice-actions schemas
+and, from BE-03 (#15), the upload, investigation, job, capture, report, claim,
+evidence and assessment schemas with their enums and the OpenAPI document. The
+intake and account-link request and response models in `services/api/schemas.py`
+are mirrored there; the new read models (`Claim`, `Evidence`, `Assessment`,
+`ReportVersion`, `JobSummary`, `InvestigationReadModel`) generate the six
+result fixtures through `packages/contracts/roundtrip.py`, and
+`tests/test_contract_roundtrip.py` fails when a model and its fixture drift.
+No route emits the read models yet: `GET /v1/investigations/{id}` still returns
+`InvestigationResponse`, and adopting `InvestigationReadModel` (adding
+`processing_status`, `job` and `report`) is #33 work.
 
 ## Local checks
 
@@ -344,7 +351,10 @@ line-specific, explained `S603` annotations; production code has no security-rul
 exemptions.
 
 The optional `quality` group adds locked pre-commit, actionlint, zizmor and
-pip-audit tooling without changing runtime dependencies. From the repository root:
+pip-audit tooling without changing runtime dependencies; the optional
+`contracts` group adds `openapi-spec-validator` for the
+[contracts package](../packages/contracts/README.md#validation) OpenAPI check.
+From the repository root:
 
 ```sh
 uv sync --project backend --frozen --group quality
@@ -385,6 +395,8 @@ changes in this Backend CI workflow; the separate Quality checks job still runs.
 The validation job uses Python 3.11, pinned setup-uv, the frozen lockfile, Ruff,
 strict MyPy with the Pydantic plugin, the
 [contracts package](../packages/contracts/README.md#validation) validator and
+server round-trip check (the full contract gate, including OpenAPI, spectral,
+oasdiff and the Android tests, is the separate **Contract checks** workflow),
 tests, PostgreSQL 16, migration upgrade/drift
 checks and the real test suite. Only pushes to `main` save uv caches; PRs can read
 them. Dependabot checks the `/backend` uv project weekly with grouped minor/patch

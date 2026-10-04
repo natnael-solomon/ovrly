@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py Evidence and EvidenceSource.",
+  "title": "Evidence",
+  "description": "One retrieved source considered for one claim. Evidence records identity (source), kind (source_type), how much of it was actually read (inspection_level), how relevant retrieval judged it (retrieval_relevance) and whether the source itself has since been corrected, retracted or withdrawn (retraction_status). It deliberately carries no support relation: whether it supports, challenges or qualifies the claim lives in the assessment, so relevance and support can never be confused.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "claim_id",
+    "source",
+    "source_type",
+    "inspection_level",
+    "retrieval_relevance",
+    "retraction_status",
+    "excerpt",
+    "retrieved_at"
+  ],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/opaque_id" },
+    "claim_id": {
+      "$ref": "common.schema.json#/$defs/opaque_id",
+      "description": "The claim this evidence was retrieved for; refers to a claim in the same report version."
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "source_type": { "$ref": "enums.schema.json#/$defs/source_type" },
+    "inspection_level": { "$ref": "enums.schema.json#/$defs/source_inspection_level" },
+    "retrieval_relevance": { "$ref": "enums.schema.json#/$defs/retrieval_relevance" },
+    "retraction_status": { "$ref": "enums.schema.json#/$defs/retraction_status" },
+    "excerpt": {
+      "description": "Short quoted passage the assessment relied on, or null when only metadata was inspected.",
+      "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 1000 }]
+    },
+    "retrieved_at": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "When the source was fetched; shown as the retrieval date in exports."
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "description": "Identity of the source independent of this claim.",
+      "additionalProperties": false,
+      "required": ["id", "title", "publisher", "url", "published_at"],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/$defs/opaque_id",
+          "description": "Stable identifier of the source document, so the same source cited for two claims is recognisably one source."
+        },
+        "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "publisher": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "url": {
+          "description": "Where the source was retrieved from, or null for sources without a public location.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 8, "maxLength": 2048, "pattern": "^https?://[^\\s]+(?![\\s\\S])" }
+          ]
+        },
+        "published_at": { "$ref": "common.schema.json#/$defs/nullable_timestamp" }
+      }
+    }
+  }
+}

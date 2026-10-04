@@ -1,0 +1,38 @@
+{
+  "synthetic": true,
+  "description": "Chunk 2 is sent a second time with the same bytes: the server replays the original acknowledgement with disposition duplicate and the original received_at; nothing is stored or processed twice. Synthetic fixture; no bytes or session exist.",
+  "schemas": {
+    "request": "capture-chunk-request.schema.json",
+    "response": "capture-chunk.schema.json"
+  },
+  "expect": {
+    "request": "valid",
+    "response": "valid"
+  },
+  "request": {
+    "session_id": "00000000-0000-4000-8000-000000000501",
+    "seq": 2,
+    "interval": {
+      "start_ms": 20000,
+      "end_ms": 30000,
+      "timebase": "capture"
+    },
+    "size_bytes": 401408,
+    "sha256": "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",
+    "content_type": "video/mp4"
+  },
+  "response": {
+    "session_id": "00000000-0000-4000-8000-000000000501",
+    "seq": 2,
+    "interval": {
+      "start_ms": 20000,
+      "end_ms": 30000,
+      "timebase": "capture"
+    },
+    "size_bytes": 401408,
+    "sha256": "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",
+    "disposition": "duplicate",
+    "received_at": "2026-10-04T12:00:31Z",
+    "gaps": []
+  }
+}

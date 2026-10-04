@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Hand-authored: no backend model or endpoint exists yet.",
+  "title": "CaptureChunk",
+  "description": "Acknowledgement and read model of one stored capture chunk. disposition tells the client what happened: stored, duplicate (replayed acknowledgement, nothing stored twice) or out_of_order (stored while a lower seq is still missing). The session's current gaps are echoed so the client can resend missing chunks without another round trip. Clients map an unknown disposition to UNKNOWN and must not treat it as stored.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_id",
+    "seq",
+    "interval",
+    "size_bytes",
+    "sha256",
+    "disposition",
+    "received_at",
+    "gaps"
+  ],
+  "properties": {
+    "session_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "seq": { "type": "integer" },
+    "interval": {
+      "allOf": [
+        { "$ref": "common.schema.json#/$defs/interval" },
+        { "properties": { "timebase": { "const": "capture" } } }
+      ]
+    },
+    "size_bytes": { "type": "integer" },
+    "sha256": { "$ref": "common.schema.json#/$defs/sha256" },
+    "disposition": { "$ref": "enums.schema.json#/$defs/chunk_disposition" },
+    "received_at": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "When the chunk was first stored. A duplicate acknowledgement repeats the original value."
+    },
+    "gaps": {
+      "type": "array",
+      "description": "The session's missing sequence ranges after this chunk was handled.",
+      "items": { "$ref": "common.schema.json#/$defs/seq_range" }
+    }
+  }
+}
