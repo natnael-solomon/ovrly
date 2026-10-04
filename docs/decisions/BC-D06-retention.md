@@ -12,14 +12,21 @@ Backend implementation: @Nattyy-1. No acceptance is recorded.
 windows; an explicit, fixed-lifetime demo workspace.
 
 **Evidence and uncertainties:** #77 requires bounded, configurable deletion
-across current stores. The current backend has guest identities, uploads,
+across current stores. The current backend has guest identities, Google-linked
+accounts (BC-D07), uploads,
 investigations, idempotency responses and jobs, but no permanent saved-report
-storage. A durable account policy, provider terms, infrastructure backup
+storage yet (BE-10, #33). A durable account policy, provider terms, infrastructure backup
 retention and approved hosting locations remain unresolved.
 
-**Chosen option and rationale:** Proposed only: expire the whole workspace
-86400 seconds (24 hours) after principal creation, including its credentials
-and all dependent content. Remove unused pending uploads at target expiry.
+**Chosen option and rationale:** Proposed only: expire a whole **guest**
+workspace 86400 seconds (24 hours) after principal creation, including its
+credentials and all dependent content. Principals linked to a Google account
+under [BC-D07](BC-D07-account-link.md) (`kind = account`) are excluded from this
+sweep: they carry the saved-report recovery promise (AC08), so the account row,
+its credentials and its objects are never expired by the demo policy, however
+old the original guest row is. A guest merged into an account on a second
+device remains a guest and still expires with its revoked credential. Remove
+unused pending uploads at target expiry.
 Apply the same content age limit to legacy ownerless jobs. Retain detached
 tombstones and terminal retention-job metadata for 604800 seconds (seven days),
 then physically delete them. Run every 60 seconds with batches of 100 subjects.
@@ -27,10 +34,11 @@ Automatic retention remains disabled by default until explicitly enabled for
 approved demo data. These numbers are proposals, not statutory deadlines.
 
 **User-visible consequences:** Enabling this policy can remove recently
-uploaded content in an older workspace. Activity does not extend its lifetime.
-After expiry, old credentials fail, responses cannot be replayed indefinitely,
-and users need a new guest identity. Do not enable for permanent accounts or
-saved reports without a revised decision.
+uploaded content in an older guest workspace. Activity does not extend its
+lifetime. After expiry, old credentials fail, responses cannot be replayed
+indefinitely, and users need a new guest identity or must link an account
+before the lifetime ends. Linked accounts keep their data; a retention
+policy for accounts and saved reports needs a revised decision.
 
 **Technical, privacy, cost and evaluation consequences:** One locked deletion
 path per store, with shared `JobQueue.delete` fencing; fewer duplicate
@@ -41,8 +49,10 @@ Physical disk/WAL/backup erasure and remote-provider deletion are not proven.
 Proposed host log retention is seven days and must be configured by the operator.
 
 **Dependencies / capability gates:** Owner acceptance, matching API/worker
-settings and storage mounts, #80/#81 integration and the operational transfer
-checklist. No quotas, token buckets or global intake stop are decided here.
+settings and storage mounts, and the operational transfer
+checklist. #81 (owner-scoped job actions) and #80 (account linking) are on
+`main`; the sweep reuses `JobQueue.delete` and honours `principals.kind`.
+No quotas, token buckets or global intake stop are decided here.
 Those remain #22 and the separate BC-D06 budget discussion.
 
 **Rejected alternatives and why:** Indefinite retention is unsuitable for a

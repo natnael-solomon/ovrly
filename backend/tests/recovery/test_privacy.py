@@ -5,6 +5,7 @@ from datetime import timedelta
 import httpx
 import pytest
 from sqlalchemy import func, select, update
+from test_account_link import LINK, FakeVerifier, link_body
 from test_intake_api import CONTENT, completed_upload, declare_upload, guest
 
 from services.api.main import create_app
@@ -179,6 +180,94 @@ async def test_expired_pending_upload_removed_without_expiring_owner(privacy_app
     response = await client.put(upload["target"], headers=headers, content=b"late")
     assert response.status_code == 404
     assert (await client.get("/v1/investigations", headers=headers)).status_code == 200
+
+
+async def test_linked_account_survives_the_sweep_while_aged_guests_expire(database_url, tmp_path):
+    """BC-D07 accounts carry the saved-report promise: the demo lifetime never expires them.
+
+    Three principals age past the lifetime: a guest upgraded in place to an account, a
+    second-device guest merged into that account (credential revoked, ``merged_into`` set)
+    and a plain guest. Only the account, its credential and its objects survive.
+    """
+    verifier = FakeVerifier()
+    app = create_app(
+        Settings(
+            database_url=database_url,
+            storage_dir=tmp_path / "uploads",
+            retention_enabled=True,
+            job_lease_seconds=30,
+            _env_file=None,
+        ),
+        id_token_verifier=verifier,
+    )
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://test",
+        ) as client:
+            account_headers, account_upload, account_investigation, account_id = await seed(
+                app, client
+            )
+            linked = await client.post(LINK, json=link_body("token-alice"), headers=account_headers)
+            assert linked.status_code == 200 and linked.json()["kind"] == "account", linked.text
+            merged_headers, merged_upload, merged_investigation, merged_id = await seed(app, client)
+            merged = await client.post(LINK, json=link_body("token-alice"), headers=merged_headers)
+            assert merged.status_code == 200, merged.text
+            assert uuid.UUID(merged.json()["principal_id"]) == account_id
+            continued = {"Authorization": f"Bearer {merged.json()['credential']['token']}"}
+            guest_headers, guest_upload, guest_investigation, guest_id = await seed(app, client)
+            for principal_id in (account_id, merged_id, guest_id):
+                await expire(app, principal_id)
+
+            counts = await sweep(app)
+            assert counts["principals"] == 2
+
+            async with app.state.database.engine.connect() as connection:
+                account = (
+                    await connection.execute(
+                        select(principals).where(principals.c.id == account_id)
+                    )
+                ).one()
+                assert account.kind == "account"
+                assert account.google_sub == verifier.tokens["token-alice"]
+                live = (
+                    await connection.execute(
+                        select(credentials.c.id).where(
+                            credentials.c.principal_id == account_id,
+                            credentials.c.revoked_at.is_(None),
+                        )
+                    )
+                ).all()
+                assert len(live) == 2, "the original and the second-device credentials remain"
+                assert await connection.scalar(
+                    select(uploads.c.id).where(uploads.c.id == account_upload)
+                )
+                for table, clause in (
+                    (principals, principals.c.id.in_([merged_id, guest_id])),
+                    (credentials, credentials.c.principal_id.in_([merged_id, guest_id])),
+                    (uploads, uploads.c.id.in_([merged_upload, guest_upload])),
+                    (
+                        investigations,
+                        investigations.c.id.in_([merged_investigation, guest_investigation]),
+                    ),
+                ):
+                    assert (await connection.execute(select(table).where(clause))).first() is None
+            assert len(list(app.state.settings.storage_dir.iterdir())) == 1
+
+            for headers in (account_headers, continued):
+                response = await client.get(
+                    f"/v1/investigations/{account_investigation}", headers=headers
+                )
+                assert response.status_code == 200, response.text
+            for headers in (merged_headers, guest_headers):
+                assert (await client.get("/v1/investigations", headers=headers)).status_code == 401
+
+            # A second sweep finds nothing else to expire and leaves the account alone.
+            assert (await sweep(app))["principals"] == 0
+            async with app.state.database.engine.connect() as connection:
+                assert await connection.scalar(
+                    select(principals.c.id).where(principals.c.id == account_id)
+                )
 
 
 async def test_tombstone_purge_still_rejects_late_publication(privacy_app):

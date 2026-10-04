@@ -297,7 +297,7 @@ is Proposed until the product owner accepts it.
 | Setting | Proposed default and enforced bounds |
 | --- | --- |
 | `OVRLY_RETENTION_ENABLED` | `0`; explicit opt-in for approved demo data only |
-| `OVRLY_RETENTION_DATA_SECONDS` | 86400; 60..2592000. Whole workspace lifetime from principal creation; also legacy ownerless job content age |
+| `OVRLY_RETENTION_DATA_SECONDS` | 86400; 60..2592000. Guest workspace lifetime from principal creation; also legacy ownerless job content age. Linked accounts are never expired |
 | `OVRLY_RETENTION_TOMBSTONE_SECONDS` | 604800; 60..7776000. Detached tombstone/terminal retention-receipt age |
 | `OVRLY_RETENTION_POLL_SECONDS` | 60; 1..3600. Scheduling interval |
 | `OVRLY_RETENTION_BATCH_SIZE` | 100; 1..1000 expired subjects per category per sweep |
@@ -309,9 +309,16 @@ API-only mode schedules nothing. The API and worker must share the same
 database, settings and **upload directory/mount**.
 
 The proposed policy expires credentials and every upload/investigation/job
-belonging to a principal 24 hours after that principal was created, including
-newer content. It is deliberately **not a permanent account/saved-report
-policy** or inactivity timer. Pending upload targets expire separately.
+belonging to a **guest** principal 24 hours after that principal was created,
+including newer content. Principals linked to a Google account
+([BC-D07](../docs/decisions/BC-D07-account-link.md), `kind = account`) are
+excluded from the workspace sweep: the account row, its credentials and its
+objects survive however old the original guest row is, because they carry the
+saved-report recovery promise. A guest that was merged into an account on a
+second device keeps `kind = guest`, so its revoked credential and leftover
+workspace still expire. The sweep is deliberately **not a permanent
+account/saved-report policy** or inactivity timer; a retention policy for
+accounts needs a revised BC-D06. Pending upload targets expire separately.
 Cleanup uses row locks and the same `JobQueue.delete` as user-requested
 deletion; counts indicate completed operations, not external-provider erasure.
 Old detached tombstones are eventually removed; late publication still fails.

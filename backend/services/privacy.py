@@ -7,9 +7,10 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import ColumnElement, and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from services.api.auth.linking import ACCOUNT_KIND
 from services.database import Database
 from services.jobs.handlers import JobContext
 from services.jobs.models import jobs
@@ -61,6 +62,18 @@ class Retention:
             )
         return len(rows)
 
+    @staticmethod
+    def _expired_workspace(now: datetime, lifetime: timedelta) -> ColumnElement[bool]:
+        """Guest workspaces past their lifetime, including guests already merged into an account.
+
+        Linked accounts (BC-D07) are the durable half of the saved-report promise and are
+        never expired by the demo sweep, however old their original guest row is.
+        """
+        return and_(
+            principals.c.created_at <= now - lifetime,
+            principals.c.kind != ACCOUNT_KIND,
+        )
+
     async def run(self, job: ClaimedJob, context: JobContext) -> dict[str, int]:
         counts = {"principals": 0, "uploads": 0, "jobs": 0, "purged": 0}
         lifetime = timedelta(seconds=self.settings.retention_data_seconds)
@@ -71,7 +84,7 @@ class Retention:
                 (
                     await connection.execute(
                         select(principals.c.id)
-                        .where(principals.c.created_at <= now - lifetime)
+                        .where(self._expired_workspace(now, lifetime))
                         .order_by(principals.c.created_at, principals.c.id)
                         .limit(self.settings.retention_batch_size)
                     )
@@ -84,7 +97,7 @@ class Retention:
             async with self.database.engine.begin() as connection:
                 owner = await connection.scalar(
                     select(principals.c.id)
-                    .where(principals.c.id == owner_id, principals.c.created_at <= now - lifetime)
+                    .where(principals.c.id == owner_id, self._expired_workspace(now, lifetime))
                     .with_for_update()
                 )
                 if owner is None:
