@@ -355,13 +355,19 @@ class ContractEnumsTest {
         const val CREATE_REQUEST = "investigation-create-request.schema.json"
         val KIND = setOf(KIND_KEY)
 
-        /** Schemas with no model of their own: definitions, `$ref` wrappers and the voice slice. */
+        /**
+         * Schemas with no model of their own: definitions, `$ref` wrappers, the voice slice and
+         * the BE-04 part 3 job action receipts (#75), whose Android models are a #62 follow-up.
+         */
         val UNMIRRORED_SCHEMAS = setOf(
             "enums.schema.json",
             "upload-declare-response.schema.json",
             "upload-complete-response.schema.json",
             "voice-action-request.schema.json",
-            "voice-action-response.schema.json"
+            "voice-action-response.schema.json",
+            "job-action-request.schema.json",
+            "job-cancel-response.schema.json",
+            "job-delete-response.schema.json"
         )
     }
 }

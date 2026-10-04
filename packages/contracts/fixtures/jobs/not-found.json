@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "description": "Synthetic missing or other-owner job; identical response for either case.",
+  "operation": "delete",
+  "status": 404,
+  "request": {"job_id": "00000000-0000-4000-8000-000000000075"},
+  "response": {
+    "code": "NOT_FOUND",
+    "message": "The requested resource was not found",
+    "retryable": false,
+    "action": "none",
+    "request_id": "req_synthetic_0075"
+  }
+}

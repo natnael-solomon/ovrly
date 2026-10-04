@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "description": "Synthetic published job cannot be cancelled.",
+  "operation": "cancel",
+  "status": 409,
+  "request": {"job_id": "00000000-0000-4000-8000-000000000075"},
+  "response": {
+    "code": "JOB_NOT_CANCELLABLE",
+    "message": "The job can no longer be cancelled",
+    "retryable": false,
+    "action": "none",
+    "request_id": "req_synthetic_0075"
+  }
+}

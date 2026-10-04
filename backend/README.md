@@ -127,8 +127,9 @@ Alembic history; `0002_jobs` creates the `jobs` and `job_results` tables,
 `0003_identity_intake` creates the principal, credential, upload, investigation
 and idempotency tables defined in `services/models.py`, `0004_job_retries`
 adds the retry class, per-class retry counters and the provider request id to
-`jobs`, and `0005_account_link` adds `google_sub` (unique), `merged_into` and
-`merged_at` to `principals`. Future schema changes require a reviewed migration
+`jobs`, `0005_account_link` adds `google_sub` (unique), `merged_into` and
+`merged_at` to `principals`, and `0006_job_ownership` adds the nullable
+`owner_id` and `cancel_outcome` columns to `jobs`. Future schema changes require a reviewed migration
 and upgrade/downgrade coverage, not `create_all()` during API startup.
 
 ### Durable jobs and recovery
@@ -168,11 +169,9 @@ a result row; a missing or foreign investigation is `NonRetriableInput`. Media
 stages arrive with BE-07 (#20). Handlers receive a `JobContext`
 whose `heartbeat()` must be called by long stages. Other handler exceptions
 mark the job `failed` with the exception type only; messages are never
-persisted or logged. `POST /v1/jobs/{id}/cancel`, `DELETE /v1/jobs/{id}` and
-the cross-owner-read invariant are
-[BE-04 part 3 / #75](https://github.com/natnael-solomon/ovrly/issues/75), built
-on the BE-05 (#19) error shape and identity; the queue primitives they call
-(`request_cancel`, `delete`) are already here.
+persisted or logged. The owner-scoped cancel/delete API uses the same
+`request_cancel` and `delete` primitives inside the authorization transaction;
+see [Job actions](#job-actions).
 
 `services/api/intake.py` hands each new investigation to the queue.
 `QueueDispatcher` runs inside the transaction that writes the investigation and
@@ -201,8 +200,8 @@ integrated yet, so those stages are stubs registered only in tests. Covered:
   and a running stage (released, re-leased by the new lifespan, completed once).
 - Cancellation before a stage, during a stage and mid-retrieval (no further
   chunk fetched); deletion with a delayed provider callback (late publish
-  rejected, no resurrected content, tombstone kept). #75 adds the API-driven
-  variants.
+  rejected, no resurrected content, tombstone kept), including authenticated
+  API-driven variants.
 - Database connection dropped mid-stage with `pg_terminate_backend`, and the
   variant where the release fails too (lease expires); the worker survives and
   the job is never marked failed.
@@ -226,7 +225,10 @@ integrated yet, so those stages are stubs registered only in tests. Covered:
 After each case the harness asserts exactly one publication (or none for
 cancelled, deleted and failed jobs), no lost job, matching stage key, fencing
 token and generation, no held leases and, for deletions, an empty payload and
-no result. CI runs this as the separate **Backend recovery** job:
+no result. All harness cases also check that another principal cannot read the
+job through the shared ownership loader or obtain data/mutate it through the
+action endpoints: other-owner and missing jobs return identical errors.
+CI runs this as the separate **Backend recovery** job:
 
 ```sh
 OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0.0.1:55432/ovrly' \
@@ -234,10 +236,53 @@ OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0
   tests/test_job_queue.py tests/recovery
 ```
 
-Not covered here: the cancel/delete endpoints and cross-owner reads (#75), and
-the chunk `(session, seq)` idempotency test, which belongs to the capture
-intake endpoint that introduces that resource. Investigation POST idempotency
-is covered by `test_intake_handoff.py` and `tests/test_intake_api.py`.
+Not covered here: external-provider erasure, upload/artifact retention and
+backup expiry (#77); the chunk `(session, seq)` idempotency test belongs to
+the capture intake endpoint that introduces that resource. Investigation POST
+idempotency is covered by `test_intake_handoff.py` and `tests/test_intake_api.py`.
+
+### Job actions
+
+Both routes require the BE-05 bearer principal and accept **no request body**.
+They load and lock the job through `load_owned`; authorization, queue mutation
+and the receipt commit atomically. Missing, unowned legacy and other-owner
+jobs all return 404 `NOT_FOUND`, with no owner information.
+
+| Route | Result |
+| --- | --- |
+| `POST /v1/jobs/{id}/cancel` | 200 `{"job_id":"...","cancellation":"effective"}` for queued/already cancelled work; 202 with `cancellation: requested` for a leased/running job. Published/failed jobs return 409 `JOB_NOT_CANCELLABLE`. |
+| `DELETE /v1/jobs/{id}` | 200 with `job_id`, `state: deleted`, `access_revoked: true`, `cleanup_status: complete`, `cleanup_scope: job_payload_and_result` after tombstoning, clearing the lease/payload and removing the result in one transaction. |
+
+Cancellation stores its first outcome durably. Repeats return that original
+status/body even after acknowledgement or an API restart; the receipt is not
+a current-progress response. A deleted job cannot replay a cancellation
+receipt (404); its owner can repeat DELETE with the same deletion receipt.
+Repeats do not bump generations, timestamps or perform cleanup again.
+Cancellation cannot promise provider interruption or refunded billing.
+
+Cleanup means **only the database job payload/result**. No provider, upload,
+external artifact or backup deletion is claimed. Tombstone identity and fencing
+metadata remain so late callbacks cannot resurrect content. There is no
+general job-read endpoint in this slice.
+
+Migration `0006_job_ownership` adds nullable `owner_id` and `cancel_outcome`.
+The `QueueDispatcher` in `services/api/intake.py` passes the investigation's
+owner to `JobQueue.enqueue(..., owner_id=...)`, so every `intake` job created
+by `POST /v1/investigations` can be cancelled or deleted by that owner; the
+recovery suite proves it and that another principal gets 404. Jobs enqueued
+before the migration remain ownerless and API-inaccessible; ownership is never
+inferred from payload data. Other enqueue callers pass the authenticated
+principal the same way in their business transaction. The existing global
+stage key must not be reused across principals: a collision fails explicitly
+instead of returning another owner's job, while a replay by the same owner
+still returns the existing job.
+
+Shared request-path/response schemas and synthetic receipts live in
+`packages/contracts`; all failures reuse its unchanged error schema, and
+`openapi.json` publishes both operations. Backend
+recovery tests compare actual API output with these fixtures and test replay,
+concurrent requests, rollback, invalid input and delayed publication. Android
+parsing and both-side contract review remain coordinated through #15/#62.
 
 ## Identity and intake API
 
@@ -447,7 +492,7 @@ implementations; a maintainer must add **Backend checks** to the main ruleset
 after the workflow lands and reports successfully. This PR does not change
 protection settings or complete the whole issue.
 
-Durable job cancel/delete endpoints and the cross-owner-read invariant remain
+The cancel/delete API and cross-owner recovery cases implement
 [BE-04 part 3 / #75](https://github.com/natnael-solomon/ovrly/issues/75) under
 [BE-04 / #16](https://github.com/natnael-solomon/ovrly/issues/16); the engine,
 retry classes and recovery cases are described under

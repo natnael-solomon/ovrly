@@ -18,7 +18,7 @@ import pytest
 PACKAGE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PACKAGE))
 
-import validate  # noqa: E402
+import validate as validate  # noqa: E402
 
 FIXTURES = PACKAGE / "fixtures" / "voice-actions"
 ANDROID_CONTRACT = (
@@ -70,6 +70,7 @@ def test_every_schema_and_fixture_passes_the_validator() -> None:
         len(validate.fixture_paths())
         + len(validate.result_fixture_paths())
         + len(validate.intake_fixture_paths())
+        + len(validate.job_fixture_paths())
     )
     assert sum(line.startswith("fixture ") for line in lines) == fixtures
 

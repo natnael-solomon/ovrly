@@ -4,8 +4,13 @@ import asyncio
 import uuid
 from contextlib import suppress
 
+import httpx
+import pytest
 from sqlalchemy import select, text
 
+from services.api.auth import Principal, load_owned, owned_rows
+from services.api.auth.dependency import create_guest_principal
+from services.api.errors import ApiError
 from services.api.main import create_app
 from services.database import Database
 from services.jobs.faults import Checkpoint, SimulatedCrash
@@ -85,6 +90,23 @@ class Harness:
         self.calls = []
         self.provider = StubProvider()
         self.artifacts = StubArtifactStore()
+        self.owner = None
+        self.outsider = None
+        self.token = None
+        self.job_ids = []
+
+    async def initialize(self):
+        async with self.control.engine.begin() as connection:
+            self.owner, self.token = await create_guest_principal(connection)
+            self.outsider, self.outsider_token = await create_guest_principal(connection)
+
+    def client(self, app, *, outsider=False):
+        token = self.outsider_token if outsider else self.token
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {token}"},
+        )
 
     def settings(self, **overrides):
         values = {
@@ -133,7 +155,10 @@ class Harness:
     async def enqueue(self, payload=None):
         key = self.key()
         async with self.control.engine.begin() as connection:
-            enqueued = await self.queue.enqueue(connection, key, payload or {"input": "x"})
+            enqueued = await self.queue.enqueue(
+                connection, key, payload or {"input": "x"}, owner_id=self.owner.id
+            )
+        self.job_ids.append(enqueued.job_id)
         return key, enqueued.job_id
 
     def recording_handler(self, result=None):
@@ -200,6 +225,7 @@ class Harness:
 
     async def assert_invariants(self, key, job_id, *, worker_ids=()):
         """No duplicate publication, no lost job, no version conflict, no leases held."""
+        await self.assert_no_cross_owner_read(job_id)
         record = await self.queue.get(job_id)
         assert record is not None, "The job was lost"
         assert record.status.state.value == "published", record.status
@@ -219,6 +245,7 @@ class Harness:
 
     async def assert_deleted(self, key, job_id):
         """Tombstoned, payload cleared, no published result, no held lease."""
+        await self.assert_no_cross_owner_read(job_id)
         record = await self.queue.get(job_id)
         assert record is not None, "A tombstone must remain"
         assert record.status.state.value == "deleted", record.status
@@ -234,6 +261,7 @@ class Harness:
         return record
 
     async def assert_failed(self, key, job_id, retry_class, *, failure=None):
+        await self.assert_no_cross_owner_read(job_id)
         record = await self.queue.get(job_id)
         assert record is not None, "The job was lost"
         assert record.status.state.value == "failed", record.status
@@ -243,6 +271,43 @@ class Harness:
         assert record.lease_owner is None
         assert await self.queue.published(key) == []
         return record
+
+    async def assert_no_cross_owner_read(self, job_id):
+        """The job's recorded owner can load it; the outsider can neither read nor mutate it.
+
+        Jobs enqueued by ``self.enqueue`` belong to ``self.owner``; jobs the production
+        intake dispatcher created belong to the API guest that recorded the investigation.
+        Either way the row must carry an owner and that owner must not be the outsider.
+        """
+        async with self.control.engine.connect() as connection:
+            row = (await connection.execute(select(jobs).where(jobs.c.id == job_id))).one()
+            assert row.owner_id is not None, "Every job in the recovery suite has an owner"
+            assert row.owner_id != self.outsider.id
+            owner = Principal(id=row.owner_id, kind="guest")
+            assert (await load_owned(connection, jobs, job_id, owner)).owner_id == owner.id
+            assert (
+                await connection.execute(owned_rows(jobs, self.outsider).where(jobs.c.id == job_id))
+            ).first() is None
+            with pytest.raises(ApiError) as error:
+                await load_owned(connection, jobs, job_id, self.outsider)
+            assert error.value.status_code == 404
+            assert error.value.code == "NOT_FOUND"
+        app = create_app(self.settings())
+        async with app.router.lifespan_context(app), self.client(app, outsider=True) as client:
+            async with self.control.engine.connect() as connection:
+                before = (await connection.execute(select(jobs).where(jobs.c.id == job_id))).one()
+            for method, suffix in (("POST", "/cancel"), ("DELETE", "")):
+                response = await client.request(method, f"/v1/jobs/{job_id}{suffix}")
+                missing = await client.request(
+                    method,
+                    f"/v1/jobs/{uuid.uuid4()}{suffix}",
+                    headers={"X-Request-Id": response.headers["X-Request-Id"]},
+                )
+                assert response.status_code == missing.status_code == 404
+                assert response.json() == missing.json()
+            async with self.control.engine.connect() as connection:
+                after = (await connection.execute(select(jobs).where(jobs.c.id == job_id))).one()
+            assert before == after, "An outsider mutated the job"
 
     async def close(self):
         for worker in self.workers:

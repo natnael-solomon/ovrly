@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "0.1.0-draft",
+  "title": "Job deletion receipt",
+  "description": "200 after the tombstone, lease revocation and removal of the database job payload/result commit. Cleanup covers only those rows, not uploads, provider copies, external artifacts or backups.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["job_id", "state", "access_revoked", "cleanup_status", "cleanup_scope"],
+  "properties": {
+    "job_id": {"$ref": "job-action-request.schema.json#/properties/job_id"},
+    "state": {"type": "string", "const": "deleted"},
+    "access_revoked": {"type": "boolean", "const": true},
+    "cleanup_status": {"type": "string", "const": "complete"},
+    "cleanup_scope": {"type": "string", "const": "job_payload_and_result"}
+  }
+}

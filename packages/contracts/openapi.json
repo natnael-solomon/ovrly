@@ -4,7 +4,7 @@
     "title": "Ovrly API",
     "version": "0.1.0-draft",
     "summary": "Contract between the Android client and the backend.",
-    "description": "Ovrly contracts 0.1.0-draft (pre-1.0). Investigation reads derive state from the intake job (queued/leased -> queued, running -> running, failed -> failed with PROCESSING_FAILED, cancelled/deleted -> cancelled). Every schema is a reference into schemas/*.schema.json so the OpenAPI document, the JSON Schema fixtures and the Android models cannot drift from each other. Every error response uses the shared error shape; stage-specific error codes are listed per operation and must be SCREAMING_SNAKE_CASE. Paths listed here are those the backend serves today (BE-05, #19, including account linking from BC-D07) plus POST /v1/voice/actions (BE-13, #67; served by BE-10, #33). Capture-session and chunk schemas are published in components for the client models but their endpoints are not yet defined; report-version retrieval and reanalysis are #33.",
+    "description": "Ovrly contracts 0.1.0-draft (pre-1.0). Investigation reads derive state from the intake job (queued/leased -> queued, running -> running, failed -> failed with PROCESSING_FAILED, cancelled/deleted -> cancelled). Every schema is a reference into schemas/*.schema.json so the OpenAPI document, the JSON Schema fixtures and the Android models cannot drift from each other. Every error response uses the shared error shape; stage-specific error codes are listed per operation and must be SCREAMING_SNAKE_CASE. Paths listed here are those the backend serves today (BE-05, #19, including account linking from BC-D07, and the owner-scoped job actions from BE-04 part 3, #75) plus POST /v1/voice/actions (BE-13, #67; served by BE-10, #33). Capture-session and chunk schemas are published in components for the client models but their endpoints are not yet defined; report-version retrieval and reanalysis are #33.",
     "license": {
       "name": "PolyForm Noncommercial 1.0.0",
       "identifier": "PolyForm-Noncommercial-1.0.0"
@@ -21,7 +21,8 @@
     { "name": "principals", "description": "Guest identity (BE-05)." },
     { "name": "uploads", "description": "Declared and verified media uploads (BE-05)." },
     { "name": "investigations", "description": "Checks: idempotent creation and owner-scoped reads (BE-05)." },
-    { "name": "voice", "description": "Allowlisted voice actions (BE-13 contract, BE-10 endpoint)." }
+    { "name": "voice", "description": "Allowlisted voice actions (BE-13 contract, BE-10 endpoint)." },
+    { "name": "jobs", "description": "Owner-scoped job cancellation and deletion receipts (BE-04 part 3)." }
   ],
   "paths": {
     "/v1/principals/guest": {
@@ -285,6 +286,74 @@
         }
       }
     },
+    "/v1/jobs/{job_id}/cancel": {
+      "parameters": [{ "$ref": "#/components/parameters/JobId" }],
+      "post": {
+        "tags": ["jobs"],
+        "operationId": "cancelJob",
+        "summary": "Cancel one owned job: effective now or requested from its worker.",
+        "description": "No request body; a body is rejected with VALIDATION_FAILED. A queued or already cancelled job answers 200 with cancellation effective; a leased or running job answers 202 with cancellation requested and the worker makes it effective. The first outcome is stored and replayed unchanged on repeats, even after the worker acknowledges or the API restarts: this is a receipt, not a progress snapshot, and it promises nothing about provider interruption or billing. Missing, other-owner and legacy ownerless jobs all answer the same 404.",
+        "responses": {
+          "200": {
+            "description": "Cancellation effective.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobCancelResponse" }
+              }
+            }
+          },
+          "202": {
+            "description": "Cancellation requested; the worker observes it at its next heartbeat or lease expiry.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobCancelResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ClientIdentityRejected" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": {
+            "description": "JOB_NOT_CANCELLABLE: the job is already published or failed.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}": {
+      "parameters": [{ "$ref": "#/components/parameters/JobId" }],
+      "delete": {
+        "tags": ["jobs"],
+        "operationId": "deleteJob",
+        "summary": "Tombstone one owned job and clear its database payload and result.",
+        "description": "No request body; a body is rejected with VALIDATION_FAILED. Deletion revokes access, fences late worker publication and removes the job payload and published result in one transaction; the tombstone keeps ownership, fencing and provider-request metadata so a late callback is routed to nothing. cleanup_scope is job_payload_and_result only: uploads, provider copies, external artifacts and backups are not covered (#77). Repeating DELETE returns the same receipt without another mutation; a cancellation receipt is no longer readable after deletion (404).",
+        "responses": {
+          "200": {
+            "description": "Job tombstoned; cleanup of the database payload and result complete.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobDeleteResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ClientIdentityRejected" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
     "/v1/investigations/{investigation_id}": {
       "parameters": [{ "$ref": "#/components/parameters/InvestigationId" }],
       "get": {
@@ -367,6 +436,13 @@
         "required": true,
         "schema": { "$ref": "schemas/common.schema.json#/$defs/uuid" }
       },
+      "JobId": {
+        "name": "job_id",
+        "in": "path",
+        "required": true,
+        "description": "Canonical lowercase UUID of the job, as the queue stores it. The path parameters of both job actions are described by schemas/job-action-request.schema.json; neither operation takes a body.",
+        "schema": { "$ref": "schemas/job-action-request.schema.json#/properties/job_id" }
+      },
       "IdempotencyKey": {
         "name": "Idempotency-Key",
         "in": "header",
@@ -391,6 +467,11 @@
       },
       "ValidationFailed": {
         "description": "VALIDATION_FAILED (body, query or path invalid) or CLIENT_IDENTITY_REJECTED.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "ClientIdentityRejected": {
+        "description": "CLIENT_IDENTITY_REJECTED: a user_id, owner_id or principal_id arrived in the query string or an X-User-Id style header; identity comes only from the bearer credential.",
         "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
@@ -485,7 +566,9 @@
       "CaptureChunkRequest": { "$ref": "schemas/capture-chunk-request.schema.json" },
       "CaptureChunk": { "$ref": "schemas/capture-chunk.schema.json" },
       "VoiceActionRequest": { "$ref": "schemas/voice-action-request.schema.json" },
-      "VoiceActionResponse": { "$ref": "schemas/voice-action-response.schema.json" }
+      "VoiceActionResponse": { "$ref": "schemas/voice-action-response.schema.json" },
+      "JobCancelResponse": { "$ref": "schemas/job-cancel-response.schema.json" },
+      "JobDeleteResponse": { "$ref": "schemas/job-delete-response.schema.json" }
     }
   }
 }

@@ -1,0 +1,8 @@
+{
+  "synthetic": true,
+  "description": "Synthetic queued job cancelled immediately.",
+  "operation": "cancel",
+  "status": 200,
+  "request": {"job_id": "00000000-0000-4000-8000-000000000075"},
+  "response": {"job_id": "00000000-0000-4000-8000-000000000075", "cancellation": "effective"}
+}

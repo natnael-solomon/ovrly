@@ -656,6 +656,47 @@ def _check_synthetic_ids(value: Any, location: str) -> None:
             _check_synthetic_ids(item, f"{location}[{index}]")
 
 
+# Job action fixtures (cancel and delete receipts) -------------------------
+
+
+def job_fixture_paths(fixture_dir: Path = FIXTURES / "jobs") -> list[Path]:
+    return sorted(fixture_dir.glob("*.json"))
+
+
+def check_job_fixture(validator: Validator, path: Path) -> None:
+    fixture = read_json(path)
+    location = str(path)
+    require(isinstance(fixture, dict), location, "expected a fixture object")
+    require(
+        set(fixture) == {"synthetic", "description", "operation", "status", "request", "response"},
+        location,
+        "unexpected fixture fields",
+    )
+    require(fixture["synthetic"] is True, location, "fixture must be synthetic")
+    require(
+        isinstance(fixture["description"], str) and "synthetic" in fixture["description"].lower(),
+        location,
+        "description must identify synthetic data",
+    )
+    operation, status = fixture["operation"], fixture["status"]
+    require(operation in ("cancel", "delete"), location, "unknown operation")
+    require(type(status) is int and status in (200, 202, 404, 409), location, "unknown status")
+    validator.validate(fixture["request"], "job-action-request.schema.json")
+    response = fixture["response"]
+    if status in (404, 409):
+        validator.validate(response, ERROR_SCHEMA)
+        code = "NOT_FOUND" if status == 404 else "JOB_NOT_CANCELLABLE"
+        require(response["code"] == code, location, "error code/status mismatch")
+        require(status != 409 or operation == "cancel", location, "only cancel can conflict")
+    else:
+        validator.validate(response, f"job-{operation}-response.schema.json")
+        require(response["job_id"] == fixture["request"]["job_id"], location, "job id mismatch")
+        expected = 202 if response.get("cancellation") == "requested" else 200
+        require(status == expected, location, "outcome/status mismatch")
+    _check_synthetic_ids(fixture["request"], f"{location} request")
+    _check_synthetic_ids(response, f"{location} response")
+
+
 def check_all() -> Iterator[str]:
     """Yield one line per checked artifact; raise Invalid on the first problem."""
     yield f"version {check_version()}"
@@ -681,6 +722,11 @@ def check_all() -> Iterator[str]:
     require(bool(intake), str(FIXTURES / "intake"), "no intake fixtures found")
     for path in intake:
         check_intake_fixture(validator, path)
+        yield f"fixture {path.relative_to(ROOT).as_posix()}"
+    job_paths = job_fixture_paths()
+    require(bool(job_paths), str(FIXTURES / "jobs"), "no job fixtures found")
+    for path in job_paths:
+        check_job_fixture(validator, path)
         yield f"fixture {path.relative_to(ROOT).as_posix()}"
 
 

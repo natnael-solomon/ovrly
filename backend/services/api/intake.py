@@ -31,7 +31,11 @@ class RecordOnlyDispatcher:
 
 
 class QueueDispatcher:
-    """Production dispatcher: one ``intake`` job per investigation, in the caller's transaction."""
+    """Production dispatcher: one ``intake`` job per investigation, in the caller's transaction.
+
+    The job is enqueued with the investigation's owner, so the owner-scoped cancel and
+    delete routes can act on it; a job without an owner is unreachable through them.
+    """
 
     def __init__(self, queue: JobQueue):
         self.queue = queue
@@ -43,4 +47,5 @@ class QueueDispatcher:
             connection,
             intake_stage_key(investigation_id),
             intake_payload(investigation_id, owner_id),
+            owner_id=owner_id,
         )

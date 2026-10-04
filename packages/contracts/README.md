@@ -9,7 +9,8 @@ claim, evidence and assessment schemas, the shared enums, the six result
 fixtures, the OpenAPI document, the server round-trip check and the required
 **Contract checks** workflow (schema validation, spectral, oasdiff, server
 round trip and the Android compatibility tests against the same fixtures).
-Nothing here implements an endpoint or Android wiring.
+BE-04 part 3 (#75) adds the job action schemas and receipts, exercised by the
+backend endpoints. Nothing here implements Android wiring.
 
 ## Layout and namespaces
 
@@ -22,7 +23,8 @@ Nothing here implements an endpoint or Android wiring.
 | `fixtures/voice-actions/*.json` | Synthetic voice request/response scenarios with explicit expectations. |
 | `fixtures/results/*.json` | The six investigation read payloads (complete, partial, failed, cancelled, insufficient-evidence, no-claims), generated from the backend models. |
 | `fixtures/intake/*.json` | Hand-authored upload, investigation-create and capture samples, each naming the schemas it exercises. |
-| `validate.py` | Standard-library validator for the schemas and all three fixture directories. |
+| `fixtures/jobs/*.json` | Synthetic job action receipts and safe error examples; see [Job actions](#job-actions). |
+| `validate.py` | Standard-library validator for the schemas and all four fixture directories. |
 | `roundtrip.py` | Builds `fixtures/results` from `backend/services/api/schemas.py` and diffs them (`--check`) or rewrites them (`--update`). |
 | `openapi_check.py` | Validates `openapi.json` with `openapi-spec-validator` and applies the contract rules without Node. |
 | `compat.py` | Breaking-change gate: pinned `oasdiff` plus enum/schema-file diff against a base; fails without a `VERSION` bump. |
@@ -60,6 +62,9 @@ round-trip check reports whole-file diffs).
 | `capture-session.schema.json` | Hand-authored; no backend model yet | Live-overlay session read model. |
 | `capture-chunk-request.schema.json`, `capture-chunk.schema.json` | Hand-authored; no backend model yet | Chunk declaration and acknowledgement. |
 | `voice-action-request.schema.json`, `voice-action-response.schema.json` | BE-13 slice, unchanged | `POST /v1/voice/actions`. |
+| `job-action-request.schema.json` | Path parameters of the job actions (`job_id`); no body | `POST /v1/jobs/{job_id}/cancel`, `DELETE /v1/jobs/{job_id}`. |
+| `job-cancel-response.schema.json` | `CancelResponse` in `services/api/routes/jobs.py` | `POST /v1/jobs/{job_id}/cancel` 200 and 202. |
+| `job-delete-response.schema.json` | `DeleteResponse` in `services/api/routes/jobs.py` | `DELETE /v1/jobs/{job_id}` 200. |
 
 "Mirrors" names the Pydantic class in `backend/services/api/schemas.py`. The
 request models and `InvestigationResponse`, `UploadResponse` existed before this
@@ -251,6 +256,41 @@ Android models and parser:
 
 Record the reviewed schema/fixture link in #62, #18 and #33.
 
+## Job actions
+
+`POST /v1/jobs/{job_id}/cancel` and `DELETE /v1/jobs/{job_id}` require bearer
+authentication and **no HTTP body**. `job-action-request.schema.json` describes
+the path parameters, not a JSON body. IDs in fixtures/responses use canonical
+UUID strings, matching the queue. Job owners come only from authenticated
+enqueue callers, never client body fields or payload contents.
+
+Cancellation returns `job_id` and `cancellation`: `effective` (200) or
+`requested` (202). Its first outcome is persisted and replayed unchanged, even
+after the worker acknowledges or the API restarts; this is a receipt, not a
+progress snapshot. A published/failed job is 409 `JOB_NOT_CANCELLABLE`.
+Cancellation makes no promise about provider interruption or billing.
+
+Deletion returns `job_id`, `state: deleted`, `access_revoked: true`,
+`cleanup_status: complete` and `cleanup_scope: job_payload_and_result` (200).
+Cleanup is limited to the database payload/result: uploads, external artifacts,
+provider copies and backup expiry are **not** covered. The tombstone retains
+ownership/fencing metadata. The owner can repeat DELETE without mutation,
+but cancellation receipts become inaccessible after deletion (404).
+
+Missing, legacy ownerless and other-owner jobs return the identical shared
+404 `NOT_FOUND` shape. No owner-specific error distinguishes them.
+
+`fixtures/jobs` uses `synthetic`, `description`, `operation`, `status`,
+`request` (path parameters) and `response`. The validator checks schema,
+status/outcome, synthetic ids and ID consistency. `openapi.json` publishes both
+operations with the `JobId` path parameter (a reference into
+`job-action-request.schema.json`), the `JobCancelResponse`
+and `JobDeleteResponse` components and the shared `Error` responses. Backend recovery tests compare these
+fixtures with the real endpoints, round-trip the response models, reject
+invalid payloads and prove unauthorized requests cannot alter a job.
+The addition leaves existing voice schemas and version unchanged; both Android
+and backend review are required under #15. Android job parsing remains #62.
+
 ## Voice actions
 
 Decision record: [BC-D04](../../docs/decisions/BC-D04-voxide-route.md). The
@@ -398,7 +438,8 @@ copy them.
 `openapi.json` is an OpenAPI 3.1 document for the routes the backend serves
 today (`/v1/principals/guest`, `/v1/uploads`, `/v1/uploads/{id}/content`,
 `/v1/uploads/{id}/complete`, `/v1/investigations`,
-`/v1/investigations/{id}`) plus `POST /v1/voice/actions`. Every request and
+`/v1/investigations/{id}`, `/v1/jobs/{job_id}/cancel`, `/v1/jobs/{job_id}`) plus
+`POST /v1/voice/actions`. Every request and
 response schema is a `$ref` into `schemas/`, through named components
 (`#/components/schemas/Investigation` is `schemas/investigation.schema.json`),
 so the document cannot describe a shape the JSON Schemas and the fixtures do not
