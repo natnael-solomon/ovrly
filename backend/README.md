@@ -453,6 +453,335 @@ Durable job cancel/delete endpoints and the cross-owner-read invariant remain
 retry classes and recovery cases are described under
 [Durable jobs and recovery](#durable-jobs-and-recovery).
 
+## BE-01 router experiment
+
+`uv run --frozen python -m services.experiments.router` is an isolated research
+runner, never started by the API or worker. Its tests use HTTP mocks, not provider
+keys. It prepares the experiment in [BE-01 / #11](https://github.com/natnael-solomon/ovrly/issues/11);
+it does **not** establish free-tier entitlements or complete that issue.
+The existing locked HTTPX dependency is also a runtime dependency for this CLI.
+
+### Inputs and approval
+
+Store inputs under ignored root `.scratch/`, not in evaluation fixtures.
+The input is one JSON object:
+
+```json
+{
+  "schema_version": "be01-experimental-v2",
+  "version": "pilot-v2",
+  "kind": "synthetic",
+  "split": "dev",
+  "hosted_processing_approved": false,
+  "provenance": "Invented local example; not real transcript evidence",
+  "windows": [
+    {
+      "window_id": "window-one",
+      "context_status": "window-only",
+      "observations": [
+        {
+          "id": "segment-one",
+          "role": "target",
+          "text": "The sample contains ten seeds.",
+          "source_type": "supplied-caption",
+          "speaker_id": null,
+          "envelope": {
+            "start_ms": 0,
+            "end_ms": 5000,
+            "basis": "user-timed-caption-not-media-verified"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Provide 1-50 windows with unique window IDs and distinct target transcript text.
+Each window needs at least one target observation and unique observation IDs.
+Reused observation IDs across windows must retain identical text/source metadata;
+their role may differ. IDs identify supplied observations, not retrieved papers.
+`source_type` is `supplied-caption` or `source-subtitle`; these experiment inputs
+do not establish that ASR ran or that captions agree with media. The example's
+text and timing are invented, not a real recording or timing measurement.
+
+`speaker_id` preserves a supplied speaker label or is explicitly null; do not
+infer a person's name. `envelope` has an exclusive end greater than its start.
+Timing bases are `user-timed-caption-not-media-verified`,
+`coarse-parent-envelope-not-subwindow-timing`, or
+`source-subtitle-cue-not-media-verified`. Subdividing a coarse block does not
+justify narrowing its time envelope.
+
+Keep the initial 50-window comparison `window-only`: do not silently append
+previous passages or guessed visual context. The fixed prompt flags missing
+context rather than inventing it. A separately versioned experiment may supply
+observations with `role: context` and `context_status: additional-context-supplied`.
+Context assists interpretation but is not another extraction target.
+
+`split` must be `dev`: never feed the frozen holdout or its labels to prompt
+tuning. The two invented few-shot examples are embedded in the fixed prompt,
+separate from evaluation material. Use `kind: real` only for actual transcript
+windows, with provenance identifying the approved dataset/version and selection
+method. Select short/simple through long/many-claim windows. The repository's
+RES-06 draft has neither full transcripts nor hosted-processing clearance;
+do not turn its normalized annotations into purported transcript data.
+
+Version 2 replaces the old `transcript`/`evidence_ids` input and `claims` output.
+The runner rejects v1 or unversioned inputs; there is no silent conversion.
+To migrate locally, preserve the original snapshot, construct observations from
+its actual source spans, verify exact text reconstruction, and write a new
+dataset version with `schema_version: be01-experimental-v2`. Keep the original
+source hashes, parent envelopes, family/overlap records and permission status
+in the accompanying private provenance. Do not fabricate fine-grained timing.
+
+`hosted_processing_approved: true` is an operator attestation, not automated
+rights verification. Obtain permission for the selected provider's processing
+and retention terms before setting it. Plan mode accepts unapproved inputs and
+does not read a key, create recordings or contact any provider.
+
+### Plan, then explicitly execute
+
+From `backend/`, after saving the input as root `.scratch/be01-windows.json`:
+
+```sh
+uv run --frozen python -m services.experiments.router ../.scratch/be01-windows.json
+```
+
+For 50 windows the matrix has **525 cases / at most 1,050 requests**:
+350 baseline cases across `auto:cheap`, `auto:quality` and five pinned candidates,
+plus 175 paired `/no_think` cases on alternating input windows (25 per route).
+Input ordering determines the paired subset. Pinning uses `model: auto:cheap`
+with a singleton `models` list; an unexpected executor fails that attempt.
+Only documented request fields are used. No `response_format`, tools, feedback,
+provider fallback, automatic HTTP retry or production integration is enabled.
+
+Before executing, use a dedicated experiment key and verify the account's plan
+and available spending controls. The team reports that its Free account has no
+dashboard model-selection controls; do not require or claim a nonexistent
+allow-list. A singleton `models` request is a per-request selection, not an
+account-wide billing ceiling. Keep subscription-backed Free access; do not
+enable self-funded routing or upgrade billing as an experiment workaround.
+Inspect remaining account quota: the request bound is not a token, money or
+shared-account quota guarantee.
+Export `SCHOLARXIV_EXPERIMENT_API_KEY` through a secret manager or non-echoing
+shell input; never put its value in a command, document or Git. Obtain the exact
+HTTPS completion URL from the team's verified provider setup. The runner checks
+URL shape, not domain ownership or account entitlements. Do not use an untrusted
+endpoint: it will receive the key and approved transcript text.
+The observed canonical endpoint is
+`https://www.scholarxiv.com/api/v1/router/chat/completions`; the non-`www`
+address redirects, which this runner deliberately does not follow.
+If using ignored `backend/.env.experiments`, explicitly load it with
+`uv run --frozen --env-file .env.experiments ...`; ordinary `uv run` does not
+automatically load that filename.
+
+```sh
+uv run --frozen python -m services.experiments.router ../.scratch/be01-windows.json \
+  --execute --endpoint "$SCHOLARXIV_ROUTER_COMPLETIONS_URL" \
+  --run-id be01-approved-run-01 --max-requests 1050 --max-tokens 2048
+```
+
+`--max-requests` must cover the worst-case matrix before any call; smaller pilot
+inputs need a smaller bound printed by plan mode. Temperature is always zero;
+max tokens defaults to 2048 (accepted range 300-8192), with a 60-second HTTPX
+timeout and redirects/environment proxies disabled. Calls are sequential.
+Interrupt to stop; partial recordings are retained but never yield a completed
+summary. HTTP errors are recorded as failed cases without retries or downgrade.
+Use a new run ID for a new run; existing recordings are never overwritten.
+
+### What is measured
+
+The **experimental** `be01-experimental-v2` schema is implemented in
+`services/experiments/schema.py`; the fixed prompt is `be01-window-only-v2`.
+The output is `{"occurrences":[...]}`, with these required fields per occurrence:
+
+| Field | Meaning |
+| --- | --- |
+| `proposition` | Claim preserving polarity, quantities, units, conditions and attribution |
+| `taxonomy` | `empirical`, `causal`, `documentary`, `predictive`, `normative`, `mixed`, `unclear` |
+| `source_refs` | Nonempty list of target observation text spans |
+| `context_refs` | Context observation spans, or `[]` when none are used |
+| `assertion_mode` | `asserted`, `reported`, `questioned`, `hypothetical`, `counterfactual`, `unclear` |
+| `speaker_commitment` | `endorsed`, `rejected`, `uncommitted`, `unclear` |
+| `attributed_to` | Person/group explicitly identifiable in supplied text, otherwise null |
+| `eligibility_reason` | `factual-claim`, `factual-premise`, `opinion`, `quoted-not-endorsed`, `insufficient-context`, `not-a-claim` |
+| `uncertainty_flags` | Any of `unresolved-reference`, `missing-context`, `ambiguous-attribution`, `ambiguous-commitment`, `ambiguous-meaning`, `source-text-conflict`; otherwise `[]` |
+
+Every reference has `observation_id`, `start_char`, and `end_char`. Offsets count
+Unicode code points in the exact observation text, zero-based and end-exclusive;
+they are not UTF-8 bytes or Kotlin/Java UTF-16 indices. No text normalization is
+performed. The validator rejects unknown IDs, role mismatches, empty/inverted or
+out-of-bounds spans, whitespace-only selections, duplicate references within an
+occurrence, and target spans combining distinct supplied speakers. Repeated
+occurrences remain separate; no reconciliation is performed.
+
+Extra fields, missing fields and coercions fail. Pure normative judgments,
+questions and invented scenarios cannot use an eligible factual reason.
+`quoted-not-endorsed` cannot accompany `endorsed`, and uncertainty flags cannot
+repeat. Counterfactual claims may be eligible if their conditions are retained.
+Missing evidence alone is not missing context. Relevant exclusions are retained;
+this is not an exhaustive annotation of every nonclaim sentence.
+
+The backend can derive quotations, supplied speaker labels and time envelopes
+from validated references. The model must not generate those fields, occurrence
+IDs, revisions, confidence scores or truth verdicts. JSON Schema enforces shape;
+Pydantic and source checks enforce additional consistency, not semantic support.
+`{"occurrences":[]}` means no relevant candidates in that window, not a failure
+fallback or proof of whole-clip review.
+
+This connects the draft to the isolated experiment, **not** the BE-03/BE-08
+production contract. Agree the experiment schema/prompt before the real run;
+production promotion still requires the shared contract review. Structural
+validity does not measure claim correctness, semantic fidelity, extraction
+recall, timestamps or evidence quality.
+
+Recordings retain the request and raw response, executor, decision ID, usage,
+response length in characters, latency, raw JSON validity, thinking/fence flags,
+truncation, post-hygiene JSON validity, Pydantic validity, enum/schema errors and
+source-reference errors. `evidence_id_hallucination` now means an unknown
+observation ID in either reference list. Leading closed `<think>` blocks,
+surrounding Markdown fences and
+preamble before the first object are removed for the post-hygiene measurement.
+Duplicate JSON keys, NaN/infinity constants, trailing prose, schema errors,
+invented IDs, invalid source grounding and truncation fail closed. One invalid
+output gets exactly one repair, with validation diagnostics and the same original
+observations; HTTP/protocol failures do not. Unknown completion finish reasons fail.
+The expected non-streaming envelope requires `model`, `decision_id`, `usage`
+and exactly one `choices` entry with text `message.content` and `finish_reason`;
+incompatibility is explicit failure, not a silently accepted response.
+
+`summary.json` reports first-pass (after hygiene) and post-single-repair validity,
+fail-closed percentage, per-route/condition metrics, actual-executor attempt
+validity, and nearest-rank p50/p95 end-to-end case latency including repair.
+Actual-executor counts separate first/repair attempts because routing may change
+on repair; they are not falsely attributed to the originally requested model.
+Requests and reported tokens are quota proxies only; missing usage is counted.
+The proposed 90% threshold uses the 50 baseline cases per eligible route, not a
+pool of routes or the `/no_think` condition. Fewer than 50 windows or synthetic
+inputs are always `pilot_only`, never a go/no-go observation.
+Even a qualifying real run leaves `decision: pending_team_approval`.
+
+Results stay under ignored `.scratch/router/<run-id>/`: a manifest with dataset
+and runner/schema-module hashes, schema/prompt versions, a fixed prompt-template
+hash, input/output schemas, timestamps and completion state; flushed
+`attempts.jsonl` cassettes; `results.json`; and `summary.json`.
+Authorization headers are never recorded and the configured key is redacted,
+but transcripts and responses remain sensitive. This is **not** a general PII
+or secret sanitizer. Review rights, redact other sensitive data and obtain
+approval before promoting any cassette into BE-08/RES-03 fixtures or publishing
+an evidence table. Keep raw account evidence and private references out of Git.
+Exit codes: 0 = complete with every case valid, 1 = complete with failed cases
+(inspect the threshold separately), 2 = invalid configuration/input or local
+failure. An interrupted run is incomplete, irrespective of partial successes.
+
+The runner executes locally; model inference is hosted. No web-service deployment
+is required, but `--execute` sends the approved observation text to the provider.
+Plan mode and the focused offline checks send nothing.
+
+Focused offline check:
+
+```sh
+uv run --frozen pytest -q tests/test_router_experiment.py tests/test_extraction_contract.py
+```
+
+### Fixed experiment contract and offline coverage
+
+Version `be01-experimental-v2` and prompt `be01-window-only-v2` are the fixed
+contract for the next model experiment. Regression tests pin their canonical
+JSON fingerprints. A deliberate schema/prompt change requires a new version,
+reviewed fixture expectations and a separate run; do not overwrite historical
+inputs, recordings or results. This experiment lock is not a production
+BE-03 contract, hosted-processing approval or a provider go/no-go decision.
+
+`tests/test_extraction_contract.py` supplies thirteen invented contract cases:
+negation, rejected quotation, hypothetical, counterfactual, normative/factual
+premises, missing context, correction/repetition, reported belief, distinct
+speakers/quantities, explicitly supplied hypothetical context, no claims,
+instruction-like text, and Unicode source text. They are separate from the two
+prompt examples and from both real evaluation splits. These are authored
+expected structures, not recorded model outputs or independently reviewed
+evaluation labels.
+
+Offline checks establish that the contract can represent these cases, rejects
+missing required fields, round-trips its values and preserves input text.
+They do not establish that a model will extract them correctly or resist
+instruction-like source text. A regression test explicitly demonstrates that
+an incorrect strengthened proposition can still pass structural validation;
+semantic fidelity and extraction recall require a separate model evaluation.
+The schema records uncertain attribution/context but does not verify their
+truth. Approximate envelopes remain source metadata, not generated word timing.
+
+### Provider, hosting and BE-08 decisions
+
+The provider order (Scholarxiv `auto:cheap`, then Groq `openai/gpt-oss-20b`
+as the only claim fallback; Gemini not selected), the EthioDeploy Free hosting
+choice, the limited BE-08 development go and the account, entitlement and
+hosting evidence behind them are recorded in
+[BC-D03](../docs/decisions/BC-D03-provider-hosting.md). That record is
+Proposed: authored from this experiment by Neb-iyu (BE-01 owner) on
+2026-10-04 and awaiting confirmation by the product owner, natnael-solomon.
+This README keeps the runner, its inputs and the measurement procedure. The
+original #11 checklist also cites BC-D04; that reference does not redefine the
+canonical [BC-D04 Voxide decision](../docs/decisions/BC-D04-voxide-route.md).
+No provider switching has been added to the API, worker or this runner;
+adapter orchestration belongs to BE-08 and must keep the same validation
+contract on every route.
+
+### Measured result (local run)
+
+The fixed v2 prompt/schema were measured on 50 authorized real development
+windows from seven sources, with temperature 0 and `max_tokens: 8192`.
+Windows overlap and source/topic families are correlated; these are not 50
+independent clips or a holdout evaluation.
+
+| Cohort | First-pass structural validity | Post-repair structural validity | Interpretation |
+| --- | --- | --- | --- |
+| `auto:cheap`, all 50 baseline windows | 44/50 (88%) | 48/50 (96%) | Meets the selected structural gate; two cases fail closed |
+| Matched cheap subset, no suffix | 21/25 | 25/25 | Same 25 windows as the next row |
+| Matched cheap subset, `/no_think` | 17/25 | 21/25 | No improvement; do not adopt the suffix |
+| `auto:quality`, original baseline | 9/50 | 9/50 | Only nine baseline cases returned HTTP 200; remaining failures do not establish model quality |
+| Pinned routes, original/resumed matrix | Not meaningfully measured | Not meaningfully measured | No HTTP responses for pinned routes in that cohort; do not rank their quality as zero |
+| GPT-OSS via Scholarxiv, first recovery baseline subset | 13/21 | 16/21 | Partial, separate recovery cohort, not a completed 50-window route or a direct Groq measurement |
+
+The complete cheap baseline used 56 requests and 123,122 reported tokens;
+case p50/p95 latency including repair was 2.35/10.90 s. Counts do not establish
+billed cost or remaining shared quota. The original plus first continuation
+recorded 525 cases / 539 requests, including 435 transport failures; later
+recoveries and timeout trials are separate cohorts, not overwritten results.
+The final recovery left 399 cases unattempted in that recovery sequence.
+They are explicitly deferred, not passed. Earlier synthetic runs used a
+different 2048-token ceiling and cannot be pooled with these measurements.
+
+The figures in this table come from an uncommitted local run. Its recordings
+live under ignored `.scratch/router/<run-id>/` (manifest, `attempts.jsonl`,
+`results.json` and `summary.json`) and are not in the repository, so a reviewer
+cannot verify them from this checkout. Before BC-D03 moves from Proposed to
+Accepted, a redacted metrics-only `summary.json` (no transcripts, requests or
+responses) or the run id together with the manifest SHA-256 and summary
+SHA-256 must be committed and linked from the record. Run summaries keep
+`decision: pending_team_approval`; the proposed go in BC-D03 supplements them
+rather than rewriting them.
+
+Semantic review found missed claims, incorrect rejection/negation, and
+hypothetical context promoted to fact, including in structurally valid output.
+Quote-reference and prompt-revision pilots did not establish a consistent
+held-aside improvement and were not adopted. Their provisional reference labels
+are agent-authored, not independent human gold.
+
+Cassettes stay local; fixture publication requires rights and privacy review
+and explicit authorization. No real transcripts or account identifiers have
+been promoted into committed fixtures.
+
+Offline validation of this runner is the focused command above, which passed
+212 tests on 2026-10-04 from `backend/`:
+
+```sh
+uv run --frozen pytest -q tests/test_router_experiment.py tests/test_extraction_contract.py
+```
+
+The full PostgreSQL suite, migrations and the coverage comparison against
+`main` run in **Backend checks**; see [Local checks](#local-checks).
+
 ## Stack record and boundaries
 
 This implements the infrastructure choice in
@@ -461,7 +790,8 @@ Python 3.11, uv, FastAPI/Uvicorn, PostgreSQL 16, SQLAlchemy asyncio/Psycopg and
 Alembic, with a single Python codebase for API and worker. The issue associates
 this stack with `BC-D03` / `RFC-D41-D43`. This records the implemented stack,
 not approval of the remaining infrastructure or hosting decisions. The full
-decision-log task remains #5; provider/hosting evidence remains #11 and #21.
+decision-log task remains #5; provider/hosting evidence is proposed in
+[BC-D03](../docs/decisions/BC-D03-provider-hosting.md) and continues in #21.
 
 Keep provider credentials and private media out of Git; future media uploads
 require explicit consent and a retention policy. No hosting entitlement or
