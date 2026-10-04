@@ -6,9 +6,15 @@ on: # zizmor: ignore[dangerous-triggers]
     workflows: [Android CI]
     types: [completed]
   pull_request:
-    types: [opened, ready_for_review, closed]
+    # synchronize and reopened stand in for a delayed or dropped "opened" webhook; the script
+    # announces a PR once, keyed by its number in the state variable.
+    types: [opened, synchronize, reopened, ready_for_review, closed]
   release:
     types: [published]
+  # Hourly catch-up announces open PRs whose every webhook was dropped.
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,7 +23,9 @@ jobs:
   notify:
     name: Telegram notify
     # Dependabot-triggered runs have no access to secrets; the script also skips its PRs.
-    if: github.actor != 'dependabot[bot]'
+    if: >-
+      github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' &&
+      github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -35,3 +43,27 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
           # GITHUB_TOKEN cannot manage repository variables; a PAT with Variables access is required.
           STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+
+  catch-up:
+    name: Telegram catch-up
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read   # list open PRs; the only job that reads them
+    steps:
+      - name: Check out notifier scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Announce open pull requests missed by webhooks
+        run: python3 .github/scripts/telegram_notify.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          # GITHUB_TOKEN cannot manage repository variables; a PAT with Variables access is required.
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
