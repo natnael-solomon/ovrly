@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py InvestigationReadModel: the nine InvestigationResponse fields that GET /v1/investigations/{id} returns today plus processing_status, job and report. The live route adopts the three new fields in #19 part 2 / #33; the round-trip fixtures under fixtures/results are produced from the Pydantic model.",
+  "title": "Investigation",
+  "description": "Read model of one investigation (a check), returned by POST /v1/investigations (202), GET /v1/investigations/{id} and as items of GET /v1/investigations. Processing progress (processing_status), the coarse stored state, the current job and the published report are separate fields: a failed or cancelled investigation carries an error and no report, so a failure can never be read as a finding. Clients map unknown state, stage, processing_status, job and report enum values to UNKNOWN and keep reading the rest of the payload.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "state",
+    "stage",
+    "coverage",
+    "version",
+    "error",
+    "source",
+    "created_at",
+    "updated_at",
+    "processing_status",
+    "job",
+    "report"
+  ],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "state": { "$ref": "enums.schema.json#/$defs/investigation_state" },
+    "stage": {
+      "$ref": "enums.schema.json#/$defs/stage",
+      "description": "Stage the investigation is at or stopped at. intake until the job engine picks it up."
+    },
+    "coverage": { "$ref": "#/$defs/coverage" },
+    "version": {
+      "type": "integer",
+      "description": "Current report version number, starting at 1 at intake. Equals report.version when a report is present."
+    },
+    "error": {
+      "description": "Null unless processing failed. The stored subset of the shared error shape (error.schema.json): code, message and retryable. request_id is absent because a stored failure is not tied to the request that reads it, and action is not stored today.",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/safe_error" }]
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "updated_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "processing_status": { "$ref": "enums.schema.json#/$defs/processing_status" },
+    "job": {
+      "description": "The current or last queue job, or null before the job engine has one (intake) or after deletion.",
+      "oneOf": [{ "type": "null" }, { "$ref": "job.schema.json" }]
+    },
+    "report": {
+      "description": "The latest published report version, or null when nothing has been published. Present for partial and complete; always null for waiting, checking and failed.",
+      "oneOf": [{ "type": "null" }, { "$ref": "report-version.schema.json" }]
+    }
+  },
+  "oneOf": [
+    {
+      "$comment": "Nothing published yet, nothing failed.",
+      "properties": {
+        "processing_status": { "type": "string", "enum": ["waiting", "checking", "cancelled"] },
+        "state": { "type": "string", "enum": ["queued", "running", "cancelled"] },
+        "report": { "type": "null" },
+        "error": { "type": "null" }
+      }
+    },
+    {
+      "$comment": "A report version is published; cancelled keeps what was published before the cancel.",
+      "properties": {
+        "processing_status": { "type": "string", "enum": ["partial", "complete", "cancelled"] },
+        "state": { "type": "string", "enum": ["running", "completed", "cancelled"] },
+        "report": { "type": "object" },
+        "error": { "type": "null" }
+      }
+    },
+    {
+      "$comment": "Failed: the error is present and there are no findings.",
+      "properties": {
+        "processing_status": { "type": "string", "enum": ["failed"] },
+        "state": { "type": "string", "enum": ["failed"] },
+        "report": { "type": "null" },
+        "error": { "type": "object" }
+      }
+    }
+  ],
+  "$defs": {
+    "coverage": {
+      "type": "object",
+      "description": "How much of the eligible media has been checked. Never a verdict. The intake placeholder is {\"status\": \"not_started\"}.",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "$ref": "enums.schema.json#/$defs/coverage_status" },
+        "covered_ms": {
+          "$ref": "common.schema.json#/$defs/nullable_integer",
+          "description": "Milliseconds of media that reached assessment."
+        },
+        "total_ms": {
+          "$ref": "common.schema.json#/$defs/nullable_integer",
+          "description": "Eligible media duration in milliseconds, once known."
+        }
+      }
+    },
+    "safe_error": {
+      "type": "object",
+      "description": "Stored failure: the code, message and retryable fields of error.schema.json, by reference so there is one definition of each.",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "$ref": "error.schema.json#/properties/code" },
+        "message": { "$ref": "error.schema.json#/properties/message" },
+        "retryable": { "$ref": "error.schema.json#/properties/retryable" }
+      }
+    },
+    "source": {
+      "description": "Echo of the accepted source. Same union as investigation-create-request.schema.json, except that duration_ms is omitted when it was not declared instead of being null.",
+      "oneOf": [{ "$ref": "#/$defs/url_source" }, { "$ref": "#/$defs/upload_source" }]
+    },
+    "url_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "url"],
+      "properties": {
+        "kind": { "const": "url", "$ref": "enums.schema.json#/$defs/source_kind" },
+        "url": { "$ref": "investigation-create-request.schema.json#/$defs/url_source/properties/url" },
+        "duration_ms": { "type": "integer" }
+      }
+    },
+    "upload_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "upload_id"],
+      "properties": {
+        "kind": { "const": "upload", "$ref": "enums.schema.json#/$defs/source_kind" },
+        "upload_id": { "$ref": "common.schema.json#/$defs/uuid" },
+        "duration_ms": { "type": "integer" }
+      }
+    }
+  }
+}

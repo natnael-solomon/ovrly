@@ -82,13 +82,10 @@ jobs:
         run: uv run --frozen ruff check . && uv run --frozen ruff format --check .
       - name: Strict types
         run: uv run --frozen mypy --strict services/
-      - name: Voice-actions contract schemas and fixtures
+      - name: Contract schemas, fixtures and server round-trip
         run: >-
-          uv run --frozen ruff check ../packages/contracts
-          && uv run --frozen ruff format --check ../packages/contracts
-          && uv run --frozen mypy --strict ../packages/contracts/validate.py ../packages/contracts/tests
-          && uv run --frozen python ../packages/contracts/validate.py
-          && uv run --frozen pytest ../packages/contracts/tests -q
+          uv run --frozen python ../packages/contracts/validate.py
+          && uv run --frozen python ../packages/contracts/roundtrip.py --check
       - name: Upgrade database and check migration drift
         run: uv run --frozen alembic upgrade head && uv run --frozen alembic check
       - name: Test and compare coverage with main

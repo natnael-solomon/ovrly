@@ -1,0 +1,38 @@
+{
+  "synthetic": true,
+  "description": "Creating an investigation from a completed upload without a declared duration (duration_ms null, as the Pydantic model allows), and the 202 Investigation read model at intake. Synthetic fixture; the upload id refers to nothing.",
+  "schemas": {
+    "request": "investigation-create-request.schema.json",
+    "response": "investigation.schema.json"
+  },
+  "expect": {
+    "request": "valid",
+    "response": "valid"
+  },
+  "request": {
+    "source": {
+      "kind": "upload",
+      "upload_id": "00000000-0000-4000-8000-000000000301",
+      "duration_ms": null
+    }
+  },
+  "response": {
+    "id": "00000000-0000-4000-8000-000000000402",
+    "state": "queued",
+    "stage": "intake",
+    "coverage": {
+      "status": "not_started"
+    },
+    "version": 1,
+    "error": null,
+    "source": {
+      "kind": "upload",
+      "upload_id": "00000000-0000-4000-8000-000000000301"
+    },
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:00:00Z",
+    "processing_status": "waiting",
+    "job": null,
+    "report": null
+  }
+}

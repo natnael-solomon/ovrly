@@ -1,0 +1,113 @@
+{
+  "synthetic": true,
+  "description": "A live capture session still running: coverage is partial, the report is provisional, one claim is assessed and the second is found but not yet assessed. The job is on its second attempt after a transient provider error. Synthetic fixture; nothing behind these identifiers exists.",
+  "expect": {
+    "payload": "valid",
+    "processing_status": "partial",
+    "state": "running",
+    "claim_count": 2,
+    "assessment_count": 1
+  },
+  "investigation": {
+    "id": "00000000-0000-4000-8000-000000000002",
+    "state": "running",
+    "stage": "retrieval",
+    "coverage": {
+      "status": "partial",
+      "covered_ms": 60000,
+      "total_ms": null
+    },
+    "version": 1,
+    "error": null,
+    "source": {
+      "kind": "upload",
+      "upload_id": "00000000-0000-4000-8000-000000000202"
+    },
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:00:50Z",
+    "processing_status": "partial",
+    "job": {
+      "id": "00000000-0000-4000-8000-000000000102",
+      "state": "running",
+      "stage": "retrieval",
+      "cancel_requested": false,
+      "attempts": 2,
+      "retry_class": "transient",
+      "available_at": "2026-10-04T12:00:00Z",
+      "updated_at": "2026-10-04T12:00:50Z"
+    },
+    "report": {
+      "id": "rpt_synthetic_0002_v1",
+      "investigation_id": "00000000-0000-4000-8000-000000000002",
+      "version": 1,
+      "created_at": "2026-10-04T12:00:45Z",
+      "provisional": true,
+      "change_summary": "First partial results while the capture continues.",
+      "supersedes": null,
+      "claims": [
+        {
+          "id": "clm_synthetic_0003",
+          "occurrence_id": "occ_synthetic_0003",
+          "interval": {
+            "start_ms": 4200,
+            "end_ms": 9800,
+            "timebase": "capture"
+          },
+          "modality": "speech",
+          "original_text": "a recent survey found that nearly two thirds of city buses are electric now",
+          "proposition": "Nearly two thirds of the city's buses are electric, per a recent survey.",
+          "correction": null
+        },
+        {
+          "id": "clm_synthetic_0004",
+          "occurrence_id": "occ_synthetic_0004",
+          "interval": {
+            "start_ms": 31000,
+            "end_ms": 36000,
+            "timebase": "capture"
+          },
+          "modality": "text",
+          "original_text": "BUS FLEET: 0 DIESEL BY 2024",
+          "proposition": "The bus fleet had no diesel vehicles by 2024.",
+          "correction": null
+        }
+      ],
+      "evidence": [
+        {
+          "id": "evd_synthetic_0004",
+          "claim_id": "clm_synthetic_0003",
+          "source": {
+            "id": "src_synthetic_0004",
+            "title": "Synthetic source 4",
+            "publisher": "Synthetic Publisher",
+            "url": "https://sources.example/synthetic/0004",
+            "published_at": "2026-09-04T12:00:00Z"
+          },
+          "source_type": "government",
+          "inspection_level": "full_text",
+          "retrieval_relevance": "high",
+          "retraction_status": "none",
+          "excerpt": "41 percent of the municipal bus fleet was battery-electric at end of 2025.",
+          "retrieved_at": "2026-10-04T12:02:00Z"
+        }
+      ],
+      "assessments": [
+        {
+          "id": "asm_synthetic_0003",
+          "claim_id": "clm_synthetic_0003",
+          "version": 1,
+          "relations": [
+            {
+              "evidence_id": "evd_synthetic_0004",
+              "relation": "challenge",
+              "note": "The fleet report gives 41 percent, well short of two thirds."
+            }
+          ],
+          "overall": "challenged",
+          "provisional": true,
+          "summary": "The official fleet report gives a much lower electric share; more may follow."
+        }
+      ]
+    }
+  }
+}

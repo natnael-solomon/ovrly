@@ -1,0 +1,31 @@
+{
+  "synthetic": true,
+  "description": "An open live capture session after six chunks, with chunk 3 still missing: highest_seq is 5, gaps lists 3..3, and the duplicate and out-of-order semantics are stated as data. Synthetic fixture; no session exists and the live-overlay endpoints are not implemented.",
+  "schemas": {
+    "response": "capture-session.schema.json"
+  },
+  "expect": {
+    "response": "valid"
+  },
+  "response": {
+    "id": "00000000-0000-4000-8000-000000000501",
+    "investigation_id": "00000000-0000-4000-8000-000000000002",
+    "state": "open",
+    "timebase": "capture",
+    "started_at": "2026-10-04T12:00:00Z",
+    "closed_at": null,
+    "max_duration_ms": 180000,
+    "chunk_duration_ms": 10000,
+    "chunks_received": 5,
+    "highest_seq": 5,
+    "received_ms": 50000,
+    "gaps": [
+      {
+        "from_seq": 3,
+        "to_seq": 3
+      }
+    ],
+    "duplicate_handling": "replay_acknowledgement",
+    "out_of_order_handling": "accept_and_record_gaps"
+  }
+}

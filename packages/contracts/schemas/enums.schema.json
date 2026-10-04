@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Every closed vocabulary of the contract, one $def each, so the Android models (#62) map each one to an enum with an UNKNOWN fallback. Removing or renaming a value is a breaking change; adding one is additive but read-side parsers must already tolerate it. The source of each list is named in its description.",
+  "title": "Enums",
+  "description": "Definitions only; this file is not a payload schema. Read-model fields (investigation, job, report version, claim, evidence, assessment, capture session) tolerate values outside these lists by mapping them to UNKNOWN, never to a success or finding state. Request fields are validated strictly by the server.",
+  "$defs": {
+    "job_state": {
+      "type": "string",
+      "description": "Persisted job state. Source: backend/services/jobs/states.py JobState. Terminal states only move to deleted; a requested cancellation is the separate cancel_requested flag.",
+      "enum": ["queued", "leased", "running", "published", "cancelled", "deleted", "failed"]
+    },
+    "retry_class": {
+      "type": "string",
+      "description": "Class of the last scheduled retry or of the terminal failure. Source: backend/services/jobs/retries.py RetryClass.",
+      "enum": [
+        "transient",
+        "rate_limited",
+        "non_retriable_input",
+        "invalid_model_schema",
+        "unknown_outcome"
+      ]
+    },
+    "investigation_state": {
+      "type": "string",
+      "description": "Coarse investigation state as stored by the intake API. Source: backend/services/api/schemas.py InvestigationState. Distinct from job_state, which is one queue job; an investigation spans several stage jobs.",
+      "enum": ["queued", "running", "completed", "failed", "cancelled"]
+    },
+    "stage": {
+      "type": "string",
+      "description": "Pipeline stage an investigation or job is at. Source: build contract section 4 and RFC section 13. Only intake exists in backend code today (routes/investigations.py INITIAL_STAGE); the other eight are introduced by this contract for the pipeline tasks.",
+      "enum": [
+        "intake",
+        "media_validation",
+        "asr",
+        "device_text",
+        "claim_extraction",
+        "retrieval",
+        "assessment",
+        "reconciliation",
+        "publication"
+      ]
+    },
+    "processing_status": {
+      "type": "string",
+      "description": "User-facing progress of an investigation. Source: build contract section 3. Separate from relation and overall_assessment on purpose: failed, cancelled and waiting are never findings, and a finding never encodes processing failure.",
+      "enum": ["waiting", "checking", "partial", "complete", "failed", "cancelled"]
+    },
+    "coverage_status": {
+      "type": "string",
+      "description": "How much of the eligible media has been checked. Source: routes/investigations.py COVERAGE_PLACEHOLDER (not_started) plus the two values the pipeline will report.",
+      "enum": ["not_started", "partial", "complete"]
+    },
+    "upload_state": {
+      "type": "string",
+      "description": "Upload lifecycle. Source: backend/services/api/schemas.py UploadState.",
+      "enum": ["pending", "completed"]
+    },
+    "source_kind": {
+      "type": "string",
+      "description": "Discriminator of the investigation source union. Source: backend/services/api/schemas.py UrlSource and UploadSource.",
+      "enum": ["url", "upload"]
+    },
+    "timebase": {
+      "type": "string",
+      "description": "What millisecond offsets are relative to. capture: the start of the live capture session (overlay path). media: the start of the complete shared media file (share path). Source: build contract section 4, decision record 0001.",
+      "enum": ["capture", "media"]
+    },
+    "modality": {
+      "type": "string",
+      "description": "Where a claim occurrence was observed. both means the same occurrence is jointly supported by speech and screen text. Source: evaluation contract, RFC section 13.",
+      "enum": ["speech", "text", "both"]
+    },
+    "relation": {
+      "type": "string",
+      "description": "How one piece of evidence relates to one claim. Source: RFC section 08 and build contract section 3. insufficient means the evidence was read and does not settle the claim; it is not a processing failure.",
+      "enum": ["support", "challenge", "qualify", "mixed", "insufficient"]
+    },
+    "overall_assessment": {
+      "type": "string",
+      "description": "Per-claim aggregate over its evidence relations. There is deliberately no report-level verdict (decision record 0001: no blanket truth verdict). insufficient_evidence is a finding about the evidence, not about the claim being true or false.",
+      "enum": ["supported", "challenged", "qualified", "mixed", "insufficient_evidence"]
+    },
+    "source_inspection_level": {
+      "type": "string",
+      "description": "How much of the source the pipeline actually read before relating it to a claim. Source: RFC section 08 axes.",
+      "enum": ["abstract_only", "full_text", "metadata_only", "unknown"]
+    },
+    "source_type": {
+      "type": "string",
+      "description": "Kind of publication the evidence comes from. Source: RFC section 08 source identity axis; the list is a first draft and additive.",
+      "enum": [
+        "peer_reviewed",
+        "preprint",
+        "government",
+        "news",
+        "reference_work",
+        "primary_document",
+        "organization",
+        "other"
+      ]
+    },
+    "retrieval_relevance": {
+      "type": "string",
+      "description": "How relevant retrieval judged the source to the claim before reading it. Independent of relation: a highly relevant source can challenge the claim or be insufficient.",
+      "enum": ["high", "medium", "low"]
+    },
+    "retraction_status": {
+      "type": "string",
+      "description": "Whether the source itself has been corrected, retracted or withdrawn since publication. Source: RFC section 08, evaluation coverage tag withdrawn-retracted-source.",
+      "enum": ["none", "corrected", "retracted", "withdrawn", "unknown"]
+    },
+    "correction_attribution": {
+      "type": "string",
+      "description": "Who changed the normalized meaning of a claim after the original extraction. Source: BE-10 (#33) reanalyze with reason correction.",
+      "enum": ["user", "pipeline"]
+    },
+    "capture_session_state": {
+      "type": "string",
+      "description": "Lifecycle of a live capture session. abandoned: the client stopped sending chunks and never closed the session.",
+      "enum": ["open", "closed", "abandoned"]
+    },
+    "chunk_disposition": {
+      "type": "string",
+      "description": "What the server did with a chunk. stored: first time this (session, seq) was seen. duplicate: same (session, seq) and same bytes as before, original acknowledgement replayed, nothing stored twice. out_of_order: stored, but a lower seq is still missing so the gap list grew.",
+      "enum": ["stored", "duplicate", "out_of_order"]
+    }
+  }
+}

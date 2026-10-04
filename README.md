@@ -11,7 +11,7 @@ For the backend, run `sh scripts/backend.sh` on Linux/WSL with uv and Docker Com
 - [Task board](https://github.com/users/natnael-solomon/projects/3)
 - [Team workflow](WORKFLOW.md)
 - [Backend](backend/README.md)
-- [Contracts](packages/contracts/README.md) (draft voice-actions schemas and synthetic fixtures)
+- [Contracts](packages/contracts/README.md) (JSON Schemas, enums and synthetic fixtures shared by Android and the backend)
 - [Evaluation](evaluation/README.md) (synthetic examples and an eleven-clip draft; frozen corpus pending)
 - [Architecture](docs/architecture.md)
 - [Decision records](docs/decisions/README.md) (scope, tracking, dates, Voxide route)

@@ -66,7 +66,12 @@ def error(code: str = "VOICE_TARGET_NOT_FOUND", **overrides: Any) -> dict[str, A
 def test_every_schema_and_fixture_passes_the_validator() -> None:
     lines = list(validate.check_all())
     assert any(line.startswith("version 0.") for line in lines)
-    assert sum(line.startswith("fixture ") for line in lines) == len(validate.fixture_paths())
+    fixtures = (
+        len(validate.fixture_paths())
+        + len(validate.result_fixture_paths())
+        + len(validate.intake_fixture_paths())
+    )
+    assert sum(line.startswith("fixture ") for line in lines) == fixtures
 
 
 def test_cli_exit_code_is_zero(capsys: pytest.CaptureFixture[str]) -> None:

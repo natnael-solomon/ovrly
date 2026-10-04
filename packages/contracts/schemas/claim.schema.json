@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py Claim.",
+  "title": "Claim",
+  "description": "One factual claim occurrence found in the media: where it was observed (interval and modality), what was actually said or shown (original_text) and the normalized proposition the pipeline assessed. Normalization must not strengthen the claim. When a user or the pipeline later corrected the proposition, correction records who and what it replaced; the original wording is never rewritten. A claim says nothing about truth; see assessment.schema.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "occurrence_id",
+    "interval",
+    "modality",
+    "original_text",
+    "proposition",
+    "correction"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "common.schema.json#/$defs/opaque_id",
+      "description": "Stable within the investigation across report versions."
+    },
+    "occurrence_id": {
+      "$ref": "common.schema.json#/$defs/opaque_id",
+      "description": "Identifies this appearance of the proposition in the media. Repeated statements of the same proposition are separate occurrences; the evaluation contract uses the same notion."
+    },
+    "interval": {
+      "$ref": "common.schema.json#/$defs/interval",
+      "description": "Where the occurrence is in the media, on the capture timebase for the live overlay or the media timebase for a shared video."
+    },
+    "modality": { "$ref": "enums.schema.json#/$defs/modality" },
+    "original_text": {
+      "type": "string",
+      "description": "The words as transcribed or read on screen, including hedges, negation and attribution.",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "proposition": {
+      "type": "string",
+      "description": "Normalized meaning that was assessed. Preserves negation, quantities, units, dates, attribution and uncertainty.",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "correction": {
+      "description": "Null when the proposition is the pipeline's original extraction.",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/correction" }]
+    }
+  },
+  "$defs": {
+    "correction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attributed_to", "corrected_at", "superseded_proposition"],
+      "properties": {
+        "attributed_to": { "$ref": "enums.schema.json#/$defs/correction_attribution" },
+        "corrected_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "superseded_proposition": {
+          "type": "string",
+          "description": "The proposition this correction replaced, kept so the change is attributable and reversible.",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      }
+    }
+  }
+}

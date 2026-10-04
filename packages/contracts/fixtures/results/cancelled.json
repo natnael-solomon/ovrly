@@ -1,0 +1,41 @@
+{
+  "synthetic": true,
+  "description": "The owner cancelled during transcription before any report version was published: the job records the request and the effective cancelled state, coverage shows what had been reached, and there is no report and no error. Synthetic fixture.",
+  "expect": {
+    "payload": "valid",
+    "processing_status": "cancelled",
+    "state": "cancelled",
+    "claim_count": 0,
+    "assessment_count": 0
+  },
+  "investigation": {
+    "id": "00000000-0000-4000-8000-000000000004",
+    "state": "cancelled",
+    "stage": "asr",
+    "coverage": {
+      "status": "partial",
+      "covered_ms": 30000,
+      "total_ms": null
+    },
+    "version": 1,
+    "error": null,
+    "source": {
+      "kind": "upload",
+      "upload_id": "00000000-0000-4000-8000-000000000204"
+    },
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:00:31Z",
+    "processing_status": "cancelled",
+    "job": {
+      "id": "00000000-0000-4000-8000-000000000104",
+      "state": "cancelled",
+      "stage": "asr",
+      "cancel_requested": true,
+      "attempts": 1,
+      "retry_class": null,
+      "available_at": "2026-10-04T12:00:00Z",
+      "updated_at": "2026-10-04T12:00:31Z"
+    },
+    "report": null
+  }
+}

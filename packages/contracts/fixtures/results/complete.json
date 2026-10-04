@@ -1,0 +1,172 @@
+{
+  "synthetic": true,
+  "description": "A shared video checked across its full duration, now at report version 2 after the user corrected one claim's normalized meaning; version 1 is superseded, not edited. Synthetic fixture for the investigation read model; no real investigation, media, source or user exists behind these identifiers.",
+  "expect": {
+    "payload": "valid",
+    "processing_status": "complete",
+    "state": "completed",
+    "claim_count": 2,
+    "assessment_count": 2
+  },
+  "investigation": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "state": "completed",
+    "stage": "publication",
+    "coverage": {
+      "status": "complete",
+      "covered_ms": 185000,
+      "total_ms": 185000
+    },
+    "version": 2,
+    "error": null,
+    "source": {
+      "kind": "url",
+      "url": "https://video.example/synthetic/clip-0001",
+      "duration_ms": 185000
+    },
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:11:00Z",
+    "processing_status": "complete",
+    "job": {
+      "id": "00000000-0000-4000-8000-000000000101",
+      "state": "published",
+      "stage": "publication",
+      "cancel_requested": false,
+      "attempts": 1,
+      "retry_class": null,
+      "available_at": "2026-10-04T12:00:00Z",
+      "updated_at": "2026-10-04T12:11:00Z"
+    },
+    "report": {
+      "id": "rpt_synthetic_0001_v2",
+      "investigation_id": "00000000-0000-4000-8000-000000000001",
+      "version": 2,
+      "created_at": "2026-10-04T12:11:00Z",
+      "provisional": false,
+      "change_summary": "Correction: the user corrected the normalized meaning of clm_synthetic_0001 from the country's fleet to the city's fleet; its assessment was rerun. Version 1 is kept.",
+      "supersedes": "rpt_synthetic_0001_v1",
+      "claims": [
+        {
+          "id": "clm_synthetic_0001",
+          "occurrence_id": "occ_synthetic_0001",
+          "interval": {
+            "start_ms": 12400,
+            "end_ms": 18900,
+            "timebase": "media"
+          },
+          "modality": "speech",
+          "original_text": "a recent survey found that nearly two thirds of city buses are electric now",
+          "proposition": "Nearly two thirds of the city's buses are electric, per a recent survey.",
+          "correction": {
+            "attributed_to": "user",
+            "corrected_at": "2026-10-04T12:10:00Z",
+            "superseded_proposition": "Two thirds of the country's buses are electric."
+          }
+        },
+        {
+          "id": "clm_synthetic_0002",
+          "occurrence_id": "occ_synthetic_0002",
+          "interval": {
+            "start_ms": 41000,
+            "end_ms": 46000,
+            "timebase": "media"
+          },
+          "modality": "text",
+          "original_text": "BUS FLEET: 0 DIESEL BY 2024",
+          "proposition": "The bus fleet had no diesel vehicles by 2024.",
+          "correction": null
+        }
+      ],
+      "evidence": [
+        {
+          "id": "evd_synthetic_0001",
+          "claim_id": "clm_synthetic_0001",
+          "source": {
+            "id": "src_synthetic_0001",
+            "title": "Synthetic source 1",
+            "publisher": "Synthetic Publisher",
+            "url": "https://sources.example/synthetic/0001",
+            "published_at": "2026-09-04T12:00:00Z"
+          },
+          "source_type": "government",
+          "inspection_level": "full_text",
+          "retrieval_relevance": "high",
+          "retraction_status": "none",
+          "excerpt": "64 percent of the municipal bus fleet was battery-electric at end of 2025.",
+          "retrieved_at": "2026-10-04T12:02:00Z"
+        },
+        {
+          "id": "evd_synthetic_0002",
+          "claim_id": "clm_synthetic_0001",
+          "source": {
+            "id": "src_synthetic_0002",
+            "title": "Synthetic source 2",
+            "publisher": "Synthetic Publisher",
+            "url": "https://sources.example/synthetic/0002",
+            "published_at": "2026-09-04T12:00:00Z"
+          },
+          "source_type": "news",
+          "inspection_level": "full_text",
+          "retrieval_relevance": "medium",
+          "retraction_status": "none",
+          "excerpt": "The city says about two thirds of its buses are now electric.",
+          "retrieved_at": "2026-10-04T12:02:00Z"
+        },
+        {
+          "id": "evd_synthetic_0003",
+          "claim_id": "clm_synthetic_0002",
+          "source": {
+            "id": "src_synthetic_0003",
+            "title": "Synthetic source 3",
+            "publisher": "Synthetic Publisher",
+            "url": "https://sources.example/synthetic/0003",
+            "published_at": "2026-09-04T12:00:00Z"
+          },
+          "source_type": "primary_document",
+          "inspection_level": "full_text",
+          "retrieval_relevance": "high",
+          "retraction_status": "none",
+          "excerpt": "Twelve diesel buses remained in reserve service through 2024.",
+          "retrieved_at": "2026-10-04T12:02:00Z"
+        }
+      ],
+      "assessments": [
+        {
+          "id": "asm_synthetic_0001",
+          "claim_id": "clm_synthetic_0001",
+          "version": 2,
+          "relations": [
+            {
+              "evidence_id": "evd_synthetic_0001",
+              "relation": "support",
+              "note": "The fleet report gives 64 percent battery-electric at end of 2025."
+            },
+            {
+              "evidence_id": "evd_synthetic_0002",
+              "relation": "support",
+              "note": null
+            }
+          ],
+          "overall": "supported",
+          "provisional": false,
+          "summary": "Two independent sources put the electric share of the fleet near two thirds."
+        },
+        {
+          "id": "asm_synthetic_0002",
+          "claim_id": "clm_synthetic_0002",
+          "version": 2,
+          "relations": [
+            {
+              "evidence_id": "evd_synthetic_0003",
+              "relation": "qualify",
+              "note": "Diesel buses stayed in reserve service; the fleet was not diesel-free."
+            }
+          ],
+          "overall": "qualified",
+          "provisional": false,
+          "summary": "The on-screen claim holds for scheduled service only; reserve diesel stayed."
+        }
+      ]
+    }
+  }
+}

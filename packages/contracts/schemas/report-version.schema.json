@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py ReportVersion. Immutability is a server rule (BE-10, #33): a published version is never edited; corrections and confirmed full-video expansions create a new version that names the one it supersedes.",
+  "title": "ReportVersion",
+  "description": "One immutable published version of an investigation's report: the claims found, the evidence retrieved and the assessments made, plus a change summary describing what differs from the superseded version. Returned nested in an investigation read and, in #33, by GET /v1/investigations/{id}/reports/{version}. An empty claims array with an empty assessments array means no assessable factual claims were found; it is not a statement that the video is accurate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "investigation_id",
+    "version",
+    "created_at",
+    "provisional",
+    "change_summary",
+    "supersedes",
+    "claims",
+    "evidence",
+    "assessments"
+  ],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/opaque_id" },
+    "investigation_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "version": {
+      "type": "integer",
+      "description": "1 for the first published version, then increasing by one. Every nested assessment carries the same number."
+    },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "provisional": {
+      "type": "boolean",
+      "description": "True while processing continues (partial results) or coverage is incomplete; false only when the investigation is complete."
+    },
+    "change_summary": {
+      "type": "string",
+      "description": "What this version adds or changes relative to supersedes; for version 1, how the report came to be.",
+      "minLength": 1,
+      "maxLength": 600
+    },
+    "supersedes": {
+      "description": "Id of the previous report version, or null for the first.",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/opaque_id" }]
+    },
+    "claims": {
+      "type": "array",
+      "items": { "$ref": "claim.schema.json" }
+    },
+    "evidence": {
+      "type": "array",
+      "description": "Every piece of evidence any assessment in this version refers to. Each item names its claim_id.",
+      "items": { "$ref": "evidence.schema.json" }
+    },
+    "assessments": {
+      "type": "array",
+      "description": "At most one per claim in this version. Fewer assessments than claims means those claims are still being assessed (provisional) or the investigation stopped before assessing them.",
+      "items": { "$ref": "assessment.schema.json" }
+    }
+  }
+}
