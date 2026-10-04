@@ -4,6 +4,7 @@ from alembic import context
 from sqlalchemy.engine import Connection
 
 import services.jobs.models  # noqa: F401 - registers job tables on the shared metadata
+import services.models  # noqa: F401 - registers identity and intake tables on the shared metadata
 from services.database import Database, metadata
 from services.settings import load_settings
 

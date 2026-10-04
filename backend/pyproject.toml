@@ -62,6 +62,9 @@ enable_error_code = ["ignore-without-code"]
 source = ["services"]
 relative_files = true
 parallel = true
+# SQLAlchemy asyncio runs database calls on greenlets; without this, lines after each
+# `await connection.execute(...)` are not traced.
+concurrency = ["thread", "greenlet"]
 patch = ["subprocess"]
 
 [tool.coverage.report]
