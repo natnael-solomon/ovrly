@@ -1,6 +1,6 @@
 # ovrly
 
-Native Android companion with floating controls and local video-interval capture.
+We’re building an Android overlay for checking claims in short/long videos against research, without leaving the app you’re watching.
 
 ## Get started
 
