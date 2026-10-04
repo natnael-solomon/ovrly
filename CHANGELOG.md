@@ -46,6 +46,7 @@
 
 ### Fixed
 
+- Telegram PR announcements survive delayed or dropped GitHub webhooks: `synchronize` and `reopened` post the PR card only when none is recorded for that PR number, an hourly catch-up (also manual) announces open PRs without a recorded card, and a malformed or missing announcement state fails the job without posting rather than risking duplicates. Draft, ready-for-review, merge and close handling is unchanged.
 - Accept bounded incoming voice bursts without a 16-message UI backlog cutoff; decode off the UI thread and deliver ordered, fair batches with explicit memory limits.
 - Make voice playback buffering independent of audio chunk count with a fixed 10 MB ring buffer, add a stalled-speaker watchdog, and show the current voice status in Settings.
 - Move voice socket cancellation and pooled TLS cleanup off the UI thread to prevent a stop-time Android crash. Add bounded, payload-free connection and traffic diagnostics.

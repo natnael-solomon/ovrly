@@ -178,6 +178,11 @@ class VariableState:
         self._transport = transport
         self._exists = False
 
+    @property
+    def exists(self):
+        """Whether the variable was found by load() or created by save()."""
+        return self._exists
+
     def load(self):
         status, response = self._transport(f"{self._url}/{self._name}", headers=self._headers)
         if status == 404:
