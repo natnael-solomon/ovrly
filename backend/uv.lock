@@ -1449,6 +1449,7 @@ dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
     { name = "google-auth", extra = ["requests"] },
+    { name = "httpx" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -1461,7 +1462,6 @@ contracts = [
 ]
 dev = [
     { name = "coverage" },
-    { name = "httpx" },
     { name = "hypothesis" },
     { name = "mypy" },
     { name = "pytest" },
@@ -1480,6 +1480,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.16,<2" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "google-auth", extras = ["requests"], specifier = ">=2.40,<3" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
     { name = "pydantic-settings", specifier = ">=2.8,<3" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0,<3" },
@@ -1490,7 +1491,6 @@ requires-dist = [
 contracts = [{ name = "openapi-spec-validator", specifier = ">=0.7,<1" }]
 dev = [
     { name = "coverage", specifier = ">=7.10,<8" },
-    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "hypothesis", specifier = ">=6.100,<7" },
     { name = "mypy", specifier = ">=1.15,<3" },
     { name = "pytest", specifier = ">=8,<10" },

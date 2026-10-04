@@ -7,6 +7,7 @@ dependencies = [
     "alembic>=1.16,<2",
     "fastapi>=0.115,<1",
     "google-auth[requests]>=2.40,<3",
+    "httpx>=0.28,<1",
     "psycopg[binary]>=3.2,<4",
     "pydantic-settings>=2.8,<3",
     "sqlalchemy[asyncio]>=2.0,<3",
@@ -16,7 +17,6 @@ dependencies = [
 [dependency-groups]
 dev = [
     "coverage>=7.10,<8",
-    "httpx>=0.28,<1",
     "hypothesis>=6.100,<7",
     "mypy>=1.15,<3",
     "pytest>=8,<10",
