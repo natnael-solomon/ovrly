@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
+from services.api import routes
 from services.database import Database
 from services.jobs.faults import FaultInjector
 from services.jobs.handlers import JobHandler, default_handlers
@@ -53,6 +54,7 @@ def create_app(
                 await database.close()
 
     app = FastAPI(title="Ovrly backend", lifespan=lifespan)
+    routes.register(app, config)
 
     @app.get("/healthz")
     async def health() -> JSONResponse:

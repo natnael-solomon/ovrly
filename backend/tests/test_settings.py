@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -26,11 +28,22 @@ def test_invalid_database_url(value):
         ("worker_shutdown_seconds", 31),
         ("api_port", 65536),
         ("embed_worker", "maybe"),
+        ("upload_max_bytes", 0),
+        ("upload_target_seconds", 86401),
+        ("max_shared_duration_seconds", -1),
     ],
 )
 def test_invalid_options(field, value):
     with pytest.raises(ValidationError):
         Settings(database_url=URL, _env_file=None, **{field: value})
+
+
+def test_intake_limit_defaults():
+    settings = Settings(database_url=URL, _env_file=None)
+    assert settings.upload_max_bytes == 256 * 1024 * 1024
+    assert settings.upload_target_seconds == 900
+    assert settings.max_shared_duration_seconds == 600
+    assert str(settings.storage_dir) == str(Path(".data/uploads"))
 
 
 def test_missing_settings_error_is_safe(monkeypatch, tmp_path, caplog):

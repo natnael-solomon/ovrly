@@ -1,9 +1,14 @@
 import logging
+from pathlib import Path
 
 from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
+
+# Placeholder until BC-D06 fixes the shared upload budget; 256 MiB keeps a ten-minute
+# phone recording inside the limit while bounding local disk use.
+DEFAULT_UPLOAD_MAX_BYTES = 256 * 1024 * 1024
 
 
 class Settings(BaseSettings):
@@ -16,6 +21,10 @@ class Settings(BaseSettings):
     worker_shutdown_seconds: float = Field(default=5, gt=0, le=30)
     job_lease_seconds: float = Field(default=30, gt=0, le=600)
     job_poll_seconds: float = Field(default=1, gt=0, le=60)
+    upload_max_bytes: int = Field(default=DEFAULT_UPLOAD_MAX_BYTES, gt=0)
+    upload_target_seconds: int = Field(default=900, gt=0, le=86400)
+    max_shared_duration_seconds: int = Field(default=600, gt=0)
+    storage_dir: Path = Path(".data/uploads")
 
     @field_validator("database_url")
     @classmethod

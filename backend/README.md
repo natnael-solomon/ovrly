@@ -1,10 +1,12 @@
 # Backend
 
 Python 3.11 / uv / FastAPI foundation with PostgreSQL, Alembic, a shared worker
-lifecycle and a durable PostgreSQL job queue. No research, intake,
-authentication or uploads are implemented yet, and no pipeline stage handlers
-exist, so the worker claims nothing in production; it proves startup,
-supervision, lease draining and shutdown. See
+lifecycle and a durable PostgreSQL job queue. The API mints guest principals,
+accepts uploads and records investigations behind bearer authentication (see
+[Identity and intake API](#identity-and-intake-api)). No research processing or
+account linking is implemented, recorded investigations are not yet handed to
+the queue, and no pipeline stage handlers exist, so the worker claims nothing in
+production; it proves startup, supervision, lease draining and shutdown. See
 [Durable jobs and recovery](#durable-jobs-and-recovery).
 
 ## Local setup (Linux / WSL)
@@ -74,6 +76,10 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_WORKER_SHUTDOWN_SECONDS` | 5; positive, at most 30. Time a stopping worker may spend finishing its in-flight job before the lease is released |
 | `OVRLY_JOB_LEASE_SECONDS` | 30; positive, at most 600. Lease granted per claim; handlers extend it with heartbeats |
 | `OVRLY_JOB_POLL_SECONDS` | 1; positive, at most 60. Idle wait between claim attempts |
+| `OVRLY_UPLOAD_MAX_BYTES` | 268435456 (256 MiB); positive. Placeholder until BC-D06 fixes the budget |
+| `OVRLY_UPLOAD_TARGET_SECONDS` | 900; how long an upload target accepts bytes and completion, at most 86400 |
+| `OVRLY_MAX_SHARED_DURATION_SECONDS` | 600; declared shared-media duration limit from BC-D01 |
+| `OVRLY_STORAGE_DIR` | `.data/uploads`, relative to `backend/` and Git-ignored; local filesystem upload store |
 
 The helper checks for at least 2 GiB free on the checkout filesystem before and
 after dependency/image setup and after database startup. It stops further work if
@@ -109,9 +115,11 @@ development session. The standalone entry point handles SIGINT/SIGTERM on
 Linux/WSL; native Windows signal handling is not implemented. Both modes close
 owned database resources and drain their lease on shutdown. Worker failures are
 visible and are not automatically restarted. Migration `0001` only establishes
-Alembic history; `0002_jobs` creates the `jobs` and `job_results` tables. Future
-schema changes require a reviewed migration and upgrade/downgrade coverage, not
-`create_all()` during API startup.
+Alembic history; `0002_jobs` creates the `jobs` and `job_results` tables and
+`0003_identity_intake` creates the principal, credential, upload, investigation
+and idempotency tables defined in `services/models.py`. Future schema changes
+require a reviewed migration and upgrade/downgrade coverage, not `create_all()`
+during API startup.
 
 ### Durable jobs and recovery
 
@@ -158,6 +166,58 @@ retrieval, delete with a delayed callback, database connection drop, API
 restart with in-flight requests, cross-owner reads and the idempotency tests for
 chunks, investigation POSTs and provider callbacks.
 
+## Identity and intake API
+
+All product routes live under `/v1`, return JSON and use the shared contract
+error shape from
+[`packages/contracts/schemas/error.schema.json`](../packages/contracts/schemas/error.schema.json):
+`{code, message, retryable, action, request_id}` with `SCREAMING_SNAKE_CASE`
+codes. Validation failures (422 `VALIDATION_FAILED`), unknown routes
+(`NOT_FOUND`), database outages (503 `DATABASE_UNAVAILABLE`) and unexpected
+failures (500 `INTERNAL_ERROR`) use the same shape; messages never include
+internals, inputs or secrets. Every response carries `X-Request-Id`; a
+well-formed client value (1 to 128 characters, starting with a letter or digit,
+then letters, digits, `_` or `-`) is echoed, otherwise one is generated.
+`action` is a client hint: `none`, `retry`, `authenticate`, `fix_request` or
+`upload_again`. The test suite validates every error response against the
+schema with the contracts validator.
+
+| Route | Behavior |
+| --- | --- |
+| `POST /v1/principals/guest` | Mints a guest principal and an opaque bearer token (`ovk_` prefix, 256 random bits). Only a SHA-256 digest is stored; the token is returned once and never logged. 201. |
+| `POST /v1/uploads` | Declares `size_bytes`, `sha256` and optional `content_type`; returns a scoped `target`, `max_bytes` and `expires_at`. Over the byte limit: 413 `UPLOAD_TOO_LARGE`. |
+| `PUT /v1/uploads/{id}/content` | Streams raw bytes to the target while holding the upload row lock, so a concurrent completion waits for the whole body. Exceeding the smaller of the limit and the declared size discards the partial content with 413. Expired: 410 `UPLOAD_EXPIRED`. |
+| `POST /v1/uploads/{id}/complete` | Re-reads the stored bytes and compares size and SHA-256 with the declaration. Mismatch deletes the bytes and returns 409 `UPLOAD_MISMATCH`; missing bytes return 409 `UPLOAD_CONTENT_MISSING`. Completing twice returns the same 200. |
+| `POST /v1/investigations` | Requires `Idempotency-Key` (400 if missing or longer than 200 characters). Body: `{"source": {"kind": "url", "url": ...}}` or `{"source": {"kind": "upload", "upload_id": ...}}`, each with optional `duration_ms`. Writes the investigation and the key in one transaction before answering 202. Same key and body replays the original 202 body; same key with a different body is 409 `IDEMPOTENCY_KEY_REUSED`. Keys are scoped per owner. |
+| `GET /v1/investigations` | Newest-first list of the caller's investigations (at most 100). |
+| `GET /v1/investigations/{id}` | `state`, `stage`, a coverage placeholder, `version` and a safe `error` object or `null`. |
+
+Every route except guest minting requires `Authorization: Bearer <token>`.
+Missing credentials return 401 `AUTHENTICATION_REQUIRED`; malformed, unknown or
+revoked ones return 401 `INVALID_CREDENTIAL`, both with `WWW-Authenticate`.
+Identity comes only from the credential: `user_id`, `owner_id` or `principal_id`
+in a body, query string or `X-User-Id`-style header is rejected with
+`CLIENT_IDENTITY_REJECTED`. Object routes load rows through the owner-scoped
+helper in `services/api/auth/ownership.py`; another owner's object is a plain
+404, so existence is not revealed.
+
+Limits come from settings. A declared `duration_ms` above
+`OVRLY_MAX_SHARED_DURATION_SECONDS` is 422 `DURATION_LIMIT_EXCEEDED`; the byte
+limit is checked at declaration and while streaming. Upload bytes are written
+to `OVRLY_STORAGE_DIR` through the `UploadStore` interface in
+`services/storage.py`; object storage can replace the local store once BC-D03 is
+decided. Uploaded media is development data on the local disk, not a retention
+policy or consent record.
+
+Recorded investigations stay `queued` at stage `intake`. Handing them to the
+job engine (#16), account linking (BC-D07), quotas beyond the two limits and
+deletion are the second BE-05 PR. `services/api/intake.py` defines the
+`InvestigationDispatcher` hook that runs inside the creating transaction; the
+default records nothing beyond the investigation row. `packages/contracts`
+holds the shared error shape and the draft voice-actions schemas; the intake
+request and response models in `services/api/schemas.py` remain backend-owned
+Pydantic until #15 exports them there.
+
 ## Local checks
 
 From `backend/` with the local PostgreSQL service running:
@@ -185,9 +245,13 @@ Ordinary options such as `sslmode` remain supported.
 
 Coverage includes real PostgreSQL readiness, migration round trips and drift,
 safe failure responses, both worker modes, signal shutdown, cancellation and
-resource cleanup, the job queue invariants, the recovery harness and
-startup-helper negative paths. The test database is migrated to `head` once per
-session. No provider keys or personal media are needed.
+resource cleanup, the job queue invariants, the recovery harness,
+startup-helper negative paths, and the intake API: guest credentials, rejected
+client identity, cross-owner 404s, idempotent replay and 409, upload limits,
+expiry and hash mismatch, and the shared error shape validated against
+`packages/contracts/schemas/error.schema.json`. The test database is migrated
+to `head` once per session. No provider keys or personal media are needed;
+upload tests use synthetic bytes in a temporary directory.
 
 Ruff includes security rules (`S`) and rejects bare `type: ignore` comments
 (`PGH003`); MyPy also enables `ignore-without-code`. Only pytest's `S101`
@@ -275,11 +339,10 @@ not claim the regression check passed. Unknown refs, failing baseline tests,
 missing reports or source without a manifest fail instead of taking that path.
 
 The current `services/worker` tree is held to **90% line coverage**, including
-the standalone entry point. `services/api/auth` and `services/contracts` have
-future 90% floors (module files and package directories supported); absence is
-shown as **not implemented / not evaluated**, not 100%. Their eventual locations
-must be confirmed when those tasks land. Android coverage is not part of this
-denominator and must not be inferred from backend results.
+the standalone entry point. `services/api/auth` now exists and is held to the
+same 90% floor; `services/contracts` keeps a future 90% floor and is shown as
+**not implemented / not evaluated**, not 100%, until #15 lands. Android coverage
+is not part of this denominator and must not be inferred from backend results.
 
 Remaining [REPO-04 / #13](https://github.com/natnael-solomon/ovrly/issues/13) work:
 Android unit/instrumented reports and capture/share floors depend on the emulator
