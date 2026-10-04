@@ -1,7 +1,9 @@
 package app.ovrly.voice
 
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -67,12 +69,13 @@ class VoxideTransportTest {
     private fun intercepted(response: (Request) -> Pair<Int, String>): Pair<String, Int> {
         val failed = CountDownLatch(1)
         val failure = AtomicReference<String>()
-        val diagnostics = mutableListOf<String>()
-        var requests = 0
+        // The transport reports diagnostics from its own threads while this test reads them.
+        val diagnostics = CopyOnWriteArrayList<String>()
+        val requests = AtomicInteger()
         // This interceptor returns synthetic responses without chain.proceed: no DNS or network.
         val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
             .addInterceptor { chain ->
-                requests++
+                requests.incrementAndGet()
                 val (code, body) = response(chain.request())
                 Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
                     .code(code).message("Synthetic test response")
@@ -80,19 +83,30 @@ class VoxideTransportTest {
                     .body(body.toResponseBody()).build()
             }.build()
         val transport = VoxideTransport(
-            VoiceConfiguration(true, "https://example.invalid", "vox_pub_test"), client,
-            VoiceDiagnostics(diagnostics::add),
+            VoiceConfiguration(true, "https://example.invalid", "vox_pub_test"),
+            client,
+            VoiceDiagnostics(diagnostics::add)
         )
         try {
             transport.start(object : VoiceTransport.Listener {
-                override fun message(text: String) { error("Unexpected WebSocket message") }
-                override fun failed(message: String) { failure.set(message); failed.countDown() }
+                override fun message(text: String) {
+                    error("Unexpected WebSocket message")
+                }
+
+                override fun failed(message: String) {
+                    failure.set(message)
+                    failed.countDown()
+                }
             })
             assertTrue("Synthetic response did not complete", failed.await(5, TimeUnit.SECONDS))
             assertFalse(transport.send("{}"))
             assertTrue(diagnostics.isNotEmpty())
-            assertFalse(diagnostics.any { it.contains("vox_pub_test") || it.contains("sensitive-server-detail") })
-            return failure.get() to requests
+            assertFalse(
+                diagnostics.any {
+                    it.contains("vox_pub_test") || it.contains("sensitive-server-detail")
+                }
+            )
+            return failure.get() to requests.get()
         } finally {
             transport.close()
         }

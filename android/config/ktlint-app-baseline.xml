@@ -2424,35 +2424,17 @@
         <error line="144" column="113" source="standard:argument-list-wrapping" />
     </file>
     <file name="src/test/java/app/ovrly/voice/VoxideTransportTest.kt">
-        <error line="23" column="61" source="standard:multiline-if-else" />
-        <error line="24" column="18" source="standard:multiline-if-else" />
-        <error line="38" column="22" source="standard:wrapping" />
-        <error line="38" column="22" source="standard:argument-list-wrapping" />
-        <error line="39" column="87" source="standard:wrapping" />
-        <error line="39" column="88" source="standard:argument-list-wrapping" />
-        <error line="51" column="29" source="standard:wrapping" />
-        <error line="51" column="29" source="standard:argument-list-wrapping" />
-        <error line="51" column="41" source="standard:argument-list-wrapping" />
-        <error line="51" column="47" source="standard:argument-list-wrapping" />
-        <error line="52" column="77" source="standard:wrapping" />
-        <error line="52" column="78" source="standard:argument-list-wrapping" />
-        <error line="83" column="82" source="standard:argument-list-wrapping" />
-        <error line="84" column="47" source="standard:trailing-comma-on-call-site" />
-        <error line="88" column="54" source="standard:statement-wrapping" />
-        <error line="88" column="92" source="standard:statement-wrapping" />
-        <error line="89" column="56" source="standard:statement-wrapping" />
-        <error line="89" column="77" source="standard:statement-wrapping" />
-        <error line="89" column="97" source="standard:statement-wrapping" />
-        <error line="94" column="25" source="standard:argument-list-wrapping" />
-        <error line="94" column="41" source="standard:function-literal" />
-        <error line="94" column="42" source="standard:wrapping" />
-        <error line="94" column="55" source="standard:argument-list-wrapping" />
-        <error line="94" column="69" source="standard:argument-list-wrapping" />
-        <error line="94" column="73" source="standard:binary-expression-wrapping" />
-        <error line="94" column="86" source="standard:argument-list-wrapping" />
-        <error line="94" column="101" source="standard:max-line-length" />
-        <error line="94" column="111" source="standard:argument-list-wrapping" />
-        <error line="94" column="113" source="standard:function-literal" />
-        <error line="94" column="114" source="standard:argument-list-wrapping" />
+        <error line="25" column="61" source="standard:multiline-if-else" />
+        <error line="26" column="18" source="standard:multiline-if-else" />
+        <error line="40" column="22" source="standard:wrapping" />
+        <error line="40" column="22" source="standard:argument-list-wrapping" />
+        <error line="41" column="87" source="standard:wrapping" />
+        <error line="41" column="88" source="standard:argument-list-wrapping" />
+        <error line="53" column="29" source="standard:wrapping" />
+        <error line="53" column="29" source="standard:argument-list-wrapping" />
+        <error line="53" column="41" source="standard:argument-list-wrapping" />
+        <error line="53" column="47" source="standard:argument-list-wrapping" />
+        <error line="54" column="77" source="standard:wrapping" />
+        <error line="54" column="78" source="standard:argument-list-wrapping" />
     </file>
 </baseline>
