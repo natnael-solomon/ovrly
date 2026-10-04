@@ -1,0 +1,21 @@
+{
+  "synthetic": true,
+  "description": "An upload read model whose declared_sha256 uses uppercase hexadecimal. The contract fixes 64 lowercase characters. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "upload.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "declared_sha256"
+  },
+  "payload": {
+    "id": "00000000-0000-4000-8000-000000000931",
+    "state": "pending",
+    "target": "/v1/uploads/00000000-0000-4000-8000-000000000931/content",
+    "max_bytes": 268435456,
+    "declared_size_bytes": 1024,
+    "declared_sha256": "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+    "content_type": "video/mp4",
+    "expires_at": "2026-10-04T12:15:00Z",
+    "created_at": "2026-10-04T12:00:00Z",
+    "completed_at": null
+  }
+}

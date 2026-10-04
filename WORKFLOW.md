@@ -189,7 +189,7 @@ Inspect the final squash author and full message, including automatically collec
 
 Squash into `main`, delete the merged branch and close linked issues with `Closes #123` where appropriate.
 
-The active `main` ruleset requires PRs, linear history, one approving review, stale-approval dismissal on push, resolved threads and up-to-date **Android checks** and **Device evidence**. Direct/force pushes and bypass actors are prohibited. Require **Backend checks** (REPO-04), **Backend recovery** (BE-04) and **Contract checks** (BE-03, `.github/workflows/contracts.yml`) once each workflow has reported on `main`.
+The active `main` ruleset requires PRs, linear history, one approving review, stale-approval dismissal on push, resolved threads and up-to-date **Android checks**, **Device evidence**, **Backend checks**, **Backend recovery**, **Contract checks** and **Quality checks**. Direct/force pushes and bypass actors are prohibited.
 
 ## 7. Document and release
 

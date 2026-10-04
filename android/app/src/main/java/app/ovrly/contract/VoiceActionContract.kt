@@ -79,7 +79,11 @@ internal enum class VoiceActionErrorCode(val wireName: String) {
 }
 
 /** Every contract enum lists its UNKNOWN fallback last; only exact wire names match. */
-private inline fun <E : Enum<E>> known(entries: List<E>, name: String, wireName: (E) -> String): E {
+internal inline fun <E : Enum<E>> known(
+    entries: List<E>,
+    name: String,
+    wireName: (E) -> String
+): E {
     val unknown = entries.last()
     return entries.firstOrNull { it != unknown && wireName(it) == name } ?: unknown
 }
@@ -119,7 +123,7 @@ internal enum class ContractErrorAction(val wireName: String) {
 internal data class ContractError(
     val code: String,
     val message: String,
-    @Serializable(with = StrictBooleanSerializer::class)
+    @Serializable(with = RetryableSerializer::class)
     val retryable: Boolean,
     @Serializable(with = ContractErrorActionSerializer::class)
     val action: ContractErrorAction,
@@ -127,20 +131,9 @@ internal data class ContractError(
     val requestId: String
 ) {
     init {
-        require(code.length in MIN_CODE_LENGTH..MAX_CODE_LENGTH && codePattern.matches(code)) {
-            "error.code must be $MIN_CODE_LENGTH to $MAX_CODE_LENGTH SCREAMING_SNAKE_CASE chars"
-        }
-        require(message.length in 1..MAX_MESSAGE_LENGTH) {
-            "error.message must be 1 to $MAX_MESSAGE_LENGTH characters"
-        }
+        ContractSyntax.errorCode("error.code", code)
+        ContractSyntax.errorMessage("error.message", message)
         OpaqueId.require("error.request_id", requestId)
-    }
-
-    companion object {
-        private const val MIN_CODE_LENGTH = 3
-        private const val MAX_CODE_LENGTH = 64
-        private const val MAX_MESSAGE_LENGTH = 240
-        private val codePattern = Regex("[A-Z][A-Z0-9_]*")
     }
 }
 

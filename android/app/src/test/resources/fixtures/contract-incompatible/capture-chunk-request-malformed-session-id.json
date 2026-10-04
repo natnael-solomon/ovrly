@@ -1,0 +1,21 @@
+{
+  "synthetic": true,
+  "description": "A chunk declaration whose session_id is an opaque id rather than the UUID the schema requires. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "capture-chunk-request.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "session_id"
+  },
+  "payload": {
+    "session_id": "sess_synthetic_0951",
+    "seq": 0,
+    "interval": {
+      "start_ms": 0,
+      "end_ms": 10000,
+      "timebase": "capture"
+    },
+    "size_bytes": 401408,
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "content_type": "video/mp4"
+  }
+}

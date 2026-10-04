@@ -1,0 +1,43 @@
+{
+  "synthetic": true,
+  "description": "A failed investigation that also carries a report version. The schema forbids the combination so a failure can never be read as a finding. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "investigation.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "report"
+  },
+  "payload": {
+    "id": "00000000-0000-4000-8000-000000000901",
+    "state": "failed",
+    "stage": "media_validation",
+    "coverage": {
+      "status": "not_started"
+    },
+    "version": 1,
+    "error": {
+      "code": "MEDIA_UNSUPPORTED",
+      "message": "Processing failed",
+      "retryable": false
+    },
+    "source": {
+      "kind": "url",
+      "url": "https://video.example/synthetic/clip-0001"
+    },
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:00:00Z",
+    "processing_status": "failed",
+    "job": null,
+    "report": {
+      "id": "rpt_synthetic_0900_v1",
+      "investigation_id": "00000000-0000-4000-8000-000000000901",
+      "version": 1,
+      "created_at": "2026-10-04T12:00:00Z",
+      "provisional": false,
+      "change_summary": "No assessable factual claims were found in the checked media. Synthetic.",
+      "supersedes": null,
+      "claims": [],
+      "evidence": [],
+      "assessments": []
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "synthetic": true,
+  "description": "A session whose duplicate_handling names a rule this contract does not state. The constant is part of the agreement, not a free-form string. Android-only compatibility fixture; nothing behind these identifiers exists.",
+  "schema": "capture-session.schema.json",
+  "expect": {
+    "payload": "invalid",
+    "reason": "duplicate_handling"
+  },
+  "payload": {
+    "id": "00000000-0000-4000-8000-000000000951",
+    "investigation_id": "00000000-0000-4000-8000-000000000901",
+    "state": "open",
+    "timebase": "capture",
+    "started_at": "2026-10-04T12:00:00Z",
+    "closed_at": null,
+    "max_duration_ms": 180000,
+    "chunk_duration_ms": 10000,
+    "chunks_received": 0,
+    "highest_seq": null,
+    "received_ms": 0,
+    "gaps": [],
+    "duplicate_handling": "store_twice",
+    "out_of_order_handling": "accept_and_record_gaps"
+  }
+}
