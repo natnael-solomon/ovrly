@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 import uuid
 from collections.abc import Iterator
 
@@ -29,6 +31,20 @@ def database_url() -> Iterator[str]:
     with psycopg.connect(connection_url, autocommit=True, connect_timeout=3) as admin:
         admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
         try:
-            yield url.set(database=name).render_as_string(hide_password=False)
+            test_url = url.set(database=name).render_as_string(hide_password=False)
+            migrate(test_url)
+            yield test_url
         finally:
             admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
+
+
+def migrate(url: str) -> None:
+    result = subprocess.run(  # noqa: S603 - current interpreter and fixed Alembic arguments
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        env={**os.environ, "OVRLY_DATABASE_URL": url},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        pytest.fail("Applying migrations to the test database failed:\n" + result.stderr)

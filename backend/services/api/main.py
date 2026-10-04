@@ -1,5 +1,5 @@
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,19 +7,38 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from services.database import Database
+from services.jobs.faults import FaultInjector
+from services.jobs.handlers import JobHandler, default_handlers
 from services.settings import Settings, load_settings
 from services.worker.runtime import Worker
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    handlers: Mapping[str, JobHandler] | None = None,
+    faults: FaultInjector | None = None,
+) -> FastAPI:
     config = settings if settings is not None else load_settings()
+    stage_handlers = handlers if handlers is not None else default_handlers()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         database = Database(config)
-        worker = Worker(database, config.worker_shutdown_seconds) if config.embed_worker else None
+        worker = (
+            Worker(
+                database,
+                config.worker_shutdown_seconds,
+                handlers=stage_handlers,
+                faults=faults,
+                lease_seconds=config.job_lease_seconds,
+                poll_seconds=config.job_poll_seconds,
+            )
+            if config.embed_worker
+            else None
+        )
         app.state.database = database
         app.state.worker = worker
         try:

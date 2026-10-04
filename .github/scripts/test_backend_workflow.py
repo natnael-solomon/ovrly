@@ -30,16 +30,34 @@ class BackendWorkflowTest(unittest.TestCase):
         self.assertIn("retention-days: 7", SOURCE)
 
     def test_postgres_is_skipped_for_docs_without_skipping_required_result(self):
-        validate = SOURCE.split("  validate:\n", 1)[1].split("  result:\n", 1)[0]
+        validate = SOURCE.split("  validate:\n", 1)[1].split("  recovery:\n", 1)[0]
         self.assertIn("if: needs.changes.outputs.backend == 'true'", validate)
         self.assertIn("services:\n      postgres:", validate)
         self.assertIn("name: Backend checks\n    if: ${{ always() }}", SOURCE)
         self.assertIn("needs: [changes, validate]", SOURCE)
         self.assertIn("test_backend_*.py", SOURCE)
 
+    def test_recovery_suite_is_a_separate_always_reported_job(self):
+        recovery = SOURCE.split("  recovery:\n", 1)[1].split("  result:\n", 1)[0]
+        self.assertIn("name: Validate recovery", recovery)
+        self.assertIn("if: needs.changes.outputs.backend == 'true'", recovery)
+        self.assertIn("services:\n      postgres:", recovery)
+        self.assertIn("alembic upgrade head", recovery)
+        for path in ("tests/test_job_states.py", "tests/test_job_queue.py", "tests/recovery"):
+            self.assertIn(path, recovery)
+        result = SOURCE.split("  recovery_result:\n", 1)[1]
+        self.assertIn("name: Backend recovery\n    if: ${{ always() }}", result)
+        self.assertIn("needs: [changes, recovery]", result)
+        self.assertIn("VALIDATION: ${{ needs.recovery.result }}", result)
+
     def test_final_check_refuses_failed_cancelled_and_missing_jobs(self):
-        script = textwrap.dedent(SOURCE.split("      - name: Report backend result", 1)[1]
-                                 .split("        run: |\n", 1)[1])
+        for marker in ("      - name: Report backend result", "      - name: Report recovery result"):
+            with self.subTest(marker=marker):
+                self.check_result_script(marker)
+
+    def check_result_script(self, marker):
+        script = textwrap.dedent(SOURCE.split(marker, 1)[1]
+                                 .split("        run: |\n", 1)[1].split("\n\n", 1)[0])
         cases = [
             ("success", "false", "skipped", 0),
             ("success", "true", "success", 0),
