@@ -32,6 +32,8 @@ From the repository root, Python 3.11+, no additional dependencies:
 python evaluation/benchmark.py plan
 python evaluation/benchmark.py schema asr
 python evaluation/benchmark.py schema ocr
+python evaluation/benchmark.py schema asr --version res02-v2
+python evaluation/benchmark.py schema ocr --version res02-v2
 python evaluation/benchmark.py score .scratch/res02/asr-observations.json
 python evaluation/benchmark.py score .scratch/res02/ocr-observations.json
 python evaluation/benchmark.py score .scratch/res02/asr-observations.json --media-root <controlled-intake-root>
@@ -40,8 +42,10 @@ python -m unittest discover -s evaluation/tests -p "test_*.py" -v
 
 `--corpus <directory>` before the subcommand selects a different validated
 `frozen-local` or `frozen` snapshot. No automatic downgrade to draft is allowed.
-`plan` checks corpus metadata/hashes and reports missing inputs; it does not
-open media. `score` reads one complete JSON observation object and prints a
+`plan` checks corpus metadata/hashes and distinguishes existing documented
+evidence from remaining device/timing/selection gates and new-run requirements.
+It reports `inventory_only` and `local_artifacts_verified: false`: it does not
+open media or verify private results. `score` reads one complete JSON observation object and prints a
 JSON result to stdout. Keep inputs and redirected results in ignored
 `.scratch/res02/` or controlled storage, never Git by default.
 
@@ -54,11 +58,44 @@ are `null`, not zero or a passing score.
 
 ## Observation contract
 
-`schema asr|ocr` prints the authoritative, closed `res02-v1` input schema.
+`schema asr|ocr` prints the authoritative, closed `res02-v1` input schema by
+default, preserving existing callers. `--version res02-v2` explicitly exports
+the updated scoring contract. `score` dispatches on the input's required
+`schema_version`; missing or unknown versions fail, never migrate implicitly.
 Unknown/missing fields, duplicate JSON keys, non-finite numbers and unknown
 models fail. A contract change needs a new version rather than rewriting
 historical results. `tests/test_benchmark.py` contains complete invented ASR
 and OCR examples; do not reuse them as real evidence.
+
+### Scoring versions and existing evidence
+
+V1 retains its exact tokenizer and rejects punctuation-only ASR hypothesis
+segments. All existing hosted/OCR helpers and private baseline artifacts stay
+on v1, including `tokens()` and `input_schema()` when no version is supplied.
+The immutable phone handoff remains a v1 snapshot; use a current checkout for
+v2 scoring. Do not rewrite the bundle or its hashes.
+
+V2 distinguishes letter-number hyphens from signs (`COVID-19` becomes `covid`,
+`19`; standalone `-19` remains negative) and retains Unicode currency symbols
+as separate tokens after NFKC normalization (`$5` differs from `EUR 5` or
+another currency symbol). Percent/degree symbols, apostrophes and numeric
+separators retain their prior behavior. Both ASR and general OCR scoring,
+recognition matching and deduplication use the chosen version consistently.
+This is lexical comparison, not currency conversion or unit equivalence.
+
+V2 skips ASR hypothesis segments with no normalized tokens and reports
+`metrics.ignored_unscorable_segments`. It still validates their timing/order,
+retains the original input and segment indexes, and rejects timestamp pairs
+targeting an ignored segment. References remain strict; unavailable chunks
+cannot contain segments. Ignored punctuation cannot conceal missing speech:
+reference words without hypotheses still count as deletions.
+
+To rescore existing evidence, write a separate v2 input/result, preserve the
+originals, and re-annotate entity token offsets under v2 before scoring.
+Do not merely change the version on v1 entity labels or pool v1/v2 scores.
+V2 includes its version in the reference digest; v1 hashes and output shape
+remain unchanged. The private selected-region OCR metric and the hosted
+trial summarizer remain v1 and are not silently promoted by this change.
 
 Common fields identify the run, clip, model and exact `model_revision`, actual
 `hardware` (model/OS only, no serials), `provenance`, and nonempty `limitations`.
@@ -104,7 +141,7 @@ faster-whisper or paid OpenAI whisper-1 route is provided.
 | Segment offsets | Each hypothesis segment is relative to its chunk. The scorer validates bounds and adds `chunk.start_ms` exactly once, returning timebase-relative intervals without text. |
 | Failure | `ASR_UNAVAILABLE` requires no segments. Retain the failed chunk; missing speech counts as deletions and the failure count remains visible. `ok` with no segments means an observed no-speech result, not an exception fallback. |
 | WER | Minimum token edit distance, with substitution/deletion/insertion counts, divided by total reference tokens. It can exceed one. Empty-reference WER is null; hallucinated insertions remain counted. |
-| Normalization | NFKC, case-folding and punctuation removal; retain apostrophes, signs, numeric separators, percent and degree symbols. Do not convert spelled-out numbers, units or `favour`/`favor`. No semantic normalization. |
+| Normalization | Versioned NFKC/case-folded lexical tokens as described above. V1 drops currency and reads letter-number hyphens as signs; v2 corrects those cases. Neither converts spelled-out numbers, units or `favour`/`favor`. |
 | `entities` | `{category, start_token, end_token}` spans in the concatenated normalized reference, zero-based, end-exclusive. Categories: negation, number, name, date, unit. Report incorrect spans and denominators independently. |
 | Entity errors | Any substituted/deleted span token or insertion strictly inside a span makes it incorrect. Mark a full polarity-bearing phrase to catch inserted negation. Insertions outside annotated spans are only in WER; this is not automatic detection of every critical error. Alignment ties prefer diagonal, deletion, then insertion. |
 | `timestamp_pairs` | Explicit reviewer-matched reference index and hypothesis `(chunk_seq, segment_index)` for the same spoken interval, one-to-one. Never pair by array position alone. |
@@ -193,7 +230,10 @@ to force retries. Exit 2 means failure; partial runs are not complete comparison
 
 `summarize` refuses partial runs and existing output directories. It produces
 per-clip scorer inputs/results and a token-weighted summary, never an average
-of clip WER percentages. It compares full chunk response text with the original
+of clip WER percentages. An aggregate with zero reference tokens reports
+`wer: null`, not a perfect score or division error (current strict SRT
+validation normally rejects empty references before aggregation).
+It compares full chunk response text with the original
 SRT reference. Hypothesis intervals are **chunk envelopes**, not the model's
 word boundaries; raw model timestamps remain in the attempt records. No
 timestamp drift or critical-entity rate is inferred without reviewed pairings
@@ -242,13 +282,11 @@ brief card. Do not replace the Android policy with this experimental threshold.
 
 `ocr_experiment.py` exposes `sample_video`, `recognize`,
 `selected_region_errors`, `normalized_box`, and `window_coverage`. It performs
-no network calls or model downloads. Optional local execution dependencies:
-
-```text
-uv run --project backend --frozen --with av==17.1.0 --with pillow==11.3.0 --with tesserocr==2.9.1 python <controlled-ocr-run-script> prepare
-uv run --project backend --frozen --with pillow==11.3.0 --with tesserocr==2.9.1 python <controlled-ocr-run-script> run
-uv run --project backend --frozen --with pillow==11.3.0 --with tesserocr==2.9.1 python <controlled-ocr-run-script> summarize
-```
+no network calls or model downloads. The completed run used a **private
+operator script and inputs not included in the repository**; it cannot be
+reproduced from this checkout alone. Its optional dependencies were PyAV
+17.1.0, Pillow 11.3.0 and tesserocr 2.9.1. These pins and the primitives/settings
+below document the experiment, not a repository-runnable OCR command.
 
 Keep the operator script, source-reference specification, model manifests and
 outputs together in controlled storage. The executed script is part of that

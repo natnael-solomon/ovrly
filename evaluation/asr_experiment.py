@@ -620,6 +620,8 @@ def summarize(path, expected_hash):
             counts["wer"] = (
                 sum(counts[k] for k in ("substitution", "deletion", "insertion"))
                 / counts["reference_tokens"]
+                if counts["reference_tokens"]
+                else None
             )
             rows = [r for r in plan["observations"] if r["chunk_ms"] == length]
             records = [

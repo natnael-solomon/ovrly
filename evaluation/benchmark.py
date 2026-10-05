@@ -7,6 +7,7 @@ import math
 import re
 import sys
 import unicodedata
+from functools import partial
 from pathlib import Path
 
 from validate import (
@@ -22,6 +23,8 @@ from validate import (
 )
 
 VERSION = "res02-v1"
+CURRENT_VERSION = "res02-v2"
+VERSIONS = (VERSION, CURRENT_VERSION)
 ASR_MODELS = (
     "groq/whisper-large-v3",
     "groq/whisper-large-v3-turbo",
@@ -73,9 +76,10 @@ RESOURCES = obj(
 RESOURCES["type"] = ["object", "null"]
 
 
-def input_schema(task):
+def input_schema(task, version=VERSION):
+    require(version in VERSIONS, "schema_version", "unsupported scoring version")
     common = {
-        "schema_version": {"const": VERSION},
+        "schema_version": {"const": version},
         "kind": choice("synthetic", "local-measurement"),
         "task": {"const": task},
         "run_id": ID,
@@ -168,9 +172,18 @@ def input_schema(task):
     return obj(**common)
 
 
-def tokens(text):
+def tokens(text, version=VERSION):
     """Case-fold and ignore punctuation, but retain numeric separators and signs."""
+    require(version in VERSIONS, "schema_version", "unsupported scoring version")
     text = unicodedata.normalize("NFKC", text).casefold().replace("\u2019", "'")
+    if version == CURRENT_VERSION:
+        currency = "".join(sorted({c for c in text if unicodedata.category(c) == "Sc"}))
+        symbols = re.escape("%°" + currency)
+        return re.findall(
+            rf"(?<!\w)[+-]\d+(?:[.,:/-]\d+)*|\d+(?:[.,:/-]\d+)*"
+            rf"|[^\W\d_]+(?:'[^\W\d_]+)*|[{symbols}]",
+            text,
+        )
     return re.findall(r"[+-]?\d+(?:[.,:/-]\d+)*|[^\W\d_]+(?:'[^\W\d_]+)*|[%°]", text)
 
 
@@ -250,19 +263,26 @@ def interval(row, duration, location):
     )
 
 
-def ordered_segments(rows, duration, location):
+def ordered_segments(rows, duration, location, version=VERSION, *, allow_unscorable=False):
     end = 0
     for row in rows:
         interval(row, duration, location)
         require(row["start_ms"] >= end, location, "segments overlap or are out of order")
-        require(bool(tokens(row["text"])), location, "text has no scorable tokens")
+        require(
+            allow_unscorable or bool(tokens(row["text"], version)),
+            location,
+            "text has no scorable tokens",
+        )
         end = row["end_ms"]
 
 
 def score_asr(data):
-    ordered_segments(data["reference"], data["duration_ms"], "reference")
-    reference = [word for row in data["reference"] for word in tokens(row["text"])]
+    version = data["schema_version"]
+    tokenize = partial(tokens, version=version)
+    ordered_segments(data["reference"], data["duration_ms"], "reference", version)
+    reference = [word for row in data["reference"] for word in tokenize(row["text"])]
     hypothesis, global_segments = [], {}
+    ignored_unscorable = 0
     end = 0
     for seq, chunk in enumerate(data["chunks"]):
         interval(chunk, data["duration_ms"], "chunk")
@@ -272,7 +292,13 @@ def score_asr(data):
             "must cover the clip contiguously from zero with consecutive seq; record failures",
         )
         end = chunk["end_ms"]
-        ordered_segments(chunk["segments"], end - chunk["start_ms"], "chunk segments")
+        ordered_segments(
+            chunk["segments"],
+            end - chunk["start_ms"],
+            "chunk segments",
+            version,
+            allow_unscorable=version == CURRENT_VERSION,
+        )
         require(
             chunk["status"] == "ok" or not chunk["segments"],
             "chunk",
@@ -285,7 +311,11 @@ def score_asr(data):
                 "provider file cap exceeded",
             )
         for index, segment in enumerate(chunk["segments"]):
-            hypothesis.extend(tokens(segment["text"]))
+            words = tokenize(segment["text"])
+            if not words:
+                ignored_unscorable += 1
+                continue
+            hypothesis.extend(words)
             global_segments[(seq, index)] = {
                 "start_ms": chunk["start_ms"] + segment["start_ms"],
                 "end_ms": chunk["start_ms"] + segment["end_ms"],
@@ -355,6 +385,11 @@ def score_asr(data):
         }
     return {
         "word_errors": counts,
+        **(
+            {"ignored_unscorable_segments": ignored_unscorable}
+            if version == CURRENT_VERSION
+            else {}
+        ),
         "critical_entities": entities,
         "failed_chunks": sum(c["status"] != "ok" for c in data["chunks"]),
         "wall_ms_per_chunk": distribution([c["wall_ms"] for c in data["chunks"]]),
@@ -405,13 +440,14 @@ def sampling_result(reference, frames, recognized):
 
 
 def score_ocr(data):
+    tokenize = partial(tokens, version=data["schema_version"])
     reference, frames = data["reference"], data["frames"]
     ids = set()
     for row in reference:
         interval(row, data["duration_ms"], "reference")
         box_valid(row["box"])
         require(
-            row["id"] not in ids and bool(tokens(row["text"])),
+            row["id"] not in ids and bool(tokenize(row["text"])),
             "reference",
             "duplicate occurrence id or unscorable text",
         )
@@ -437,7 +473,7 @@ def score_ocr(data):
         for detection in frame["detections"]:
             box_valid(detection["box"])
             require(
-                bool(tokens(detection["text"])),
+                bool(tokenize(detection["text"])),
                 "detection",
                 "text has no scorable tokens",
             )
@@ -455,8 +491,8 @@ def score_ocr(data):
                 used.add(j)
         recognized[frame["id"]] = set()
         for i, row in enumerate(visible):
-            expected = tokens(row["text"])
-            actual = tokens(frame["detections"][matches[i]]["text"]) if i in matches else []
+            expected = tokenize(row["text"])
+            actual = tokenize(frame["detections"][matches[i]]["text"]) if i in matches else []
             counts, _ = error_counts(expected, actual)
             for name in totals:
                 totals[name] += counts[name]
@@ -466,10 +502,10 @@ def score_ocr(data):
             if j not in used:
                 unmatched_detections += 1
                 if data["reference_basis"] == "full-screen-media-reviewed":
-                    totals["insertion"] += len(tokens(detection["text"]))
+                    totals["insertion"] += len(tokenize(detection["text"]))
         next_tracks = []
         for detection in frame["detections"]:
-            normalized = tokens(detection["text"])
+            normalized = tokenize(detection["text"])
             candidates = [
                 index
                 for index in active_tracks
@@ -563,7 +599,7 @@ def plan(directory):
     manifest, clips = corpus(directory)
     return {
         "schema_version": VERSION,
-        "status": "not_measured",
+        "status": "inventory_only",
         "dataset_version": manifest["dataset_version"],
         "corpus_manifest_sha256": digest(directory / "dataset.json"),
         "dev_clip_ids": [c["clip_id"] for c in clips if c["split"] == "dev"],
@@ -578,13 +614,28 @@ def plan(directory):
             }
             for ms in (10000, 15000)
         ],
-        "blocking_inputs": [
-            "Verbatim dev references and critical-entity spans; claims are not transcripts.",
-            "Controlled media and recorded model output; no model is run by this tool.",
-            "Separate provider-use permission and dated account limits for hosted ASR.",
-            "AN-04 actual chunk format and size; 10/15-second PCM trials are proposals.",
-            "AN-01 captured frames, visibility references, boxes and device resource readings.",
+        "existing_evidence": {
+            "subtitle_references": "Existing reviewed/source SRTs reused for private trials; "
+            "subtitle agreement, not independently certified verbatim speech.",
+            "nonphone_comparisons": "Hosted ASR, critical spans, Tesseract and source-video "
+            "sampling recorded privately under #92; see BENCHMARKS.md.",
+            "capture_feasibility": "AN-01 #9 closed; Galaxy A21s / Android 12 matrix in "
+            "docs/compatibility.md. Not recognizer performance evidence.",
+        },
+        "remaining_evidence": {
+            "phone_recognition_resources": "Vosk/whisper.cpp viability, ML Kit same-captured-frame "
+            "comparison, runtime and three-minute battery/thermal readings.",
+            "capture_chunks": "Actual AN-04 chunk format, sizes, offsets and capture clock; "
+            "workstation 10/15-second PCM is not device output.",
+            "timing_and_visibility": "Independently reviewed speech timing and full-screen "
+            "visibility/boxes for final timing and missed-text claims.",
+            "selection": "Reviewed final adapter, explicit fallback and sampling decisions.",
+        },
+        "new_run_requirements": [
+            "Controlled dev media and recorded observations; reuse existing references.",
+            "Separate permission and dated account limits before any new hosted run.",
         ],
+        "local_artifacts_verified": False,
         "limitations": manifest.get("limitations", []),
         "rights_clearance": {
             c["clip_id"]: c["rights"].get("clearance", "not-recorded") for c in clips
@@ -601,7 +652,7 @@ def score(data, directory, media_root=None):
         "input",
         "expected ASR or OCR benchmark object",
     )
-    schema = input_schema(data["task"])
+    schema = input_schema(data["task"], data.get("schema_version"))
     check_schema(schema)
     validate_value(data, schema, "benchmark")
     # JSON Schema accepts integral floats; convert only after validating their exact type/range.
@@ -657,7 +708,7 @@ def score(data, directory, media_root=None):
             "measurement interval must equal the clip duration",
         )
     return {
-        "schema_version": VERSION,
+        "schema_version": data["schema_version"],
         "run_id": data["run_id"],
         "kind": data["kind"],
         "clip_id": data["clip_id"],
@@ -679,6 +730,7 @@ def score(data, directory, media_root=None):
                         "timebase",
                         "entities",
                         "timing_basis",
+                        *(("schema_version",) if data["schema_version"] == CURRENT_VERSION else ()),
                     )
                     if key in data
                 },
@@ -713,16 +765,16 @@ def main(argv=None):
     commands.add_parser(
         "plan", help="show dev-only inputs and missing evidence; no model execution"
     )
-    commands.add_parser("schema", help="emit the strict scoring input schema").add_argument(
-        "task", choices=("asr", "ocr")
-    )
+    schema_command = commands.add_parser("schema", help="emit the strict scoring input schema")
+    schema_command.add_argument("task", choices=("asr", "ocr"))
+    schema_command.add_argument("--version", choices=VERSIONS, default=VERSION)
     scoring = commands.add_parser("score", help="score a controlled local observation file")
     scoring.add_argument("input", type=Path)
     scoring.add_argument("--media-root", type=Path, help="also verify corpus media bytes locally")
     args = parser.parse_args(argv)
     try:
         if args.command == "schema":
-            result = input_schema(args.task)
+            result = input_schema(args.task, args.version)
         elif args.command == "plan":
             result = plan(args.corpus)
         else:

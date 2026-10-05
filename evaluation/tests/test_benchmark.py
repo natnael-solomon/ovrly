@@ -144,6 +144,27 @@ class BenchmarkTest(unittest.TestCase):
         for task in ("asr", "ocr"):
             check_schema(input_schema(task))
 
+    def test_cli_exports_explicit_versions_and_reports_remaining_evidence(self):
+        for version in ("res02-v1", "res02-v2"):
+            for task in ("asr", "ocr"):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(main(["schema", task, "--version", version]), 0)
+                self.assertEqual(
+                    json.loads(output.getvalue())["properties"]["schema_version"]["const"],
+                    version,
+                )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(main(["plan"]), 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["status"], "inventory_only")
+        self.assertNotIn("blocking_inputs", result)
+        self.assertIn("subtitle_references", result["existing_evidence"])
+        self.assertIn("capture_feasibility", result["existing_evidence"])
+        self.assertIn("phone_recognition_resources", result["remaining_evidence"])
+        self.assertFalse(result["local_artifacts_verified"])
+
     def test_plan_uses_new_main_snapshot_not_historical_draft(self):
         result = plan(ROOT / "corpus-local")
         self.assertEqual("res01-local-frozen-2026-10-04", result["dataset_version"])
@@ -180,6 +201,45 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(1, counts["wer"])
         with self.assertRaises(Invalid):
             error_counts(["a"] * 5001, [])
+
+    def test_versioned_asr_normalization_preserves_legacy_results(self):
+        data = asr()
+        data["reference"][0]["text"] = "COVID-19 costs $5, not -5."
+        data["chunks"][1]["segments"][0]["text"] = "COVID 19 costs \u20ac5, not 5."
+        data["entities"] = []
+        legacy = self.scored(data)
+        self.assertEqual(legacy["metrics"]["word_errors"]["reference_tokens"], 6)
+        self.assertEqual(legacy["metrics"]["word_errors"]["substitution"], 2)
+        data["schema_version"] = "res02-v2"
+        data["entities"] = [
+            {"category": "unit", "start_token": 3, "end_token": 4},
+            {"category": "number", "start_token": 6, "end_token": 7},
+        ]
+        result = self.scored(data)
+        self.assertEqual(result["schema_version"], "res02-v2")
+        self.assertEqual(result["metrics"]["word_errors"]["reference_tokens"], 7)
+        self.assertEqual(result["metrics"]["word_errors"]["substitution"], 2)
+        self.assertEqual(result["metrics"]["critical_entities"]["unit"]["incorrect_spans"], 1)
+        self.assertEqual(result["metrics"]["critical_entities"]["number"]["incorrect_spans"], 1)
+
+    def test_v2_retains_signed_numbers_and_currency_distinctions(self):
+        for reference, hypothesis, substitutions in (
+            ("COVID-19", "COVID 19", 0),
+            ("-19", "19", 1),
+            ("+19", "19", 1),
+            ("$5", "\u00a35", 1),
+            ("\u20ac5", "\u00a55", 1),
+            ("10%", "10", 0),
+        ):
+            with self.subTest(reference=reference, hypothesis=hypothesis):
+                data = asr()
+                data["schema_version"] = "res02-v2"
+                data["reference"][0]["text"] = reference
+                data["chunks"][1]["segments"][0]["text"] = hypothesis
+                data["entities"] = []
+                result = self.scored(data)["metrics"]["word_errors"]
+                self.assertEqual(result["substitution"], substitutions)
+                self.assertEqual(result["deletion"], int(reference == "10%"))
 
     def test_alignment_reconstructs_inputs_and_minimizes_edits(self):
         def distance(left, right):
@@ -238,6 +298,38 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(1, result["failed_chunks"])
         self.assertEqual(1, result["word_errors"]["wer"])
         self.assertIsNone(result["timestamp_drift_ms"]["absolute_endpoints"])
+
+    def test_v2_keeps_reference_and_segment_order_validation_strict(self):
+        data = asr()
+        data["schema_version"] = "res02-v2"
+        data["reference"][0]["text"] = "..."
+        self.invalid(data, "no scorable tokens")
+        data = asr()
+        data["schema_version"] = "res02-v2"
+        data["chunks"][1]["segments"].append({"start_ms": 1800, "end_ms": 2000, "text": "?"})
+        self.invalid(data, "overlap")
+
+    def test_v2_counts_unscorable_hypotheses_without_renumbering_timing_pairs(self):
+        data = asr()
+        data["chunks"][1]["segments"].insert(0, {"start_ms": 0, "end_ms": 100, "text": "...?"})
+        data["timestamp_pairs"][0]["segment_index"] = 1
+        self.invalid(data, "no scorable tokens")
+        data["schema_version"] = "res02-v2"
+        result = self.scored(data)["metrics"]
+        self.assertEqual(result["ignored_unscorable_segments"], 1)
+        self.assertEqual(result["word_errors"]["wer"], 0)
+        self.assertEqual(result["timebase_relative_segments"][0]["segment_index"], 1)
+        self.assertEqual(result["timestamp_drift_ms"]["paired_segments"], 1)
+        data["timestamp_pairs"][0]["segment_index"] = 0
+        self.invalid(data, "unknown reference or hypothesis")
+        data["timestamp_pairs"] = []
+        data["chunks"][1]["segments"] = data["chunks"][1]["segments"][:1]
+        self.assertEqual(self.scored(data)["metrics"]["word_errors"]["wer"], 1)
+        data["chunks"][1]["segments"][0]["end_ms"] = 6000
+        self.invalid(data, "outside duration")
+        data["chunks"][1]["segments"][0]["end_ms"] = 100
+        data["chunks"][1]["status"] = "ASR_UNAVAILABLE"
+        self.invalid(data, "cannot carry")
 
     def test_chunk_gaps_order_tail_and_segment_bounds(self):
         mutations = [
@@ -425,6 +517,22 @@ class BenchmarkTest(unittest.TestCase):
             first["metrics"]["frame_set_sha256"],
             self.scored(data)["metrics"]["frame_set_sha256"],
         )
+
+    def test_versioned_ocr_currency_errors_and_tracks_use_same_normalization(self):
+        data = ocr()
+        data["reference"][0]["text"] = "$5"
+        data["frames"][1]["detections"][0]["text"] = "\u20ac5"
+        data["frames"][2]["detections"][0]["text"] = "$5"
+        legacy = self.scored(data)
+        self.assertEqual(legacy["metrics"]["frame_weighted_word_errors"]["wer"], 0)
+        self.assertEqual(len(legacy["metrics"]["deduplicated_tracks"]), 1)
+        data["schema_version"] = "res02-v2"
+        result = self.scored(data)
+        self.assertEqual(result["metrics"]["frame_weighted_word_errors"]["reference_tokens"], 4)
+        self.assertEqual(result["metrics"]["frame_weighted_word_errors"]["substitution"], 1)
+        self.assertEqual(result["metrics"]["change_triggered"]["recognition_miss_rate"], 1)
+        self.assertEqual(len(result["metrics"]["deduplicated_tracks"]), 2)
+        self.assertNotEqual(result["reference_sha256"], legacy["reference_sha256"])
 
     def test_ocr_one_to_one_spatial_matching(self):
         data = ocr()

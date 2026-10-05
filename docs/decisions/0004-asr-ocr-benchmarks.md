@@ -58,10 +58,14 @@ score errors and expose missing evidence. #9 is now closed. Keep ML Kit as the
 hypothesis because it avoids frame uploads and server OCR CPU, not because
 comparative accuracy has been measured.
 
-For the hosted development trial, turbo with ten-second chunks is the next
-integration candidate based on this run's subtitle agreement and request
-latency, not a final production default or proof it handles critical names.
-Retain large-v3 as a comparator. **Do not add production server Tesseract**:
+Neither hosted model nor chunk size is preferred by this record. The earlier
+turbo/ten-second development preference is withdrawn because its supporting
+metrics are not committed and cannot be reviewed from this repository.
+Before proposing a preference, publish an authorized metrics-only summary per
+model/chunk size with clip and reference-token counts, token-weighted subtitle
+agreement, p50/p95 request latency and request count, without transcripts or
+responses. No permission to publish the private run is inferred here.
+**Do not add production server Tesseract**:
 frame transfer and server CPU are outside the accepted budget, regardless of
 workstation benchmark speed. The intended OCR route remains on-device ML Kit,
 conditional on the same-frame/device measurements. Fixed five-second sampling
