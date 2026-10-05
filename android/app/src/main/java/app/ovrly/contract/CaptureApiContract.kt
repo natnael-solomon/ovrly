@@ -48,10 +48,7 @@ internal data class CaptureMetadata(val chunk: CaptureChunkRequest, val modality
 }
 
 @Serializable
-internal data class CaptureModalityCoverage(
-    val speech: List<Interval>,
-    val text: List<Interval>
-) {
+internal data class CaptureModalityCoverage(val speech: List<Interval>, val text: List<Interval>) {
     init {
         (speech + text).forEach { require(it.timebase == Timebase.CAPTURE) }
     }

@@ -139,7 +139,11 @@ class ContractEnumsTest {
             "modality_coverage"
         ),
         Mirror(CaptureWork.serializer().descriptor, "capture-status.schema.json", "work"),
-        Mirror(CaptureClaimState.serializer().descriptor, "capture-status.schema.json", "claim_state"),
+        Mirror(
+            CaptureClaimState.serializer().descriptor,
+            "capture-status.schema.json",
+            "claim_state"
+        ),
         Mirror(
             InvestigationSource.Capture.serializer().descriptor,
             INVESTIGATION,
