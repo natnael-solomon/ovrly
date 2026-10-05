@@ -106,6 +106,8 @@ Session row locks serialize byte commits, Stop and retention, while queue
 fencing prevents cancelled/deleted work from publishing. See the
 [capture API](../backend/README.md#incremental-capture-api) for transport,
 deadlines and replay semantics. Android has matching codecs, not network wiring.
+`CaptureApiCodec` handles the create/close bodies, multipart metadata and polling
+envelope; `CaptureCodec` retains the existing session/chunk parsers.
 
 Before connecting Android, agree a versioned API contract with validated schemas and compatibility tests: captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors. FastAPI exposes bootstrap OpenAPI, health and the `/v1` identity and intake endpoints. That contract lives in [`packages/contracts`](../packages/contracts/README.md): the voice-actions slice, the shared error shape, the upload, investigation, job, capture-session, report-version, claim, evidence and assessment schemas with one `$def` per enum, six result fixtures generated from the backend read models, intake samples, and a hand-maintained OpenAPI 3.1 document whose schemas reference those files. The required **Contract checks** workflow validates all of it (spectral, oasdiff against the base, server round trip, Android contract tests) on every PR.
 

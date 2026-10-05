@@ -1,6 +1,6 @@
 # Contracts
 
-**Version `0.1.0-draft` (pre-1.0).** Shared JSON Schema definitions and synthetic
+**Version `0.2.0-draft` (pre-1.0).** Shared JSON Schema definitions and synthetic
 fixtures that the Android client and the backend build from. This package was
 started by BE-13 ([#67](https://github.com/natnael-solomon/ovrly/issues/67)) with
 the voice-actions slice. BE-03 ([#15](https://github.com/natnael-solomon/ovrly/issues/15))
