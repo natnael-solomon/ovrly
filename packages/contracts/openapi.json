@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Ovrly API",
-    "version": "0.1.0-draft",
+    "version": "0.2.0-draft",
     "summary": "Contract between the Android client and the backend.",
-    "description": "Ovrly contracts 0.1.0-draft (pre-1.0). Investigation reads derive state from the intake job (queued/leased -> queued, running -> running, failed -> failed with PROCESSING_FAILED, cancelled/deleted -> cancelled). Every schema is a reference into schemas/*.schema.json so the OpenAPI document, the JSON Schema fixtures and the Android models cannot drift from each other. Every error response uses the shared error shape; stage-specific error codes are listed per operation and must be SCREAMING_SNAKE_CASE. Paths listed here are those the backend serves today (BE-05, #19, including account linking from BC-D07, and the owner-scoped job actions from BE-04 part 3, #75) plus POST /v1/voice/actions (BE-13, #67; served by BE-10, #33). Capture-session and chunk schemas are published in components for the client models but their endpoints are not yet defined; report-version retrieval and reanalysis are #33.",
+    "description": "Ovrly contracts 0.2.0-draft (pre-1.0). Shared-media investigation reads derive state from the intake job (queued/leased -> queued, running -> running, failed -> failed with PROCESSING_FAILED, cancelled/deleted -> cancelled). Capture progress uses GET /v1/captures/{capture_id}; media analysis and claim extraction are not implemented yet. Every schema is a reference into schemas/*.schema.json so the OpenAPI document, the JSON Schema fixtures and the Android models cannot drift from each other. Every error response uses the shared error shape; stage-specific error codes are listed per operation and must be SCREAMING_SNAKE_CASE. Paths listed here are those the backend serves today (BE-05, #19, including account linking from BC-D07, the owner-scoped job actions from BE-04 part 3, #75, and incremental capture intake from BE-06, #24) plus POST /v1/voice/actions (BE-13, #67; served by BE-10, #33). Report-version retrieval and reanalysis are #33.",
     "license": {
       "name": "PolyForm Noncommercial 1.0.0",
       "identifier": "PolyForm-Noncommercial-1.0.0"
@@ -22,9 +22,138 @@
     { "name": "uploads", "description": "Declared and verified media uploads (BE-05)." },
     { "name": "investigations", "description": "Checks: idempotent creation and owner-scoped reads (BE-05)." },
     { "name": "voice", "description": "Allowlisted voice actions (BE-13 contract, BE-10 endpoint)." },
-    { "name": "jobs", "description": "Owner-scoped job cancellation and deletion receipts (BE-04 part 3)." }
+    { "name": "jobs", "description": "Owner-scoped job cancellation and deletion receipts (BE-04 part 3)." },
+    { "name": "captures", "description": "Owner-scoped incremental capture intake, close and polling (BE-06)." }
   ],
   "paths": {
+    "/v1/captures": {
+      "post": {
+        "tags": ["captures"],
+        "operationId": "createCapture",
+        "summary": "Create a live capture and its investigation.",
+        "description": "Requires an owner-scoped Idempotency-Key. Replay returns the original empty session; a different nominal duration under that key conflicts. No media job is created until a verified chunk arrives.",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CaptureCreateRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Created session, or its original acknowledgement on replay.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CaptureSession" } } }
+          },
+          "400": { "$ref": "#/components/responses/CaptureBadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "409": { "$ref": "#/components/responses/CaptureConflict" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/captures/{capture_id}": {
+      "parameters": [{ "$ref": "#/components/parameters/CaptureId" }],
+      "get": {
+        "tags": ["captures"],
+        "operationId": "getCapture",
+        "summary": "Poll manifest, chunk work and per-claim progress.",
+        "description": "Only verified chunks count toward coverage and gaps. Speech/text coverage is client-declared, not completed analysis. The current processor verifies media bytes only; claims are empty and not_started, never a no-claims finding.",
+        "responses": {
+          "200": {
+            "description": "Consistent owner-scoped capture snapshot.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CaptureStatus" } } }
+          },
+          "400": { "$ref": "#/components/responses/CaptureBadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/captures/{capture_id}/chunks/{seq}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/CaptureId" },
+        { "name": "seq", "in": "path", "required": true, "description": "Zero-based chunk sequence.", "schema": { "type": "integer", "minimum": 0 } }
+      ],
+      "put": {
+        "tags": ["captures"],
+        "operationId": "putCaptureChunk",
+        "summary": "Verify and durably enqueue a capture chunk without waiting for close.",
+        "description": "Exactly one metadata text part (UTF-8 JSON CaptureMetadata) and one content file part. Intervals follow the session chunk duration and cannot exceed 180000ms; only the final chunk may be shorter. Identical metadata and bytes replay the original received_at with disposition duplicate and CURRENT gaps, even after close/expiry. Changed metadata or bytes conflicts. The session-wide byte budget includes pending reservations. Authorization precedes multipart parsing; metadata and multipart overhead are bounded. New bytes must finish before expires_at.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["metadata", "content"],
+                "properties": {
+                  "metadata": { "$ref": "#/components/schemas/CaptureMetadata" },
+                  "content": { "type": "string", "format": "binary" }
+                }
+              },
+              "encoding": { "metadata": { "contentType": "application/json" }, "content": { "contentType": "application/octet-stream" } }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored, out-of-order or duplicate acknowledgement.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CaptureChunk" } } }
+          },
+          "400": { "$ref": "#/components/responses/CaptureBadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/CaptureConflict" },
+          "410": {
+            "description": "CAPTURE_EXPIRED: upload window ended; identical stored retries and close remain available.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "413": {
+            "description": "CAPTURE_TOO_LARGE: body or session exceeds the configured upload byte budget.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/captures/{capture_id}/close": {
+      "parameters": [{ "$ref": "#/components/parameters/CaptureId" }],
+      "post": {
+        "tags": ["captures"],
+        "operationId": "closeCapture",
+        "summary": "Stop intake and record whether research should continue.",
+        "description": "Close and chunk commits serialize on the session. False requests cancellation of accepted chunk jobs in the same transaction; already-published work is retained. True preserves queued work. Replays are stable; changed effective duration/choice conflicts. Close is allowed after expiry.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CaptureCloseRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Closed session acknowledgement.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CaptureSession" } } }
+          },
+          "400": { "$ref": "#/components/responses/CaptureBadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/CaptureConflict" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
     "/v1/principals/guest": {
       "post": {
         "tags": ["principals"],
@@ -424,6 +553,10 @@
       }
     },
     "parameters": {
+      "CaptureId": {
+        "name": "capture_id", "in": "path", "required": true,
+        "schema": { "$ref": "schemas/common.schema.json#/$defs/uuid" }
+      },
       "UploadId": {
         "name": "upload_id",
         "in": "path",
@@ -452,6 +585,16 @@
       }
     },
     "responses": {
+      "CaptureBadRequest": {
+        "description": "IDEMPOTENCY_KEY_REQUIRED, IDEMPOTENCY_KEY_INVALID or CLIENT_IDENTITY_REJECTED.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "CaptureConflict": {
+        "description": "IDEMPOTENCY_KEY_REUSED, CAPTURE_CHUNK_CONFLICT, CAPTURE_CLOSED, CAPTURE_FINAL_CHUNK or CAPTURE_CLOSE_CONFLICT. The supplied request conflicts with durable capture state.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
       "Unauthenticated": {
         "description": "AUTHENTICATION_REQUIRED (no credential) or INVALID_CREDENTIAL (malformed, unknown or revoked), with WWW-Authenticate.",
         "headers": {
@@ -487,6 +630,10 @@
       }
     },
     "schemas": {
+      "CaptureCreateRequest": { "$ref": "schemas/capture-create-request.schema.json" },
+      "CaptureCloseRequest": { "$ref": "schemas/capture-close-request.schema.json" },
+      "CaptureMetadata": { "$ref": "schemas/capture-metadata.schema.json" },
+      "CaptureStatus": { "$ref": "schemas/capture-status.schema.json" },
       "GuestPrincipalRequest": {
         "type": "object",
         "description": "Empty body; mirrors services/api/schemas.py GuestPrincipalRequest.",

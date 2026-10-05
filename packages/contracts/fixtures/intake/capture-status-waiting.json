@@ -1,0 +1,36 @@
+{
+  "synthetic": true,
+  "description": "Synthetic closed capture with one received interval and a missing tail. Byte receipt is not completed analysis.",
+  "schemas": { "request": "capture-close-request.schema.json", "response": "capture-status.schema.json" },
+  "expect": { "request": "valid", "response": "valid" },
+  "request": { "continue_research": true, "duration_ms": 20000 },
+  "response": {
+    "session": {
+      "id": "00000000-0000-4000-8000-000000000501",
+      "investigation_id": "00000000-0000-4000-8000-000000000501",
+      "state": "closed", "timebase": "capture",
+      "started_at": "2026-10-05T12:00:00Z",
+      "closed_at": "2026-10-05T12:00:20Z",
+      "max_duration_ms": 180000, "chunk_duration_ms": 10000,
+      "chunks_received": 1, "highest_seq": 0, "received_ms": 10000, "gaps": [],
+      "duplicate_handling": "replay_acknowledgement",
+      "out_of_order_handling": "accept_and_record_gaps"
+    },
+    "continue_research": true,
+    "expires_at": "2026-10-05T12:18:00Z",
+    "manifest": {
+      "duration_ms": 20000,
+      "missing_intervals": [{ "start_ms": 10000, "end_ms": 20000, "timebase": "capture" }],
+      "declared_coverage": {
+        "speech": [{ "start_ms": 0, "end_ms": 10000, "timebase": "capture" }],
+        "text": [{ "start_ms": 0, "end_ms": 10000, "timebase": "capture" }]
+      }
+    },
+    "work": [{
+      "seq": 0, "job_id": "00000000-0000-4000-8000-000000000601",
+      "processing_status": "waiting", "error": null
+    }],
+    "claims": [],
+    "claim_extraction_status": "not_started"
+  }
+}

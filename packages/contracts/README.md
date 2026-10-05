@@ -59,8 +59,8 @@ round-trip check reports whole-file diffs).
 | `claim.schema.json` | `Claim`, `ClaimCorrection` | Items of `report.claims`. |
 | `evidence.schema.json` | `Evidence`, `EvidenceSource` | Items of `report.evidence`. |
 | `assessment.schema.json` | `Assessment`, `EvidenceRelation` | Items of `report.assessments`. |
-| `capture-session.schema.json` | Hand-authored; no backend model yet | Live-overlay session read model. |
-| `capture-chunk-request.schema.json`, `capture-chunk.schema.json` | Hand-authored; no backend model yet | Chunk declaration and acknowledgement. |
+| `capture-session.schema.json` | `CaptureSession` in `services/api/capture_schemas.py` | Live-overlay session read model. |
+| `capture-chunk-request.schema.json`, `capture-chunk.schema.json` | `CaptureChunkRequest`, `CaptureChunk` in `services/api/capture_schemas.py` | Chunk declaration and acknowledgement. |
 | `voice-action-request.schema.json`, `voice-action-response.schema.json` | BE-13 slice, unchanged | `POST /v1/voice/actions`. |
 | `job-action-request.schema.json` | Path parameters of the job actions (`job_id`); no body | `POST /v1/jobs/{job_id}/cancel`, `DELETE /v1/jobs/{job_id}`. |
 | `job-cancel-response.schema.json` | `CancelResponse` in `services/api/routes/jobs.py` | `POST /v1/jobs/{job_id}/cancel` 200 and 202. |
@@ -125,7 +125,7 @@ in `backend/services/api/schemas.py`.
 | `job_state` | `queued`, `leased`, `running`, `published`, `cancelled`, `deleted`, `failed` | `services/jobs/states.py JobState` |
 | `retry_class` | `transient`, `rate_limited`, `non_retriable_input`, `invalid_model_schema`, `unknown_outcome` | `services/jobs/retries.py RetryClass` |
 | `investigation_state` | `queued`, `running`, `completed`, `failed`, `cancelled` | `schemas.py InvestigationState` (pre-existing) |
-| `stage` | `intake`, `media_validation`, `asr`, `device_text`, `claim_extraction`, `retrieval`, `assessment`, `reconciliation`, `publication` | Build contract section 4; only `intake` exists in code today (`routes/investigations.py INITIAL_STAGE`), the other eight are introduced here |
+| `stage` | `intake`, `media_validation`, `asr`, `device_text`, `claim_extraction`, `retrieval`, `assessment`, `reconciliation`, `publication` | Build contract section 4; `intake` confirms shared-media intake and capture `media_validation` verifies stored bytes; codec/media analysis and the remaining stages are future work |
 | `processing_status` | `waiting`, `checking`, `partial`, `complete`, `failed`, `cancelled` | Build contract section 3 |
 | `coverage_status` | `not_started`, `partial`, `complete` | `routes/investigations.py COVERAGE_PLACEHOLDER` plus the two pipeline values |
 | `upload_state` | `pending`, `completed` | `schemas.py UploadState` (pre-existing) |
@@ -527,11 +527,41 @@ input). Adding a feature requires implementing it and a negative test.
 
 ## Versioning
 
+### BE-06 capture endpoint additions
+
+`POST /v1/captures`, `PUT /v1/captures/{capture_id}/chunks/{seq}`,
+`POST /v1/captures/{capture_id}/close` and `GET /v1/captures/{capture_id}`
+are served. The existing session/chunk shapes are preserved; new
+`capture-create-request`, `capture-close-request`, `capture-metadata` and
+`capture-status` schemas specify the transport and polling envelope.
+`CaptureMetadata` wraps the unchanged chunk declaration plus its client-declared
+modality. Send it as a JSON **text** multipart part named `metadata`, alongside
+one file part named `content`. Multipart file names never become storage keys.
+
+Capture investigations add the `capture` read-source branch and `capture_id`;
+ordinary `POST /v1/investigations` still accepts only URL/upload sources.
+Create uses an owner-scoped idempotency key. Close's continuation boolean is
+required; final duration is optional, but should be supplied to expose missing
+tails. New chunks after close are rejected while identical stored retries
+preserve the receipt time and return current gaps. See the
+[backend behavior and limits](../../backend/README.md#incremental-capture-api).
+
+These are draft implementation choices pending Android/backend review, not
+retroactive product-owner decisions. The new shared intake fixtures cover the
+metadata wrapper and waiting status with a missing tail. Android mirrors the
+schemas and parses those fixtures without networking. A validation-stage result
+is not a research result: `claims: []` plus `claim_extraction_status: not_started`
+does not mean no claims were found. Per-claim pipeline population and actual
+ASR/OCR remain separate work.
+
+### Compatibility policy
+
 - The contract version lives in `VERSION`, in `openapi.json` `info.version` and
-  in each schema's `$comment`. It is still `0.1.0-draft`: this revision only
-  adds schemas, fixtures and enum lists and changes nothing the voice slice or
-  the Android parser already depend on. `VoiceActionCodec.CONTRACT_VERSION`
-  must equal `VERSION`.
+  in each schema's `$comment`. BE-06 bumps it to `0.2.0-draft`: the new capture
+  source expands the investigation response union, which `oasdiff` classifies
+  as breaking for clients that only understand URL/upload sources. Android's
+  `ContractJson.CONTRACT_VERSION` and `VoiceActionCodec.CONTRACT_VERSION`
+  must equal `VERSION`. Voice payloads and existing session/chunk shapes are unchanged.
 - A breaking change (removing or renaming a field, narrowing a type or an
   enum, adding a required field, changing an error code name) requires a
   version bump in the same PR. Adding an optional field or a new enum value is
@@ -555,8 +585,7 @@ schema/fixture link in #62, #18 and #33.
 ## Not in this package
 
 - Adoption of `InvestigationReadModel` by the live routes, `GET
-  .../reports/{version}`, reanalysis, and the capture endpoints behind
-  `capture-session` and `capture-chunk`: #19 part 2, #33 and the pipeline tasks.
+  .../reports/{version}` and reanalysis: #33 and the pipeline tasks.
   When they land, their paths join `openapi.json` and the matching spectral
   override entries are removed.
 - Android models for the new schemas: #62 part 2, from the handoff above. Until

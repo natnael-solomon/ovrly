@@ -22,7 +22,7 @@ import kotlinx.serialization.json.jsonObject
 
 /*
  * Typed models for `investigation.schema.json`, `job.schema.json` and
- * `investigation-create-request.schema.json` (contract 0.1.0-draft). Progress, stored state,
+ * `investigation-create-request.schema.json` (contract 0.2.0-draft). Progress, stored state,
  * the queue job, the error and the findings are separate fields and the constructor enforces
  * the schema's three `oneOf` branches, so a failure can never be read as a finding. Parse and
  * encode with [InvestigationCodec].
@@ -94,6 +94,21 @@ internal sealed class InvestigationSource {
         }
     }
 
+    @Serializable
+    data class Capture(
+        @SerialName("capture_id")
+        val captureId: String,
+        @SerialName("duration_ms")
+        override val durationMs: Long? = null
+    ) : InvestigationSource() {
+        override val kind: SourceKind
+            get() = SourceKind.CAPTURE
+
+        init {
+            ContractSyntax.uuid("source.capture_id", captureId)
+        }
+    }
+
     data class Unknown(val wireKind: String) : InvestigationSource() {
         override val kind: SourceKind
             get() = SourceKind.UNKNOWN
@@ -131,6 +146,9 @@ internal object InvestigationSourceSerializer : KSerializer<InvestigationSource>
             SourceKind.UPLOAD ->
                 json.json.decodeFromJsonElement(InvestigationSource.Upload.serializer(), fields)
 
+            SourceKind.CAPTURE ->
+                json.json.decodeFromJsonElement(InvestigationSource.Capture.serializer(), fields)
+
             SourceKind.UNKNOWN -> InvestigationSource.Unknown(name)
         }
     }
@@ -144,6 +162,9 @@ internal object InvestigationSourceSerializer : KSerializer<InvestigationSource>
             is InvestigationSource.Upload ->
                 json.json.encodeToJsonElement(InvestigationSource.Upload.serializer(), value)
 
+            is InvestigationSource.Capture ->
+                json.json.encodeToJsonElement(InvestigationSource.Capture.serializer(), value)
+
             is InvestigationSource.Unknown ->
                 throw IllegalArgumentException("source.kind UNKNOWN has no wire value")
         }.jsonObject
@@ -156,7 +177,9 @@ internal object InvestigationSourceSerializer : KSerializer<InvestigationSource>
 @Serializable
 internal data class InvestigationCreateRequest(val source: InvestigationSource) {
     init {
-        require(source !is InvestigationSource.Unknown) { "source.kind must be url or upload" }
+        require(source is InvestigationSource.Url || source is InvestigationSource.Upload) {
+            "source.kind must be url or upload"
+        }
         source.durationMs?.let { ContractSyntax.positive("source.duration_ms", it) }
     }
 }

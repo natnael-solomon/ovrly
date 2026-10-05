@@ -86,12 +86,9 @@ rules:
           minLength: 1
 
 overrides:
-  # Published for the Android models before their endpoints exist (live-overlay intake is a
-  # later pipeline task). Remove these entries when the capture paths are added.
+  # Reusable read-model aliases whose endpoints reference their underlying schemas.
   - files:
-      - "openapi.json#/components/schemas/CaptureSession"
       - "openapi.json#/components/schemas/CaptureChunkRequest"
-      - "openapi.json#/components/schemas/CaptureChunk"
       - "openapi.json#/components/schemas/Job"
       - "openapi.json#/components/schemas/Upload"
       - "openapi.json#/components/schemas/ReportVersion"

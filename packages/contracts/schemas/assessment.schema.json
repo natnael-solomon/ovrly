@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py Assessment and EvidenceRelation.",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py Assessment and EvidenceRelation.",
   "title": "Assessment",
   "description": "The pipeline's reading of one claim against its evidence in one report version: one relation per piece of evidence consulted, an overall aggregate, and whether the aggregate is still provisional (more evidence or media may follow). There is no report-level verdict. insufficient and insufficient_evidence describe the evidence, not the truth of the claim, and never describe a processing failure: a failed investigation has no assessments at all.",
   "type": "object",

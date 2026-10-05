@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Every closed vocabulary of the contract, one $def each, so the Android models (#62) map each one to an enum with an UNKNOWN fallback. Removing or renaming a value is a breaking change; adding one is additive but read-side parsers must already tolerate it. The source of each list is named in its description.",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Every closed vocabulary of the contract, one $def each, so the Android models (#62) map each one to an enum with an UNKNOWN fallback. Removing or renaming a value is a breaking change; adding one is additive but read-side parsers must already tolerate it. The source of each list is named in its description.",
   "title": "Enums",
   "description": "Definitions only; this file is not a payload schema. Read-model fields (investigation, job, report version, claim, evidence, assessment, capture session) tolerate values outside these lists by mapping them to UNKNOWN, never to a success or finding state. Request fields are validated strictly by the server.",
   "$defs": {
@@ -57,8 +57,8 @@
     },
     "source_kind": {
       "type": "string",
-      "description": "Discriminator of the investigation source union. Source: backend/services/api/schemas.py UrlSource and UploadSource.",
-      "enum": ["url", "upload"]
+      "description": "Investigation read-source discriminator. POST /v1/investigations accepts only url/upload; captures are created by POST /v1/captures.",
+      "enum": ["url", "upload", "capture"]
     },
     "timebase": {
       "type": "string",

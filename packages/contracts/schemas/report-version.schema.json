@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py ReportVersion. Immutability is a server rule (BE-10, #33): a published version is never edited; corrections and confirmed full-video expansions create a new version that names the one it supersedes.",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py ReportVersion. Immutability is a server rule (BE-10, #33): a published version is never edited; corrections and confirmed full-video expansions create a new version that names the one it supersedes.",
   "title": "ReportVersion",
   "description": "One immutable published version of an investigation's report: the claims found, the evidence retrieved and the assessments made, plus a change summary describing what differs from the superseded version. Returned nested in an investigation read and, in #33, by GET /v1/investigations/{id}/reports/{version}. An empty claims array with an empty assessments array means no assessable factual claims were found; it is not a statement that the video is accurate.",
   "type": "object",

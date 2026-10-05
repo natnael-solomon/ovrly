@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). The action allowlist mirrors BC-D04 and is Conditional until AN-09 (#35) wires the client; a change to the enum is a breaking change and requires a version bump.",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). The action allowlist mirrors BC-D04 and is Conditional until AN-09 (#35) wires the client; a change to the enum is a breaking change and requires a version bump.",
   "title": "VoiceActionRequest",
   "description": "Request body for POST /v1/voice/actions (BE-10, #33). Exactly one allowlisted action against exactly one typed target. There are no free-form arguments; confirmation of queue_cancel happens on the device and is never sent to the server.",
   "type": "object",

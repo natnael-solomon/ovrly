@@ -197,7 +197,7 @@ def test_removed_enum_value_needs_a_version_bump(tmp_path: Path) -> None:
     narrow_enum(head, "job_state", "failed")
     with pytest.raises(compat.Breaking, match="without a VERSION bump"):
         list(compat.check(base, head, None))
-    (head / "VERSION").write_text("0.2.0-draft\n", encoding="utf-8")
+    (head / "VERSION").write_text("0.9.0-draft\n", encoding="utf-8")
     lines = list(compat.check(base, head, None))
     assert "breaking: enum job_state lost values ['failed']" in lines
     assert lines[-1].startswith("ok VERSION bumped") or "bumped" in lines[-1]

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py UploadResponse field for field; every field is always present, nullable ones are null.",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py UploadResponse field for field; every field is always present, nullable ones are null.",
   "title": "Upload",
   "description": "Read model of an upload, returned by POST /v1/uploads (201) and POST /v1/uploads/{id}/complete (200). Clients map an unknown state to UNKNOWN and never treat it as completed.",
   "type": "object",

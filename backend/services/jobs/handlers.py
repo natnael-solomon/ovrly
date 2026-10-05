@@ -5,6 +5,7 @@ from typing import Any
 
 from services.jobs.faults import Checkpoint, FaultInjector, NoFaults
 from services.jobs.queue import ClaimedJob, JobQueue, Lease
+from services.storage import UploadStore
 
 
 class CancellationRequested(Exception):
@@ -46,9 +47,13 @@ class JobContext:
 JobHandler = Callable[[ClaimedJob, JobContext], Awaitable[dict[str, Any]]]
 
 
-def default_handlers() -> Mapping[str, JobHandler]:
-    """The production stage table: ``intake`` today, media stages when BE-07 adds them."""
+def default_handlers(store: UploadStore | None = None) -> Mapping[str, JobHandler]:
+    """Register intake and, with shared storage, incremental capture byte validation."""
     # Imported here because the stage modules import JobContext from this module.
+    from services.captures import CAPTURE_STAGE, CaptureProcessor
     from services.pipeline.intake import INTAKE_STAGE, intake_stage
 
-    return {INTAKE_STAGE: intake_stage}
+    handlers: dict[str, JobHandler] = {INTAKE_STAGE: intake_stage}
+    if store is not None:
+        handlers[CAPTURE_STAGE] = CaptureProcessor(store).run
+    return handlers

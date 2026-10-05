@@ -118,6 +118,16 @@ response with a JSON `null` target is treated as an absent target. Schema or
 fixture problems belong in `packages/contracts` through #15, not in Android-side
 workarounds. API calls, authentication, Room and UI integration are #18.
 
+## Capture endpoint contract
+
+BE-06 adds `CaptureCodec.parseCreateRequest`, `parseCloseRequest`, `parseMetadata`
+and `parseStatus`, with matching encoders and strict typed models. The shared
+intake fixtures include the multipart metadata envelope and waiting status with
+a missing tail. `InvestigationSource.Capture` is supported on reads but rejected
+by the ordinary shared-media create request. These are contract additions only:
+AN-07 still needs to package captured modalities, upload chunks and poll progress.
+Empty capture claims with `not_started` are not a no-claims finding.
+
 ## Gallery and demo
 
 Open `app/src/main/java/app/ovrly/ui/GalleryPreviews.kt` in Studio's Design or Split view. `GlassOverlay.kt` contains the live-control previews. Gallery selection does not change the live overlay.

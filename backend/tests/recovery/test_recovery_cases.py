@@ -179,11 +179,11 @@ async def test_standalone_worker_drains_its_lease_on_sigterm(harness, monkeypatc
         return {"standalone": True}
 
     monkeypatch.setattr(standalone, "load_settings", lambda: harness.settings(job_lease_seconds=5))
-    monkeypatch.setattr(standalone, "default_handlers", lambda: {harness.stage: handler})
+    monkeypatch.setattr(standalone, "default_handlers", lambda store: {harness.stage: handler})
     serving = asyncio.create_task(standalone.serve())
     try:
         key, job_id = await harness.enqueue()
-        await entered.wait()
+        await asyncio.wait_for(entered.wait(), 5)
         os.kill(os.getpid(), signal.SIGTERM)
         await asyncio.sleep(0.2)
         assert not serving.done(), "The standalone worker must finish its lease first"

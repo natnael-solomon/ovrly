@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Contract-wide error shape as fixed in BE-05 (#19). BE-03 (#15) inherits this shape; every endpoint's errors use it.",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Contract-wide error shape as fixed in BE-05 (#19). BE-03 (#15) inherits this shape; every endpoint's errors use it.",
   "title": "Error",
   "description": "Typed error returned when a request is denied or fails. The code is stable and machine-readable; the message is short, English and safe to show in the overlay. Clients map codes and actions they do not know to UNKNOWN and still show the message.",
   "type": "object",

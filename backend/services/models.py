@@ -2,6 +2,7 @@
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -111,4 +112,45 @@ idempotency_keys = Table(
     Column("response_status", Integer, nullable=False),
     Column("response_body", JSONB, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+capture_sessions = Table(
+    "capture_sessions",
+    metadata,
+    Column(
+        "id",
+        UUID(as_uuid=True),
+        ForeignKey("investigations.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("owner_id", UUID(as_uuid=True), ForeignKey("principals.id"), nullable=False),
+    Column("request_key", String(200), nullable=False),
+    Column("chunk_duration_ms", Integer, nullable=False),
+    Column("state", String(16), nullable=False),
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("closed_at", DateTime(timezone=True), nullable=True),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("continue_research", Boolean, nullable=True),
+    Column("duration_ms", Integer, nullable=True),
+    UniqueConstraint("owner_id", "request_key", name="uq_capture_owner_request"),
+)
+
+capture_chunks = Table(
+    "capture_chunks",
+    metadata,
+    Column(
+        "session_id",
+        UUID(as_uuid=True),
+        ForeignKey("capture_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("seq", Integer, primary_key=True),
+    Column("end_ms", Integer, nullable=False),
+    Column("size_bytes", BigInteger, nullable=False),
+    Column("sha256", String(64), nullable=False),
+    Column("content_type", String(128), nullable=False),
+    Column("modality", String(16), nullable=False),
+    Column("storage_key", String(32), nullable=False),
+    Column("received_at", DateTime(timezone=True), nullable=True),
+    Column("job_id", UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True),
 )

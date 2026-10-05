@@ -70,8 +70,42 @@ internal object UploadCodec {
     }
 }
 
-/** Live capture sessions and chunks (schemas published ahead of their endpoints). */
+/** Live capture sessions, chunks and polling (BE-06). */
 internal object CaptureCodec {
+    fun parseCreateRequest(payload: String): CaptureCreateRequest =
+        ContractJson.parse("capture-create request") {
+            ContractJson.strict.decodeFromString(CaptureCreateRequest.serializer(), payload)
+        }
+
+    fun encodeCreateRequest(request: CaptureCreateRequest): String = ContractJson.encode {
+        ContractJson.strict.encodeToString(CaptureCreateRequest.serializer(), request)
+    }
+
+    fun parseCloseRequest(payload: String): CaptureCloseRequest =
+        ContractJson.parse("capture-close request") {
+            ContractJson.strict.decodeFromString(CaptureCloseRequest.serializer(), payload)
+        }
+
+    fun encodeCloseRequest(request: CaptureCloseRequest): String = ContractJson.encode {
+        ContractJson.strict.encodeToString(CaptureCloseRequest.serializer(), request)
+    }
+
+    fun parseMetadata(payload: String): CaptureMetadata = ContractJson.parse("capture metadata") {
+        ContractJson.strict.decodeFromString(CaptureMetadata.serializer(), payload)
+    }
+
+    fun encodeMetadata(metadata: CaptureMetadata): String = ContractJson.encode {
+        ContractJson.strict.encodeToString(CaptureMetadata.serializer(), metadata)
+    }
+
+    fun parseStatus(payload: String): CaptureStatus = ContractJson.parse("capture status") {
+        ContractJson.tolerant.decodeFromString(CaptureStatus.serializer(), payload)
+    }
+
+    fun encodeStatus(status: CaptureStatus): String = ContractJson.encode {
+        ContractJson.tolerant.encodeToString(CaptureStatus.serializer(), status)
+    }
+
     fun parseSession(payload: String): CaptureSession = ContractJson.parse("capture session") {
         ContractJson.tolerant.decodeFromString(CaptureSession.serializer(), payload)
     }
