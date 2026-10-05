@@ -70,8 +70,8 @@ internal object UploadCodec {
     }
 }
 
-/** Live capture sessions, chunks and polling (BE-06). */
-internal object CaptureCodec {
+/** Live capture creation, close, multipart metadata and polling (BE-06). */
+internal object CaptureApiCodec {
     fun parseCreateRequest(payload: String): CaptureCreateRequest =
         ContractJson.parse("capture-create request") {
             ContractJson.strict.decodeFromString(CaptureCreateRequest.serializer(), payload)
@@ -105,7 +105,10 @@ internal object CaptureCodec {
     fun encodeStatus(status: CaptureStatus): String = ContractJson.encode {
         ContractJson.tolerant.encodeToString(CaptureStatus.serializer(), status)
     }
+}
 
+/** Live capture session and chunk models. */
+internal object CaptureCodec {
     fun parseSession(payload: String): CaptureSession = ContractJson.parse("capture session") {
         ContractJson.tolerant.decodeFromString(CaptureSession.serializer(), payload)
     }

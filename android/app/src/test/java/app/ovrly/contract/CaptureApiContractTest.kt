@@ -11,7 +11,7 @@ class CaptureApiContractTest {
     fun pendingCaptureIsNotACompletedOrNoClaimsFinding() {
         val fixture = ContractFixtures.load(ContractFixtures.INTAKE)
             .single { it.name == "capture-status-waiting" }
-        val status = CaptureCodec.parseStatus(fixture.responsePayload())
+        val status = CaptureApiCodec.parseStatus(fixture.responsePayload())
         assertFalse(status.session.isOpen)
         assertEquals("not_started", status.claimExtractionStatus)
         assertTrue(status.claims.isEmpty())
@@ -29,34 +29,34 @@ class CaptureApiContractTest {
 
     @Test
     fun createAndCloseRequestsHaveStrictTypesAndBounds() {
-        assertEquals(CaptureCreateRequest(), CaptureCodec.parseCreateRequest("{}"))
+        assertEquals(CaptureCreateRequest(), CaptureApiCodec.parseCreateRequest("{}"))
         assertEquals(
             CaptureCreateRequest(5000),
-            CaptureCodec.parseCreateRequest(
-                CaptureCodec.encodeCreateRequest(CaptureCreateRequest(5000))
+            CaptureApiCodec.parseCreateRequest(
+                CaptureApiCodec.encodeCreateRequest(CaptureCreateRequest(5000))
             )
         )
         assertEquals(
             CaptureCloseRequest(false),
-            CaptureCodec.parseCloseRequest("""{"continue_research":false}""")
+            CaptureApiCodec.parseCloseRequest("""{"continue_research":false}""")
         )
-        for (payload in listOf(
+        listOf(
             """{"chunk_duration_ms":999}""",
             """{"chunk_duration_ms":30001}""",
             """{"chunk_duration_ms":"10000"}""",
             """{"owner_id":"not-allowed"}"""
-        )) {
+        ).forEach { payload ->
             assertThrows(ContractParseException::class.java) {
-                CaptureCodec.parseCreateRequest(payload)
+                CaptureApiCodec.parseCreateRequest(payload)
             }
         }
-        for (payload in listOf(
+        listOf(
             """{}""",
             """{"continue_research":"false"}""",
             """{"continue_research":true,"duration_ms":180001}"""
-        )) {
+        ).forEach { payload ->
             assertThrows(ContractParseException::class.java) {
-                CaptureCodec.parseCloseRequest(payload)
+                CaptureApiCodec.parseCloseRequest(payload)
             }
         }
     }

@@ -10,13 +10,19 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 
+private const val MIN_CHUNK_DURATION_MS = 1_000
+private const val MAX_CHUNK_DURATION_MS = 30_000
+private const val MAX_CAPTURE_DURATION_MS = 180_000
+
 @Serializable
 internal data class CaptureCreateRequest(
     @SerialName("chunk_duration_ms")
     val chunkDurationMs: Int = 10000
 ) {
     init {
-        require(chunkDurationMs in 1000..30000) { "chunk_duration_ms must be 1000..30000" }
+        require(chunkDurationMs in MIN_CHUNK_DURATION_MS..MAX_CHUNK_DURATION_MS) {
+            "chunk_duration_ms must be 1000..30000"
+        }
     }
 }
 
@@ -28,7 +34,7 @@ internal data class CaptureCloseRequest(
     val durationMs: Int? = null
 ) {
     init {
-        require(durationMs == null || durationMs in 0..180000) {
+        require(durationMs == null || durationMs in 0..MAX_CAPTURE_DURATION_MS) {
             "duration_ms must be 0..180000"
         }
     }
@@ -61,7 +67,7 @@ internal data class CaptureManifest(
     val declaredCoverage: CaptureModalityCoverage
 ) {
     init {
-        require(durationMs in 0..180000)
+        require(durationMs in 0..MAX_CAPTURE_DURATION_MS)
         missingIntervals.forEach { require(it.timebase == Timebase.CAPTURE) }
     }
 }

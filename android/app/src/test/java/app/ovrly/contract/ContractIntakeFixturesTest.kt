@@ -198,8 +198,8 @@ class ContractIntakeFixturesTest {
         COMPLETE_REQUEST -> UploadCodec.encodeCompleteRequest(request as UploadCompleteRequest)
         CREATE_REQUEST -> encodeCreate(request as InvestigationCreateRequest)
         CHUNK_REQUEST -> CaptureCodec.encodeChunkRequest(request as CaptureChunkRequest)
-        CLOSE_REQUEST -> CaptureCodec.encodeCloseRequest(request as CaptureCloseRequest)
-        METADATA -> CaptureCodec.encodeMetadata(request as CaptureMetadata)
+        CLOSE_REQUEST -> CaptureApiCodec.encodeCloseRequest(request as CaptureCloseRequest)
+        METADATA -> CaptureApiCodec.encodeMetadata(request as CaptureMetadata)
         else -> error("no request codec is mapped to $schema")
     }
 
@@ -214,7 +214,7 @@ class ContractIntakeFixturesTest {
         INVESTIGATION -> InvestigationCodec.encodeInvestigation(response as Investigation)
         SESSION -> CaptureCodec.encodeSession(response as CaptureSession)
         CHUNK -> CaptureCodec.encodeChunk(response as CaptureChunk)
-        STATUS -> CaptureCodec.encodeStatus(response as CaptureStatus)
+        STATUS -> CaptureApiCodec.encodeStatus(response as CaptureStatus)
         else -> error("no read-model codec is mapped to $schema")
     }
 
@@ -240,8 +240,8 @@ class ContractIntakeFixturesTest {
             COMPLETE_REQUEST to UploadCodec::parseCompleteRequest,
             CREATE_REQUEST to InvestigationCodec::parseCreateRequest,
             CHUNK_REQUEST to CaptureCodec::parseChunkRequest,
-            CLOSE_REQUEST to CaptureCodec::parseCloseRequest,
-            METADATA to CaptureCodec::parseMetadata
+            CLOSE_REQUEST to CaptureApiCodec::parseCloseRequest,
+            METADATA to CaptureApiCodec::parseMetadata
         )
 
         val RESPONSE_PARSERS: Map<String, (String) -> Any> = mapOf(
@@ -250,7 +250,7 @@ class ContractIntakeFixturesTest {
             INVESTIGATION to InvestigationCodec::parseInvestigation,
             SESSION to CaptureCodec::parseSession,
             CHUNK to CaptureCodec::parseChunk,
-            STATUS to CaptureCodec::parseStatus
+            STATUS to CaptureApiCodec::parseStatus
         )
 
         val INTAKE_FIXTURES = setOf(

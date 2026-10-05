@@ -120,7 +120,7 @@ workarounds. API calls, authentication, Room and UI integration are #18.
 
 ## Capture endpoint contract
 
-BE-06 adds `CaptureCodec.parseCreateRequest`, `parseCloseRequest`, `parseMetadata`
+BE-06 adds `CaptureApiCodec.parseCreateRequest`, `parseCloseRequest`, `parseMetadata`
 and `parseStatus`, with matching encoders and strict typed models. The shared
 intake fixtures include the multipart metadata envelope and waiting status with
 a missing tail. `InvestigationSource.Capture` is supported on reads but rejected
