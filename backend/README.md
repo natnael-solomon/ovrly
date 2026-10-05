@@ -130,7 +130,8 @@ and idempotency tables defined in `services/models.py`, `0004_job_retries`
 adds the retry class, per-class retry counters and the provider request id to
 `jobs`, `0005_account_link` adds `google_sub` (unique), `merged_into` and
 `merged_at` to `principals`, and `0006_job_ownership` adds the nullable
-`owner_id` and `cancel_outcome` columns to `jobs`. Future schema changes require a reviewed migration
+`owner_id` and `cancel_outcome` columns to `jobs`. `0007_captures` adds capture
+sessions and chunk reservations/receipts. Future schema changes require a reviewed migration
 and upgrade/downgrade coverage, not `create_all()` during API startup.
 
 ### Durable jobs and recovery
@@ -344,6 +345,71 @@ These run in Backend checks; deletion/late-callback cases also run in Backend
 recovery. The [PDP Articles 18-22 checklist](../docs/operations/pdp-checklist.md)
 records unresolved transfer/sovereignty gates and is not legal advice.
 No provider erasure, backup cleanup, deployment or policy approval is claimed.
+
+## Incremental capture API
+
+BE-06 (#24), AC01/AC03/AC04, contract `0.2.0-draft`. These are draft contract choices, not a
+claim of product-owner acceptance; Android and backend review is required.
+The existing `CaptureSession` and `CaptureChunk` wire shapes are unchanged.
+
+| Route | Behavior |
+| --- | --- |
+| `POST /v1/captures` | Bearer + `Idempotency-Key`, JSON `{}` or `{"chunk_duration_ms":10000}` (1000..30000). Creates a session and a capture-source investigation with the same UUID. Returns 201. Same owner/key/duration replays the original empty/open response; a changed duration conflicts. |
+| `PUT /v1/captures/{id}/chunks/{seq}` | Multipart with exactly a `metadata` text part containing UTF-8 JSON `{"chunk":<CaptureChunkRequest>,"modality":"speech|text|both"}` and a `content` file part. Verifies actual size/hash, persists the receipt and enqueues one owner-scoped `media_validation` job atomically. Returns 200 with stored/out_of_order/duplicate. |
+| `POST /v1/captures/{id}/close` | JSON `{"continue_research":true}` with optional `duration_ms`. False cooperatively cancels unfinished chunk jobs; true keeps them. Published results are retained. Replays return the same closed session; a different effective duration/choice returns 409. |
+| `GET /v1/captures/{id}` | Session, continuation choice, expiry, manifest, per-chunk work and typed per-claim progress envelope. Missing/foreign resources return the same 404. |
+
+The server enforces **180000ms on the capture-relative media timeline**, not a
+180-second HTTP transfer deadline. Chunk n starts at n * chunk_duration_ms.
+Only the final chunk may be shorter; no later sequence can be reserved.
+Out-of-order chunks are accepted; only verified receipts count in `received_ms`
+and sequence gaps below `highest_seq`. Duplicates must match metadata and
+actual bytes; they preserve `received_at`, return **current** gaps and never
+write/enqueue twice. Different content returns `CAPTURE_CHUNK_CONFLICT`.
+
+New bytes must finish within 180 seconds plus `OVRLY_UPLOAD_TARGET_SECONDS`
+after session creation (default total 18 minutes), allowing bounded buffered
+delivery. Expired open sessions read as `abandoned`, using the durable deadline
+as `closed_at`. New chunks after expiry return 410; after explicit close, 409.
+Identical stored retries and an explicit close remain available after expiry.
+Expiration stops intake, not already queued work.
+
+Close's optional duration defaults to the highest received end, zero if empty.
+Supply the actual duration to disclose missing trailing intervals; it cannot
+truncate received media or extend a short final chunk. Unknown unsent tails
+cannot be inferred. The manifest's `declared_coverage` lists captured intervals
+for speech/text as declared by the client, **not** verified extraction or
+assessment. `both` describes one media object carrying both modalities; separate
+audio/frame streams must be packaged before using this transport.
+
+Each accepted chunk is available to the worker before close. Both worker modes
+register `CaptureProcessor`, which re-verifies stored bytes under a session lock
+and publishes a durable validation result. **ASR, OCR and claim analysis remain
+#20/#25/#27/#29**: a published validation job still reads `waiting`, with empty
+`claims` and `claim_extraction_status: not_started`, never complete/no-claims.
+The per-claim envelope is typed for the pipeline handoff; no synthetic finding
+is emitted by the API. Android codecs mirror the additions, but device upload
+and polling integration remain AN-07.
+
+The existing upload byte budget applies to the whole session, including pending
+reservations. Multipart metadata is limited to 8192 bytes and total transport
+to the byte budget plus 16384 bytes. A persistent reservation commits before
+writing to the shared `UploadStore`, then receipt and job commit together.
+Storage/queue failure leaves a tracked pending key that can be retried, not a
+successful receipt or an orphan. Session locks serialize upload commits, Stop,
+worker reads and retention. Polling instead uses a read-only repeatable-read snapshot without
+row locks, so uploads and validation do not block it and its session/chunks/jobs
+still describe one committed snapshot. Multipart parsing failures are cleaned
+up by Starlette; returned forms are closed through its public API on every exit.
+Regression tests cover partial parses, validation failure and cancellation.
+There is no filesystem/PostgreSQL distributed
+transaction. Opt-in retention removes all guest capture bytes with the workspace
+and cleans unacknowledged reservations after close/expiry even for accounts.
+Accepted account content remains excluded by BC-D06.
+
+Run `uv run --frozen pytest -q tests/recovery/test_captures.py` with the local
+test database configured. The tests use synthetic bytes only; no provider calls,
+physical capture evidence, deployment or retention-policy approval is implied.
 
 ## Identity and intake API
 

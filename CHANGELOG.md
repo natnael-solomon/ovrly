@@ -4,6 +4,18 @@
 
 ### Added
 
+- Incremental backend capture sessions with owner-scoped multipart chunk intake,
+  durable duplicate receipts, gap/modality manifests, a 180000ms timeline cap,
+  explicit Stop continuation and polling. Each chunk enters the durable queue
+  before close; byte validation is implemented, while ASR/OCR/claim analysis
+  remains separate. Capture storage participates in opt-in retention. Shared
+  schemas, Android codecs and synthetic recovery cases cover the new contract.
+  Contract `0.2.0-draft` adds the capture investigation source; older clients
+  must be updated to parse that response branch.
+  Capture polling uses a non-locking consistent database snapshot and
+  forward-compatible extraction progress; create/close schemas enforce duration
+  bounds. Multipart cleanup uses the public form API, and chunk jobs are indexed.
+
 - Device and provider compatibility matrix (`docs/compatibility.md`) from an Android 12 device run: overlay, playback audio, readable frames and lifecycle cases for YouTube Shorts, TikTok and Instagram Reels, plus `scripts/device_matrix_pull.ps1` to pull a cell's local evidence. BC-D02 records the advertised providers and devices.
 
 - Opt-in backend privacy retention jobs with shared job-deletion fencing,

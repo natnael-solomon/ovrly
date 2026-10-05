@@ -54,6 +54,8 @@ def _source(row: Row[Any]) -> dict[str, Any]:
     source: dict[str, Any] = {"kind": row.source_kind}
     if row.source_kind == "url":
         source["url"] = row.source_url
+    elif row.source_kind == "capture":
+        source["capture_id"] = str(row.id)
     else:
         source["upload_id"] = str(row.upload_id)
     if row.declared_duration_ms is not None:

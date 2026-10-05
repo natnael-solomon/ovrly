@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.1.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py InvestigationReadModel: the nine InvestigationResponse fields that GET /v1/investigations/{id} returns today plus processing_status, job and report. The live route adopts the three new fields in #19 part 2 / #33; the round-trip fixtures under fixtures/results are produced from the Pydantic model.",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py InvestigationReadModel: the nine InvestigationResponse fields that GET /v1/investigations/{id} returns today plus processing_status, job and report. The live route adopts the three new fields in #19 part 2 / #33; the round-trip fixtures under fixtures/results are produced from the Pydantic model.",
   "title": "Investigation",
   "description": "Read model of one investigation (a check), returned by POST /v1/investigations (202), GET /v1/investigations/{id} and as items of GET /v1/investigations. Processing progress (processing_status), the coarse stored state, the current job and the published report are separate fields: a failed or cancelled investigation carries an error and no report, so a failure can never be read as a finding. Clients map unknown state, stage, processing_status, job and report enum values to UNKNOWN and keep reading the rest of the payload.",
   "type": "object",
@@ -107,8 +107,18 @@
       }
     },
     "source": {
-      "description": "Echo of the accepted source. Same union as investigation-create-request.schema.json, except that duration_ms is omitted when it was not declared instead of being null.",
-      "oneOf": [{ "$ref": "#/$defs/url_source" }, { "$ref": "#/$defs/upload_source" }]
+      "description": "Echo of the accepted source. URL/upload match investigation-create-request.schema.json, with duration_ms omitted when undeclared. Capture sources are created by POST /v1/captures, never by the shared-media create endpoint.",
+      "oneOf": [{ "$ref": "#/$defs/url_source" }, { "$ref": "#/$defs/upload_source" }, { "$ref": "#/$defs/capture_source" }]
+    },
+    "capture_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "capture_id"],
+      "properties": {
+        "kind": { "$ref": "enums.schema.json#/$defs/source_kind", "const": "capture" },
+        "capture_id": { "$ref": "common.schema.json#/$defs/uuid" },
+        "duration_ms": { "type": "integer" }
+      }
     },
     "url_source": {
       "type": "object",

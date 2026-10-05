@@ -128,6 +128,28 @@ class ContractEnumsTest {
         Mirror(CaptureSession.serializer().descriptor, "capture-session.schema.json"),
         Mirror(CaptureChunkRequest.serializer().descriptor, "capture-chunk-request.schema.json"),
         Mirror(CaptureChunk.serializer().descriptor, "capture-chunk.schema.json"),
+        Mirror(CaptureCreateRequest.serializer().descriptor, "capture-create-request.schema.json"),
+        Mirror(CaptureCloseRequest.serializer().descriptor, "capture-close-request.schema.json"),
+        Mirror(CaptureMetadata.serializer().descriptor, "capture-metadata.schema.json"),
+        Mirror(CaptureStatus.serializer().descriptor, "capture-status.schema.json"),
+        Mirror(CaptureManifest.serializer().descriptor, "capture-status.schema.json", "manifest"),
+        Mirror(
+            CaptureModalityCoverage.serializer().descriptor,
+            "capture-status.schema.json",
+            "modality_coverage"
+        ),
+        Mirror(CaptureWork.serializer().descriptor, "capture-status.schema.json", "work"),
+        Mirror(
+            CaptureClaimState.serializer().descriptor,
+            "capture-status.schema.json",
+            "claim_state"
+        ),
+        Mirror(
+            InvestigationSource.Capture.serializer().descriptor,
+            INVESTIGATION,
+            "capture_source",
+            KIND
+        ),
         Mirror(ContractError.serializer().descriptor, "error.schema.json")
     )
 

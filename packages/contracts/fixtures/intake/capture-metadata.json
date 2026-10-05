@@ -1,0 +1,17 @@
+{
+  "synthetic": true,
+  "description": "Synthetic multipart metadata envelope for a chunk containing both modalities; no media or research findings.",
+  "schemas": { "request": "capture-metadata.schema.json" },
+  "expect": { "request": "valid" },
+  "request": {
+    "chunk": {
+      "session_id": "00000000-0000-4000-8000-000000000501",
+      "seq": 0,
+      "interval": { "start_ms": 0, "end_ms": 10000, "timebase": "capture" },
+      "size_bytes": 22,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "content_type": "video/mp4"
+    },
+    "modality": "both"
+  }
+}

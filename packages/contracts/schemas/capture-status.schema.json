@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.2.0-draft. Additive BE-06 polling contract; requires Android/backend review.",
+  "title": "CaptureStatus",
+  "description": "Owner-scoped live-capture status. Receipt coverage is not analysis coverage. Open duration is the highest received end; close can declare a longer duration so a missing tail is explicit. Expired open sessions read abandoned with closed_at equal to expires_at. Currently media validation runs incrementally, but ASR/OCR/claim extraction are separate pipeline work: published validation jobs remain waiting, claims stays empty and claim_extraction_status is not_started. Empty claims is not a no-claims finding.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session", "continue_research", "expires_at", "manifest", "work", "claims", "claim_extraction_status"],
+  "properties": {
+    "session": { "$ref": "capture-session.schema.json" },
+    "continue_research": { "oneOf": [{ "type": "null" }, { "type": "boolean" }] },
+    "expires_at": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "Creation time plus 180 seconds plus the configured upload-target grace (default 900 seconds). The media timeline itself can never exceed 180000ms. New bytes must finish by this deadline; stored duplicate retries and close remain available afterwards."
+    },
+    "manifest": { "$ref": "#/$defs/manifest" },
+    "work": { "type": "array", "items": { "$ref": "#/$defs/work" } },
+    "claims": { "type": "array", "items": { "$ref": "#/$defs/claim_state" } },
+    "claim_extraction_status": { "$ref": "enums.schema.json#/$defs/coverage_status" }
+  },
+  "$defs": {
+    "capture_interval": {
+      "allOf": [
+        { "$ref": "common.schema.json#/$defs/interval" },
+        { "properties": { "timebase": { "type": "string", "const": "capture" } } }
+      ]
+    },
+    "modality_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["speech", "text"],
+      "properties": {
+        "speech": { "type": "array", "items": { "$ref": "#/$defs/capture_interval" } },
+        "text": { "type": "array", "items": { "$ref": "#/$defs/capture_interval" } }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["duration_ms", "missing_intervals", "declared_coverage"],
+      "properties": {
+        "duration_ms": { "type": "integer" },
+        "missing_intervals": { "type": "array", "items": { "$ref": "#/$defs/capture_interval" } },
+        "declared_coverage": { "$ref": "#/$defs/modality_coverage" }
+      }
+    },
+    "work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "job_id", "processing_status", "error"],
+      "properties": {
+        "seq": { "type": "integer" },
+        "job_id": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/uuid" }] },
+        "processing_status": { "$ref": "enums.schema.json#/$defs/processing_status" },
+        "error": { "oneOf": [{ "type": "null" }, { "$ref": "investigation.schema.json#/$defs/safe_error" }] }
+      }
+    },
+    "claim_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "processing_status", "error"],
+      "properties": {
+        "claim_id": { "$ref": "common.schema.json#/$defs/opaque_id" },
+        "processing_status": { "$ref": "enums.schema.json#/$defs/processing_status" },
+        "error": { "oneOf": [{ "type": "null" }, { "$ref": "investigation.schema.json#/$defs/safe_error" }] }
+      }
+    }
+  }
+}

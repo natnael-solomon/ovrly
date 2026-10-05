@@ -12,8 +12,8 @@ import kotlinx.serialization.UseSerializers
 
 /*
  * Typed models for `capture-session.schema.json`, `capture-chunk-request.schema.json` and
- * `capture-chunk.schema.json` (contract 0.1.0-draft). Hand-authored schemas: no endpoint
- * serves them yet. Every interval is on the `capture` timebase, and the duplicate and
+ * `capture-chunk.schema.json` (contract 0.2.0-draft). The BE-06 endpoints serve these models.
+ * Every interval is on the `capture` timebase, and the duplicate and
  * out-of-order rules travel as data. Parse and encode with [CaptureCodec].
  */
 

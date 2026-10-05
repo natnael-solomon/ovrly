@@ -56,7 +56,7 @@ Unit tests cover palette contrast, fallback decisions and demo-entry policy. The
 
 `/healthz` checks the database and, when enabled, the embedded worker. Failures return a safe 503; failed embedded-worker startup prevents API startup. API-only readiness does not monitor a separate worker. Shutdown stops owned tasks, finishes or releases the worker's in-flight lease and closes database connections.
 
-Jobs live in PostgreSQL with an idempotent stage key `(version, stage, input hash)`, are claimed with `FOR UPDATE SKIP LOCKED` and carry a lease with a fencing token plus a cancellation/deletion generation. Publishing a stage result is compare-and-set against both, in the same transaction as the result row, so a stale or late worker can never publish. The state machine (queued, leased, running, published, cancelled, deleted, failed, with requested versus effective cancellation) is property-tested. Stage handlers report failures as typed retry classes (transient, rate limited, non-retriable input, invalid model schema, unknown outcome); the worker schedules bounded, jittered retries through the job's availability time and records the class on exhaustion. An unknown outcome is retried only when the handler recorded the provider request id before the call, so the next attempt reconciles by id instead of calling again. Database or network errors during a stage leave the outcome unknown: the lease is released or expires and the job is re-leased, never failed. Recovery cases run in CI as **Backend recovery**, including owner isolation and API-driven cancel/delete; see the [backend README](../backend/README.md#durable-jobs-and-recovery). The `intake` stage is the only production stage and media stages are later tasks. Nothing here establishes hosting entitlement.
+Jobs live in PostgreSQL with an idempotent stage key `(version, stage, input hash)`, are claimed with `FOR UPDATE SKIP LOCKED` and carry a lease with a fencing token plus a cancellation/deletion generation. Publishing a stage result is compare-and-set against both, in the same transaction as the result row, so a stale or late worker can never publish. The state machine (queued, leased, running, published, cancelled, deleted, failed, with requested versus effective cancellation) is property-tested. Stage handlers report failures as typed retry classes (transient, rate limited, non-retriable input, invalid model schema, unknown outcome); the worker schedules bounded, jittered retries through the job's availability time and records the class on exhaustion. An unknown outcome is retried only when the handler recorded the provider request id before the call, so the next attempt reconciles by id instead of calling again. Database or network errors during a stage leave the outcome unknown: the lease is released or expires and the job is re-leased, never failed. Recovery cases run in CI as **Backend recovery**, including owner isolation and API-driven cancel/delete; see the [backend README](../backend/README.md#durable-jobs-and-recovery). The `intake` stage confirms shared-media intake; capture `media_validation` verifies stored chunk bytes. Codec/media analysis and research stages are later tasks. Nothing here establishes hosting entitlement.
 
 `services/api/routes/jobs.py` exposes owner-scoped cancellation and deletion.
 Migration `0006_job_ownership` gives jobs nullable principal ownership and a
@@ -96,11 +96,24 @@ Backend CI checks the frozen environment, lint/types, PostgreSQL/migrations and 
 
 ## Future integration boundary
 
+BE-06 live capture uses `capture_sessions` and `capture_chunks` under one
+investigation/owner. The API reserves a persistent byte key before writing,
+then commits each verified receipt and `media_validation` job together.
+Capture polling reports missing intervals and client-declared speech/text
+coverage, separately from processing. Both worker modes verify each chunk's
+stored bytes before close; they do not yet transcribe or extract claims.
+Session row locks serialize byte commits, Stop and retention, while queue
+fencing prevents cancelled/deleted work from publishing. See the
+[capture API](../backend/README.md#incremental-capture-api) for transport,
+deadlines and replay semantics. Android has matching codecs, not network wiring.
+`CaptureApiCodec` handles the create/close bodies, multipart metadata and polling
+envelope; `CaptureCodec` retains the existing session/chunk parsers.
+
 Before connecting Android, agree a versioned API contract with validated schemas and compatibility tests: captured intervals, timestamped segments, ordered claims, evidence citations, job states, cancellation and explicit errors. FastAPI exposes bootstrap OpenAPI, health and the `/v1` identity and intake endpoints. That contract lives in [`packages/contracts`](../packages/contracts/README.md): the voice-actions slice, the shared error shape, the upload, investigation, job, capture-session, report-version, claim, evidence and assessment schemas with one `$def` per enum, six result fixtures generated from the backend read models, intake samples, and a hand-maintained OpenAPI 3.1 document whose schemas reference those files. The required **Contract checks** workflow validates all of it (spectral, oasdiff against the base, server round trip, Android contract tests) on every PR.
 
 `packages/contracts` is the single source for that contract. The Android `contract` package parses every schema in it with production parsers (`VoiceActionCodec`, `InvestigationCodec`, `UploadCodec`, `CaptureCodec`), one Kotlin enum per contract enum with an `UNKNOWN` fallback that is never a success state, and constructors that enforce the schema rules, including the investigation `oneOf` branches so a failure is never read as a finding; its unit tests read the committed fixtures and schemas directly through Gradle test resources and cross-check the enums and model members against them, see the [Android README](../android/README.md#contract-models-and-fixtures). This is the #62 deliverable of #15; no endpoint is called, and networking, Room and reconciliation are #18.
 
-Hosted model weights stay with the provider. Credentials stay on the server; prompts and adapters belong in the backend. Evaluation fixtures live in root `evaluation/`, independently of backend implementation. Voxide remains a separate companion-navigation path. The directory layout enables no capture upload.
+Hosted model weights stay with the provider. Credentials stay on the server; prompts and adapters belong in the backend. Evaluation fixtures live in root `evaluation/`, independently of backend implementation. Voxide remains a separate companion-navigation path. The capture transport is implemented on the backend; Android capture-to-network wiring remains separate work.
 
 ## Evaluation-data boundary
 

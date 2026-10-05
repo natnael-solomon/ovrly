@@ -15,7 +15,7 @@ from services.database import Database
 from services.jobs.handlers import JobContext
 from services.jobs.models import jobs
 from services.jobs.queue import ClaimedJob, JobQueue, StageKey
-from services.models import investigations, principals, uploads
+from services.models import capture_chunks, capture_sessions, investigations, principals, uploads
 from services.settings import Settings
 from services.storage import UploadStore
 
@@ -112,6 +112,31 @@ class Retention:
                 ).all()
                 for upload in stored:
                     await self.store.delete(upload.storage_key)
+                sessions: Sequence[UUID] = (
+                    (
+                        await connection.execute(
+                            select(capture_sessions.c.id)
+                            .where(capture_sessions.c.owner_id == owner_id)
+                            .order_by(capture_sessions.c.id)
+                            .with_for_update()
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                captured: Sequence[str] = (
+                    (
+                        await connection.execute(
+                            select(capture_chunks.c.storage_key).where(
+                                capture_chunks.c.session_id.in_(sessions)
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                for storage_key in captured:
+                    await self.store.delete(storage_key)
                 counts["jobs"] += await self._delete_jobs(connection, owner_id)
                 # Idempotency responses cascade with investigations; credentials with owners.
                 await connection.execute(
@@ -122,6 +147,43 @@ class Retention:
             counts["principals"] += 1
             counts["uploads"] += len(stored)
 
+        await context.heartbeat()
+        async with self.database.engine.begin() as connection:
+            expired_captures: Sequence[UUID] = (
+                (
+                    await connection.execute(
+                        select(capture_sessions.c.id)
+                        .where(
+                            (capture_sessions.c.expires_at <= now)
+                            | (capture_sessions.c.state == "closed")
+                        )
+                        .where(
+                            select(capture_chunks.c.seq)
+                            .where(
+                                capture_chunks.c.session_id == capture_sessions.c.id,
+                                capture_chunks.c.received_at.is_(None),
+                            )
+                            .exists()
+                        )
+                        .order_by(capture_sessions.c.id)
+                        .limit(self.settings.retention_batch_size)
+                        .with_for_update(skip_locked=True)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for capture_id in expired_captures:
+                pending = capture_chunks.c.session_id == capture_id
+                pending &= capture_chunks.c.received_at.is_(None)
+                keys: Sequence[str] = (
+                    (await connection.execute(select(capture_chunks.c.storage_key).where(pending)))
+                    .scalars()
+                    .all()
+                )
+                for key in keys:
+                    await self.store.delete(key)
+                await connection.execute(delete(capture_chunks).where(pending))
         await context.heartbeat()
         async with self.database.engine.begin() as connection:
             expired_uploads = (

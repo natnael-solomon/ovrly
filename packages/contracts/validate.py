@@ -13,6 +13,7 @@ fixture contradicts its own expectations (status, state, counts, references, ids
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 from collections.abc import Iterator
@@ -90,6 +91,9 @@ KEYWORDS = {
     "minLength",
     "maxLength",
     "pattern",
+    "minimum",
+    "maximum",
+    "default",
 }
 TYPES = {"object", "array", "string", "integer", "number", "boolean", "null"}
 EXPECTATIONS = {"valid", "invalid", "unknown-enum"}
@@ -188,6 +192,14 @@ class Validator:
                     type(schema[key]) is int and schema[key] >= 0,
                     location,
                     f"{key} must be a nonnegative integer",
+                )
+        for key in ("minimum", "maximum"):
+            if key in schema:
+                require(
+                    type(schema[key]) is int
+                    or (type(schema[key]) is float and math.isfinite(schema[key])),
+                    location,
+                    f"{key} must be a finite number",
                 )
         if "additionalProperties" in schema:
             require(
@@ -312,6 +324,11 @@ class Validator:
                 require(
                     re.search(schema["pattern"], value) is not None, location, "pattern mismatch"
                 )
+        if type(value) in (int, float):
+            if "minimum" in schema:
+                require(value >= schema["minimum"], location, "number below minimum")
+            if "maximum" in schema:
+                require(value <= schema["maximum"], location, "number above maximum")
         for index, child in enumerate(schema.get("allOf", [])):
             self._validate(value, child, file, f"{location}<allOf[{index}]>", relax)
         if "oneOf" in schema:

@@ -198,6 +198,8 @@ class ContractIntakeFixturesTest {
         COMPLETE_REQUEST -> UploadCodec.encodeCompleteRequest(request as UploadCompleteRequest)
         CREATE_REQUEST -> encodeCreate(request as InvestigationCreateRequest)
         CHUNK_REQUEST -> CaptureCodec.encodeChunkRequest(request as CaptureChunkRequest)
+        CLOSE_REQUEST -> CaptureApiCodec.encodeCloseRequest(request as CaptureCloseRequest)
+        METADATA -> CaptureApiCodec.encodeMetadata(request as CaptureMetadata)
         else -> error("no request codec is mapped to $schema")
     }
 
@@ -212,6 +214,7 @@ class ContractIntakeFixturesTest {
         INVESTIGATION -> InvestigationCodec.encodeInvestigation(response as Investigation)
         SESSION -> CaptureCodec.encodeSession(response as CaptureSession)
         CHUNK -> CaptureCodec.encodeChunk(response as CaptureChunk)
+        STATUS -> CaptureApiCodec.encodeStatus(response as CaptureStatus)
         else -> error("no read-model codec is mapped to $schema")
     }
 
@@ -228,12 +231,17 @@ class ContractIntakeFixturesTest {
         const val INVESTIGATION = "investigation.schema.json"
         const val SESSION = "capture-session.schema.json"
         const val CHUNK = "capture-chunk.schema.json"
+        const val CLOSE_REQUEST = "capture-close-request.schema.json"
+        const val METADATA = "capture-metadata.schema.json"
+        const val STATUS = "capture-status.schema.json"
 
         val REQUEST_PARSERS: Map<String, (String) -> Any> = mapOf(
             DECLARE_REQUEST to UploadCodec::parseDeclareRequest,
             COMPLETE_REQUEST to UploadCodec::parseCompleteRequest,
             CREATE_REQUEST to InvestigationCodec::parseCreateRequest,
-            CHUNK_REQUEST to CaptureCodec::parseChunkRequest
+            CHUNK_REQUEST to CaptureCodec::parseChunkRequest,
+            CLOSE_REQUEST to CaptureApiCodec::parseCloseRequest,
+            METADATA to CaptureApiCodec::parseMetadata
         )
 
         val RESPONSE_PARSERS: Map<String, (String) -> Any> = mapOf(
@@ -241,21 +249,24 @@ class ContractIntakeFixturesTest {
             COMPLETE_RESPONSE to UploadCodec::parseUpload,
             INVESTIGATION to InvestigationCodec::parseInvestigation,
             SESSION to CaptureCodec::parseSession,
-            CHUNK to CaptureCodec::parseChunk
+            CHUNK to CaptureCodec::parseChunk,
+            STATUS to CaptureApiCodec::parseStatus
         )
 
         val INTAKE_FIXTURES = setOf(
             "capture-chunk-duplicate",
             "capture-chunk-out-of-order",
             "capture-session-open",
+            "capture-status-waiting",
+            "capture-metadata",
             "investigation-create-mixed-source",
             "investigation-create-upload",
             "investigation-create-url",
             "upload-complete",
             "upload-declare"
         )
-        const val VALID_REQUESTS = 6
-        const val VALID_RESPONSES = 7
+        const val VALID_REQUESTS = 8
+        const val VALID_RESPONSES = 8
         val OPTIONAL_KEYS = setOf("duration_ms", "covered_ms", "total_ms", "content_type")
         const val UPLOAD_ID = "00000000-0000-4000-8000-000000000301"
         const val SESSION_ID = "00000000-0000-4000-8000-000000000501"

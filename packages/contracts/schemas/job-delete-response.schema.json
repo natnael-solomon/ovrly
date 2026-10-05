@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "0.1.0-draft",
+  "$comment": "0.2.0-draft",
   "title": "Job deletion receipt",
   "description": "200 after the tombstone, lease revocation and removal of the database job payload/result commit. Cleanup covers only those rows, not uploads, provider copies, external artifacts or backups.",
   "type": "object",

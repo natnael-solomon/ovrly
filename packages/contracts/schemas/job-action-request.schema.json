@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "0.1.0-draft",
+  "$comment": "0.2.0-draft",
   "title": "Job action path parameters",
   "description": "Path parameters for POST /v1/jobs/{job_id}/cancel and DELETE /v1/jobs/{job_id}. Both operations accept no HTTP body.",
   "type": "object",

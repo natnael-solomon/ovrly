@@ -13,7 +13,7 @@ import kotlinx.serialization.json.Json
  */
 internal object ContractJson {
     /** Contract version these models implement; must equal `packages/contracts/VERSION`. */
-    const val CONTRACT_VERSION = "0.1.0-draft"
+    const val CONTRACT_VERSION = "0.2.0-draft"
 
     val strict: Json = Json {
         ignoreUnknownKeys = false

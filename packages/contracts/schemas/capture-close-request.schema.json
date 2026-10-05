@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.2.0-draft. Additive BE-06 endpoint contract; requires Android/backend review.",
+  "title": "CaptureCloseRequest",
+  "description": "Close capture. New chunks are rejected, identical stored retries remain available. True preserves queued research; false requests cooperative cancellation without removing published results. Identical close requests replay; a different effective duration or choice returns CAPTURE_CLOSE_CONFLICT. Close remains available after the upload window expires.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["continue_research"],
+  "properties": {
+    "continue_research": { "type": "boolean" },
+    "duration_ms": {
+      "$ref": "common.schema.json#/$defs/nullable_integer",
+      "minimum": 0,
+      "maximum": 180000,
+      "description": "Final capture-relative duration, 0 through 180000. Omitted/null uses the highest received end (zero if empty). Supply it to expose trailing missing intervals. Cannot truncate received chunks or extend past a received short final chunk."
+    }
+  }
+}

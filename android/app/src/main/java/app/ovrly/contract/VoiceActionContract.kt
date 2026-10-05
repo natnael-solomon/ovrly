@@ -4,7 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /*
- * Typed models for `packages/contracts` version 0.1.0-draft, voice-actions slice
+ * Typed models for `packages/contracts` version 0.2.0-draft, voice-actions slice
  * (`POST /v1/voice/actions`). Field names and limits follow the JSON Schemas under
  * `packages/contracts/schemas`; constructors enforce the schema so an instance that
  * exists is one the contract allows. Parse and encode with [VoiceActionCodec].

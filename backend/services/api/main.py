@@ -32,13 +32,14 @@ def create_app(
 ) -> FastAPI:
     configure_logging()
     config = settings if settings is not None else load_settings()
-    stage_handlers = handlers if handlers is not None else default_handlers()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         database = Database(config)
         retention = Retention(database, config, app.state.upload_store)
-        active_handlers = dict(stage_handlers)
+        active_handlers = dict(
+            handlers if handlers is not None else default_handlers(app.state.upload_store)
+        )
         if config.retention_enabled:
             active_handlers[RETENTION_STAGE] = retention.run
         else:

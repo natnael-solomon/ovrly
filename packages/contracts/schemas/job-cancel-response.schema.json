@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "0.1.0-draft",
+  "$comment": "0.2.0-draft",
   "title": "Job cancellation receipt",
   "description": "200 for effective cancellation, 202 for requested cancellation. Replays preserve the original receipt and status, not current progress. Cancellation does not guarantee a provider stopped or refunded billing.",
   "type": "object",

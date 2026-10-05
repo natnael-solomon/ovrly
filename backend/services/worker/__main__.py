@@ -17,8 +17,9 @@ from services.worker.runtime import Worker
 async def serve() -> None:
     settings = load_settings()
     database = Database(settings)
-    retention = Retention(database, settings, LocalFilesystemStore(settings.storage_dir))
-    handlers = dict(default_handlers())
+    store = LocalFilesystemStore(settings.storage_dir)
+    retention = Retention(database, settings, store)
+    handlers = dict(default_handlers(store))
     if settings.retention_enabled:
         handlers[RETENTION_STAGE] = retention.run
     else:
