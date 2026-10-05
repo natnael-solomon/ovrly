@@ -33,7 +33,11 @@ The real set requires 10-20 English clips. Live-style clips are limited to 180,0
 
 ## Files and commands
 
-Python 3.11+ is sufficient. There are no dependencies, provider calls or uploads. Run from the repository root; use `python3` if needed:
+Python 3.11+ is sufficient for metadata validation and offline scoring; those
+commands have no dependencies, provider calls or uploads. The separate opt-in
+[ASR experiment runner](BENCHMARKS.md#opt-in-hosted-trial-using-existing-srts)
+has explicit dependencies and audio authorization requirements. Run from the
+repository root; use `python3` if needed:
 
 ```text
 python evaluation/validate.py
@@ -280,7 +284,16 @@ plus frozen metadata when `evaluation/corpus/` exists. It fetches no media and
 runs no models. Keep holdout labels out of prompt tuning and routine regression.
 RES-03 will score dev in CI; formal held-out evaluation requires separate authorization.
 
-There is no scoring harness, threshold, ASR/OCR benchmark or network service here.
+The [RES-02 benchmark tooling](BENCHMARKS.md) plans dev-only runs and scores
+ASR/OCR observations. Its separate opt-in hosted runner reuses existing media
+and SRTs, prepares paired 10/15-second chunks, records bounded Groq attempts
+and scores subtitle agreement. It does not regenerate the corpus or BE-01's
+50 extraction windows, select an adapter or implement a production service.
+Local OCR helpers also support pinned Tesseract comparisons on existing
+screenshots, source-video sampling and observation-preserving dedup audits.
+These are workstation measurements, not ML Kit or phone evidence; see the
+[non-phone protocol](BENCHMARKS.md#completed-workstation-evidence-and-reproducible-helpers).
+Claim and evidence scoring and its thresholds remain RES-03.
 RES-01 closes only when the reviewed set is delivered through this section's
 steps. The `frozen-local` snapshot is a reduced-scope local reference with
 pending rights; it is not that delivery. RES-06 remains the historical draft

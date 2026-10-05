@@ -27,7 +27,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Test validator and negative cases
+      - name: Test validator, offline benchmarks and negative cases
         run: python3 -m unittest discover -s evaluation/tests -p 'test_*.py' -v
 
       - name: Validate synthetic examples
@@ -44,6 +44,9 @@ jobs:
 
       - name: Validate owner-approved local frozen corpus
         run: python3 evaluation/validate.py evaluation/corpus-local --frozen-local
+
+      - name: Check RES-02 dev-only benchmark plan
+        run: python3 evaluation/benchmark.py plan
 
       - name: Validate frozen metadata if present
         shell: bash
