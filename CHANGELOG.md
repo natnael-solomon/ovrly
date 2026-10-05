@@ -4,6 +4,8 @@
 
 ### Added
 
+- Device and provider compatibility matrix (`docs/compatibility.md`) from an Android 12 device run: overlay, playback audio, readable frames and lifecycle cases for YouTube Shorts, TikTok and Instagram Reels, plus `scripts/device_matrix_pull.ps1` to pull a cell's local evidence. BC-D02 records the advertised providers and devices.
+
 - Opt-in backend privacy retention jobs with shared job-deletion fencing,
   upload-write locking, workspace/credential/replay cleanup and bounded
   tombstone expiry. Shared content-free API/worker logging and synthetic
