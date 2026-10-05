@@ -152,5 +152,11 @@ capture_chunks = Table(
     Column("modality", String(16), nullable=False),
     Column("storage_key", String(32), nullable=False),
     Column("received_at", DateTime(timezone=True), nullable=True),
-    Column("job_id", UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True),
+    Column(
+        "job_id",
+        UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    ),
 )

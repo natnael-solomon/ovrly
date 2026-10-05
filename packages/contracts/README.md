@@ -518,10 +518,11 @@ as a cheap early signal; the full gate is this workflow. A maintainer adds
 The validator supports only the schema subset used here: `$ref` (local and
 cross-file, including `#/properties/...` paths), `$defs`, `type`, `const`,
 `enum`, `required`, `properties`, boolean `additionalProperties`, `items`,
-`oneOf`, `allOf`, `not`, `minLength`, `maxLength` and `pattern`. Unsupported
-keywords (including `minimum`, `prefixItems`, `if`/`then`) fail closed, which is
-why numeric lower bounds such as a positive `size_bytes` are documented and
-enforced by the server rather than expressed in the schema. Patterns use the
+`oneOf`, `allOf`, `not`, `minLength`, `maxLength`, `pattern`, numeric `minimum`/
+`maximum`, and the annotation-only `default` (never injected into payloads).
+Capture create/close duration bounds are machine-readable and enforced by the
+validator as well as the server. Unsupported keywords (including `prefixItems`,
+`if`/`then`) still fail closed. Patterns use the
 portable subset shared with `evaluation/` (`(?![\s\S])` for strict end of
 input). Adding a feature requires implementing it and a negative test.
 
@@ -553,6 +554,10 @@ schemas and parses those fixtures without networking. A validation-stage result
 is not a research result: `claims: []` plus `claim_extraction_status: not_started`
 does not mean no claims were found. Per-claim pipeline population and actual
 ASR/OCR remain separate work.
+
+`claim_extraction_status` uses the shared `coverage_status` enum. The backend
+currently emits `not_started`; Android accepts `partial`/`complete` and maps
+future values to `UNKNOWN` without discarding the rest of the poll response.
 
 ### Compatibility policy
 

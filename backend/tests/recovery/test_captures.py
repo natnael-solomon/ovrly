@@ -4,10 +4,13 @@ import json
 import uuid
 from dataclasses import replace
 from datetime import timedelta
+from tempfile import SpooledTemporaryFile
 
 import httpx
 import pytest
 from sqlalchemy import delete, func, select, update
+from starlette import formparsers
+from starlette.requests import Request
 from test_intake_api import CONTRACT_VALIDATOR, assert_error, guest
 
 from services.api.main import create_app
@@ -25,6 +28,20 @@ from .harness import ScriptedFaults
 from .test_privacy import expire, sweep
 
 DATA = b"synthetic capture bytes"
+
+
+@pytest.fixture(params=[1024 * 1024, 1], ids=["memory", "disk"])
+def spools(monkeypatch, request):
+    opened = []
+
+    def track(*args, **kwargs):
+        spool = SpooledTemporaryFile(*args, **kwargs)
+        opened.append(spool)
+        return spool
+
+    monkeypatch.setattr(formparsers, "SpooledTemporaryFile", track)
+    monkeypatch.setattr(formparsers.MultiPartParser, "spool_max_size", request.param)
+    return opened
 
 
 @pytest.fixture
@@ -707,3 +724,130 @@ async def test_api_restart_preserves_chunk_and_close_receipts(client, capture_ap
             replay = await put(restarted, headers, session)
             assert replay.json() == {**first.json(), "disposition": "duplicate"}
             assert (await close(restarted, headers, session)).json() == closed.json()
+
+
+async def test_poll_does_not_wait_for_session_writer(client, capture_app):
+    headers = await guest(client)
+    session = await create(client, headers)
+    async with capture_app.state.database.engine.begin() as connection:
+        await connection.execute(
+            update(capture_sessions)
+            .where(capture_sessions.c.id == uuid.UUID(session["id"]))
+            .values(state="closed", continue_research=False)
+        )
+        progress = await asyncio.wait_for(status(client, headers, session), 2)
+        assert progress["session"]["state"] == "open"
+        assert progress["continue_research"] is None
+    assert (await status(client, headers, session))["session"]["state"] == "closed"
+
+
+async def test_poll_keeps_one_snapshot_while_upload_commits(client, capture_app, monkeypatch):
+    headers = await guest(client)
+    session = await create(client, headers)
+    original_chunks_for = capture_routes.chunks_for
+    committed = False
+
+    async def upload_between_reads(connection, capture_id):
+        nonlocal committed
+        if not committed:
+            committed = True
+            assert (await asyncio.wait_for(put(client, headers, session), 2)).status_code == 200
+        return await original_chunks_for(connection, capture_id)
+
+    monkeypatch.setattr(capture_routes, "chunks_for", upload_between_reads)
+    progress = await status(client, headers, session)
+    assert progress["session"]["chunks_received"] == 0
+    assert progress["work"] == []
+    assert progress["manifest"]["duration_ms"] == 0
+    latest = await status(client, headers, session)
+    assert latest["session"]["chunks_received"] == 1
+    assert len(latest["work"]) == 1
+
+
+@pytest.mark.parametrize("failure", ["none", "metadata", "hash"])
+async def test_returned_multipart_form_is_closed(client, spools, failure):
+    headers = await guest(client)
+    session = await create(client, headers)
+    metadata, _ = parts(session)
+    if failure == "metadata":
+        metadata["unexpected"] = True
+    elif failure == "hash":
+        metadata["chunk"]["sha256"] = "0" * 64
+    response = await put(client, headers, session, metadata=metadata)
+    assert response.status_code == {"none": 200, "metadata": 422, "hash": 409}[failure]
+    assert spools
+    assert all(spool.closed for spool in spools)
+
+
+async def test_returned_form_is_closed_on_task_cancellation(capture_app, spools):
+    metadata, data = parts({"id": str(uuid.uuid4()), "chunk_duration_ms": 10000})
+    upload = httpx.Request(
+        "PUT",
+        "http://test",
+        files={
+            "metadata": (None, json.dumps(metadata)),
+            "content": ("chunk.bin", data),
+        },
+    )
+
+    async def receive():
+        return {"type": "http.request", "body": upload.read(), "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "app": capture_app,
+            "headers": [(key.lower(), value) for key, value in upload.headers.raw],
+        },
+        receive=receive,
+    )
+    entered = asyncio.Event()
+
+    async def consume():
+        async with capture_routes.chunk_body(request):
+            entered.set()
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(consume())
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert spools
+    assert all(spool.closed for spool in spools)
+
+
+@pytest.mark.parametrize("failure", [asyncio.CancelledError, OSError])
+async def test_parser_closes_partial_file_when_request_stream_fails(capture_app, spools, failure):
+    calls = 0
+
+    async def receive():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return {
+                "type": "http.request",
+                "body": (
+                    b"--synthetic\r\n"
+                    b'Content-Disposition: form-data; name="content"; filename="chunk.bin"\r\n'
+                    b"Content-Type: application/octet-stream\r\n\r\npartial synthetic bytes"
+                ),
+                "more_body": True,
+            }
+        raise failure()
+
+    request = Request(
+        {
+            "type": "http",
+            "app": capture_app,
+            "headers": [(b"content-type", b"multipart/form-data; boundary=synthetic")],
+        },
+        receive=receive,
+    )
+    with pytest.raises(failure):
+        async with capture_routes.chunk_body(request):
+            pytest.fail("An incomplete failed stream must never yield a form")
+    assert spools
+    assert all(spool.closed for spool in spools)

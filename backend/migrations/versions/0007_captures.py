@@ -49,8 +49,10 @@ def upgrade() -> None:
             "job_id", sa.Uuid(), sa.ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
         ),
     )
+    op.create_index("ix_capture_chunks_job_id", "capture_chunks", ["job_id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_capture_chunks_job_id", table_name="capture_chunks")
     op.drop_table("capture_chunks")
     op.drop_table("capture_sessions")

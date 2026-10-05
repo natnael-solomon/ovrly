@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Hand-authored: no backend model or endpoint exists yet.",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/capture_schemas.py CaptureChunk, returned by PUT /v1/captures/{id}/chunks/{seq}.",
   "title": "CaptureChunk",
   "description": "Acknowledgement and read model of one stored capture chunk. disposition tells the client what happened: stored, duplicate (replayed acknowledgement, nothing stored twice) or out_of_order (stored while a lower seq is still missing). The session's current gaps are echoed so the client can resend missing chunks without another round trip. Clients map an unknown disposition to UNKNOWN and must not treat it as stored.",
   "type": "object",

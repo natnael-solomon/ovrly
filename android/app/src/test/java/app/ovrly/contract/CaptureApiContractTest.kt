@@ -13,7 +13,7 @@ class CaptureApiContractTest {
             .single { it.name == "capture-status-waiting" }
         val status = CaptureApiCodec.parseStatus(fixture.responsePayload())
         assertFalse(status.session.isOpen)
-        assertEquals("not_started", status.claimExtractionStatus)
+        assertEquals(CoverageStatus.NOT_STARTED, status.claimExtractionStatus)
         assertTrue(status.claims.isEmpty())
         assertEquals(ProcessingStatus.WAITING, status.work.single().processingStatus)
         assertEquals(20000, status.manifest.durationMs)
@@ -25,6 +25,33 @@ class CaptureApiContractTest {
             status.manifest.declaredCoverage.speech,
             status.manifest.declaredCoverage.text
         )
+    }
+
+    @Test
+    fun extractionProgressAcceptsKnownAndFutureValues() {
+        val payload = ContractFixtures.load(ContractFixtures.INTAKE)
+            .single { it.name == "capture-status-waiting" }.responsePayload()
+        mapOf(
+            "not_started" to CoverageStatus.NOT_STARTED,
+            "partial" to CoverageStatus.PARTIAL,
+            "complete" to CoverageStatus.COMPLETE,
+            "future_status" to CoverageStatus.UNKNOWN
+        ).forEach { (wire, expected) ->
+            val status = CaptureApiCodec.parseStatus(payload.replace("not_started", wire))
+            assertEquals(expected, status.claimExtractionStatus)
+            assertEquals(ProcessingStatus.WAITING, status.work.single().processingStatus)
+            assertTrue(status.claims.isEmpty())
+            if (expected == CoverageStatus.UNKNOWN) {
+                assertThrows(IllegalArgumentException::class.java) {
+                    CaptureApiCodec.encodeStatus(status)
+                }
+            } else {
+                assertEquals(
+                    status,
+                    CaptureApiCodec.parseStatus(CaptureApiCodec.encodeStatus(status))
+                )
+            }
+        }
     }
 
     @Test

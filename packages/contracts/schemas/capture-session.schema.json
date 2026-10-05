@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Hand-authored: no backend model or endpoint exists yet (the live-overlay intake endpoints are a later pipeline task), so this schema is the agreement both sides build towards. Field names follow build contract section 4.",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/capture_schemas.py CaptureSession, served by the BE-06 create, close and status endpoints. Field names follow build contract section 4.",
   "title": "CaptureSession",
   "description": "Read model of one live capture session: the explicitly started overlay capture of up to three minutes that is processed incrementally while it runs (decision record 0001). Chunks are numbered with a sequence number and timed on the capture timebase, zero at the start of this session. Duplicate and out-of-order handling are stated as data so a client can show and test them: a repeated (session, seq) with identical bytes is acknowledged again without being stored twice, and chunks may arrive in any order, with the server recording the sequence ranges it has not received in gaps until they are filled. Clients map an unknown state to UNKNOWN.",
   "type": "object",

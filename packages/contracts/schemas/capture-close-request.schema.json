@@ -10,6 +10,8 @@
     "continue_research": { "type": "boolean" },
     "duration_ms": {
       "$ref": "common.schema.json#/$defs/nullable_integer",
+      "minimum": 0,
+      "maximum": 180000,
       "description": "Final capture-relative duration, 0 through 180000. Omitted/null uses the highest received end (zero if empty). Supply it to expose trailing missing intervals. Cannot truncate received chunks or extend past a received short final chunk."
     }
   }

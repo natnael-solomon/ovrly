@@ -397,7 +397,12 @@ to the byte budget plus 16384 bytes. A persistent reservation commits before
 writing to the shared `UploadStore`, then receipt and job commit together.
 Storage/queue failure leaves a tracked pending key that can be retried, not a
 successful receipt or an orphan. Session locks serialize upload commits, Stop,
-worker reads and retention. There is no filesystem/PostgreSQL distributed
+worker reads and retention. Polling instead uses a read-only repeatable-read snapshot without
+row locks, so uploads and validation do not block it and its session/chunks/jobs
+still describe one committed snapshot. Multipart parsing failures are cleaned
+up by Starlette; returned forms are closed through its public API on every exit.
+Regression tests cover partial parses, validation failure and cancellation.
+There is no filesystem/PostgreSQL distributed
 transaction. Opt-in retention removes all guest capture bytes with the workspace
 and cleans unacknowledged reservations after close/expiry even for accounts.
 Accepted account content remains excluded by BC-D06.

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Hand-authored: no backend model or endpoint exists yet. Metadata the client sends with one chunk of a live capture session; the bytes travel separately in the request body, like upload content.",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/capture_schemas.py CaptureChunkRequest, nested in the BE-06 multipart metadata part; the bytes travel in the content file part.",
   "title": "CaptureChunkRequest",
   "description": "Declaration of one capture chunk. (session_id, seq) is the idempotency key: resending it with the same bytes is safe and replays the acknowledgement. Intervals are on the capture timebase and must be contiguous with the client's chunking: chunk n covers [n * chunk_duration_ms, (n + 1) * chunk_duration_ms) except the last. Requests are validated strictly; an unknown field or timebase is a validation error.",
   "type": "object",

@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import Row, func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
-from starlette.datastructures import UploadFile
+from starlette.datastructures import FormData, UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 
 from services.api.auth import CurrentPrincipal, load_owned
@@ -148,6 +148,7 @@ async def chunk_body(request: Request) -> AsyncIterator[tuple[CaptureMetadata, U
     parser = MultiPartParser(
         request.headers, bounded(), max_files=1, max_fields=1, max_part_size=8192
     )
+    form: FormData | None = None
     try:
         form = await parser.parse()
         if sorted(form.keys()) != ["content", "metadata"] or len(form.multi_items()) != 2:
@@ -175,9 +176,9 @@ async def chunk_body(request: Request) -> AsyncIterator[tuple[CaptureMetadata, U
     except MultiPartException:
         raise invalid("VALIDATION_FAILED", "Invalid capture multipart body", 422) from None
     finally:
-        # Starlette only closes these on MultiPartException, not cancellation/validation failure.
-        for handle in parser._files_to_close_on_error:
-            handle.close()
+        # The parser owns cleanup until it returns; we own the returned form thereafter.
+        if form is not None:
+            await form.close()
 
 
 async def file_blocks(content: UploadFile) -> AsyncIterator[bytes]:
@@ -380,10 +381,11 @@ async def close_capture(
 async def capture_status(
     request: Request, capture_id: uuid.UUID, principal: CurrentPrincipal
 ) -> CaptureStatus:
-    async with engine(request).begin() as connection:
-        session = await load_owned(
-            connection, capture_sessions, capture_id, principal, for_update=True
+    async with engine(request).connect() as connection:
+        await connection.execution_options(
+            isolation_level="REPEATABLE READ", postgresql_readonly=True
         )
+        session = await load_owned(connection, capture_sessions, capture_id, principal)
         chunks = await chunks_for(connection, capture_id)
         states = {
             row.id: row

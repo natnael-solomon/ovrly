@@ -8,6 +8,9 @@
   "properties": {
     "chunk_duration_ms": {
       "type": "integer",
+      "minimum": 1000,
+      "maximum": 30000,
+      "default": 10000,
       "description": "Nominal chunk duration, default 10000; server accepts 1000 through 30000 inclusive."
     }
   }

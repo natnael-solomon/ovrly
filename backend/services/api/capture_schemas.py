@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from services.api.schemas import Modality, ProcessingStatus, SafeError, StrictModel
+from services.api.schemas import CoverageStatus, Modality, ProcessingStatus, SafeError, StrictModel
 
 MAX_CAPTURE_MS = 180_000
 
@@ -110,4 +110,4 @@ class CaptureStatus(BaseModel):
     manifest: CaptureManifest
     work: list[CaptureWork]
     claims: list[CaptureClaimState]
-    claim_extraction_status: Literal["not_started"] = "not_started"
+    claim_extraction_status: CoverageStatus = "not_started"

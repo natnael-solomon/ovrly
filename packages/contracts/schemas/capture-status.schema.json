@@ -16,7 +16,7 @@
     "manifest": { "$ref": "#/$defs/manifest" },
     "work": { "type": "array", "items": { "$ref": "#/$defs/work" } },
     "claims": { "type": "array", "items": { "$ref": "#/$defs/claim_state" } },
-    "claim_extraction_status": { "type": "string", "const": "not_started" }
+    "claim_extraction_status": { "$ref": "enums.schema.json#/$defs/coverage_status" }
   },
   "$defs": {
     "capture_interval": {

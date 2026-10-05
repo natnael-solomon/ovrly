@@ -127,6 +127,8 @@ a missing tail. `InvestigationSource.Capture` is supported on reads but rejected
 by the ordinary shared-media create request. These are contract additions only:
 AN-07 still needs to package captured modalities, upload chunks and poll progress.
 Empty capture claims with `not_started` are not a no-claims finding.
+Extraction progress uses `CoverageStatus`: `partial` and `complete` parse today,
+and future values map to `UNKNOWN` without dropping the rest of the status.
 
 ## Gallery and demo
 
