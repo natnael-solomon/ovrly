@@ -268,7 +268,13 @@ class ContractIntakeFixturesTest {
         const val VALID_REQUESTS = 8
         const val VALID_RESPONSES = 8
         val OPTIONAL_KEYS = setOf(
-            "duration_ms", "covered_ms", "total_ms", "content_type", "media", "speech", "analysis"
+            "duration_ms",
+            "covered_ms",
+            "total_ms",
+            "content_type",
+            "media",
+            "speech",
+            "analysis"
         )
         const val UPLOAD_ID = "00000000-0000-4000-8000-000000000301"
         const val SESSION_ID = "00000000-0000-4000-8000-000000000501"

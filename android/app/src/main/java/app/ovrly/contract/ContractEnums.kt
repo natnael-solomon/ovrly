@@ -406,7 +406,10 @@ internal object ChunkDispositionSerializer : WireEnumSerializer<ChunkDisposition
 
 @Serializable(with = SpeechStatusSerializer::class)
 internal enum class SpeechStatus(val wireName: String) {
-    PENDING("pending"), RUNNING("running"), COMPLETED("completed"), UNAVAILABLE("unavailable"),
+    PENDING("pending"),
+    RUNNING("running"),
+    COMPLETED("completed"),
+    UNAVAILABLE("unavailable"),
     UNKNOWN("");
 
     companion object {
@@ -416,9 +419,13 @@ internal enum class SpeechStatus(val wireName: String) {
 
 @Serializable(with = SpeechReasonSerializer::class)
 internal enum class SpeechReason(val wireName: String) {
-    DISABLED("disabled"), NO_AUDIO_TRACK("no_audio_track"), QUOTA_EXHAUSTED("quota_exhausted"),
-    UNKNOWN_OUTCOME("unknown_outcome"), PROVIDER_UNAVAILABLE("provider_unavailable"),
-    CANCELLED("cancelled"), UNKNOWN("");
+    DISABLED("disabled"),
+    NO_AUDIO_TRACK("no_audio_track"),
+    QUOTA_EXHAUSTED("quota_exhausted"),
+    UNKNOWN_OUTCOME("unknown_outcome"),
+    PROVIDER_UNAVAILABLE("provider_unavailable"),
+    CANCELLED("cancelled"),
+    UNKNOWN("");
 
     companion object {
         fun fromWire(name: String): SpeechReason = known(entries, name) { it.wireName }
@@ -427,7 +434,8 @@ internal enum class SpeechReason(val wireName: String) {
 
 @Serializable(with = ASRProviderSerializer::class)
 internal enum class ASRProvider(val wireName: String) {
-    GROQ("groq"), UNKNOWN("");
+    GROQ("groq"),
+    UNKNOWN("");
 
     companion object {
         fun fromWire(name: String): ASRProvider = known(entries, name) { it.wireName }
@@ -436,7 +444,9 @@ internal enum class ASRProvider(val wireName: String) {
 
 @Serializable(with = MediaSpeechStatusSerializer::class)
 internal enum class MediaSpeechStatus(val wireName: String) {
-    PENDING("pending"), UNAVAILABLE("unavailable"), UNKNOWN("");
+    PENDING("pending"),
+    UNAVAILABLE("unavailable"),
+    UNKNOWN("");
 
     companion object {
         fun fromWire(name: String): MediaSpeechStatus = known(entries, name) { it.wireName }
@@ -445,7 +455,8 @@ internal enum class MediaSpeechStatus(val wireName: String) {
 
 @Serializable(with = MediaTextStatusSerializer::class)
 internal enum class MediaTextStatus(val wireName: String) {
-    PENDING("pending"), UNKNOWN("");
+    PENDING("pending"),
+    UNKNOWN("");
 
     companion object {
         fun fromWire(name: String): MediaTextStatus = known(entries, name) { it.wireName }
@@ -454,7 +465,8 @@ internal enum class MediaTextStatus(val wireName: String) {
 
 @Serializable(with = SpeechUnavailableReasonSerializer::class)
 internal enum class SpeechUnavailableReason(val wireName: String) {
-    NO_AUDIO_TRACK("no_audio_track"), UNKNOWN("");
+    NO_AUDIO_TRACK("no_audio_track"),
+    UNKNOWN("");
 
     companion object {
         fun fromWire(name: String): SpeechUnavailableReason = known(entries, name) { it.wireName }
@@ -462,15 +474,21 @@ internal enum class SpeechUnavailableReason(val wireName: String) {
 }
 
 internal object SpeechStatusSerializer : WireEnumSerializer<SpeechStatus>(
-    "app.ovrly.contract.SpeechStatus", { SpeechStatus.fromWire(it) }, SpeechStatus::wireName
+    "app.ovrly.contract.SpeechStatus",
+    { SpeechStatus.fromWire(it) },
+    SpeechStatus::wireName
 )
 
 internal object SpeechReasonSerializer : WireEnumSerializer<SpeechReason>(
-    "app.ovrly.contract.SpeechReason", { SpeechReason.fromWire(it) }, SpeechReason::wireName
+    "app.ovrly.contract.SpeechReason",
+    { SpeechReason.fromWire(it) },
+    SpeechReason::wireName
 )
 
 internal object ASRProviderSerializer : WireEnumSerializer<ASRProvider>(
-    "app.ovrly.contract.ASRProvider", { ASRProvider.fromWire(it) }, ASRProvider::wireName
+    "app.ovrly.contract.ASRProvider",
+    { ASRProvider.fromWire(it) },
+    ASRProvider::wireName
 )
 
 internal object MediaSpeechStatusSerializer : WireEnumSerializer<MediaSpeechStatus>(
@@ -480,7 +498,11 @@ internal object MediaSpeechStatusSerializer : WireEnumSerializer<MediaSpeechStat
 )
 
 internal object MediaTextStatusSerializer : WireEnumSerializer<MediaTextStatus>(
-    "app.ovrly.contract.MediaTextStatus", { MediaTextStatus.fromWire(it) }, MediaTextStatus::wireName
+    "app.ovrly.contract.MediaTextStatus",
+    {
+        MediaTextStatus.fromWire(it)
+    },
+    MediaTextStatus::wireName
 )
 
 internal object SpeechUnavailableReasonSerializer : WireEnumSerializer<SpeechUnavailableReason>(
@@ -491,7 +513,10 @@ internal object SpeechUnavailableReasonSerializer : WireEnumSerializer<SpeechUna
 
 @Serializable(with = AnalysisStatusSerializer::class)
 internal enum class AnalysisStatus(val wireName: String) {
-    PENDING("pending"), PARTIAL("partial"), NO_USABLE("no_usable"), COMPLETE("complete"),
+    PENDING("pending"),
+    PARTIAL("partial"),
+    NO_USABLE("no_usable"),
+    COMPLETE("complete"),
     UNKNOWN("");
 
     companion object {
@@ -500,5 +525,7 @@ internal enum class AnalysisStatus(val wireName: String) {
 }
 
 internal object AnalysisStatusSerializer : WireEnumSerializer<AnalysisStatus>(
-    "app.ovrly.contract.AnalysisStatus", { AnalysisStatus.fromWire(it) }, AnalysisStatus::wireName
+    "app.ovrly.contract.AnalysisStatus",
+    { AnalysisStatus.fromWire(it) },
+    AnalysisStatus::wireName
 )

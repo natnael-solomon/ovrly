@@ -36,7 +36,10 @@ class SpeechContractTest {
             InvestigationCodec.parseInvestigation(base.toString()).coverage,
             result.coverage
         )
-        assertEquals(SpeechStatus.UNKNOWN, parse(speech.replace("completed", "future")).speech?.status)
+        assertEquals(
+            SpeechStatus.UNKNOWN,
+            parse(speech.replace("completed", "future")).speech?.status
+        )
     }
 
     @Test

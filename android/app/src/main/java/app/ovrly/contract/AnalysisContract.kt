@@ -19,8 +19,4 @@ internal data class MediaAnalysis(
 )
 
 @Serializable
-internal data class AnalysisGap(
-    val modality: Modality,
-    val reason: String,
-    val interval: Interval?
-)
+internal data class AnalysisGap(val modality: Modality, val reason: String, val interval: Interval?)
