@@ -394,8 +394,14 @@ and the gallery fixtures. Previews inside production files (`GlassOverlay.kt`,
 lines in `capture/`, `share/` and `contract/`, and at most a one-point drop in
 overall lines against the last `main` measurement; API 29 is reported only.
 
-Flake policy: `.github/scripts/android_instrumented.py` retries failed tests
-once in the same job and names flakes in the job summary and as warnings. A
+Tests run under Android Test Orchestrator, so each test has its own process and a
+crash fails only that test. `.github/scripts/android_instrumented.py` also
+requires every `@Test` declared in `src/androidTest` to appear in the first
+attempt's results; missing or undeclared tests fail the job without a retry, so
+an aborted run cannot pass on a retry of the one test it reported.
+
+Flake policy: `.github/scripts/android_instrumented.py` retries each failed test
+once, in its own run, in the same job and names flakes in the job summary and as warnings. A
 test that flakes twice in 48 hours, or twice on one PR, is quarantined with
 `@Ignore` and an issue on the same day. Never re-run a job to get a green
 result.

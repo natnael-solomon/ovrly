@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,7 +12,8 @@ from unittest.mock import patch
 import android_instrumented as runner
 from android_instrumented import test_cases as read_cases
 from android_instrumented import (
-    CLASS_ARGUMENT, FAILED, PASSED, SKIPPED, classify, evaluate, plan_retry, summary,
+    CLASS_ARGUMENT, FAILED, PASSED, SKIPPED, classify, evaluate, expected_tests, plan_retry,
+    summary,
 )
 
 
@@ -41,6 +43,48 @@ class ResultParsingTest(unittest.TestCase):
             path.write_text('<testsuite><testcase classname="a.A" name="x">'
                             '<error>crash</error></testcase></testsuite>')
             self.assertEqual({"a.A#x": FAILED}, read_cases(temporary))
+
+
+class InventoryTest(unittest.TestCase):
+    def test_parses_kotlin_and_java_tests_with_extra_annotations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "a").mkdir()
+            (root / "a" / "OneTest.kt").write_text(
+                "package app.a\n\n@RunWith(AndroidJUnit4::class)\nclass OneTest {\n"
+                "    @Test fun plain() {}\n\n    @LargeTest\n    @Test fun large() {}\n"
+                "    @Test\n    @SdkSuppress(minSdkVersion = 30)\n    fun wrapped() {}\n"
+                "    private fun helper() {}\n}\n\nenum class Mode { ON }\n",
+                encoding="utf-8")
+            (root / "a" / "TwoTest.java").write_text(
+                "package app.a;\n\npublic final class TwoTest {\n"
+                "    @Test\n    public void javaTest() {}\n}\n", encoding="utf-8")
+            (root / "a" / "Helper.kt").write_text("package app.a\n\nobject Helper\n",
+                                                  encoding="utf-8")
+            self.assertEqual({"app.a.OneTest#plain", "app.a.OneTest#large",
+                              "app.a.OneTest#wrapped", "app.a.TwoTest#javaTest"},
+                             expected_tests(root))
+
+    def test_no_tests_is_an_error(self):
+        with tempfile.TemporaryDirectory() as temporary, self.assertRaises(ValueError):
+            expected_tests(temporary)
+
+    def test_repository_inventory_covers_the_suites(self):
+        tests = expected_tests()
+        for name in ("app.ovrly.capture.CaptureServiceTest#threeMinuteLimitStopsAndReleases",
+                     "app.ovrly.share.ShareInputReaderTest#ungrantedSourceIsPrivate",
+                     "app.ovrly.overlay.OverlayServiceTest#showAndHideLeaveNoWindow",
+                     "app.ovrly.ui.ShareIntakeSheetTest#malformedShareOffersNoFileAndCloses"):
+            self.assertIn(name, tests)
+
+    def test_evaluate_rejects_missing_and_undeclared_tests(self):
+        expected = {"a.A#x", "a.A#y"}
+        passed, _, failed, reason = evaluate(1, {"a.A#x": FAILED}, 0, {"a.A#x": PASSED},
+                                             expected)
+        self.assertFalse(passed)
+        self.assertEqual(["(not run) a.A#y"], failed)
+        self.assertIn("Not retried", reason)
+        self.assertTrue(evaluate(0, {"a.A#x": PASSED, "a.A#y": PASSED}, expected=expected)[0])
 
 
 class RetryPolicyTest(unittest.TestCase):
@@ -128,12 +172,58 @@ class RunnerTest(unittest.TestCase):
             return SimpleNamespace(returncode=code)
         return run
 
-    def main(self, *runs):
+    def declare(self, names):
+        """Write Kotlin sources declaring names (`pkg.Class#method`), as androidTest would."""
+        sources = Path(self.temp.name) / "src"
+        shutil.rmtree(sources, ignore_errors=True)
+        by_class = {}
+        for name in names:
+            cls, method = name.split("#")
+            by_class.setdefault(cls, []).append(method)
+        for cls, methods in by_class.items():
+            package, _, simple = cls.rpartition(".")
+            body = "".join(f"    @Test fun {method}() {{}}\n" for method in methods)
+            path = sources / package.replace(".", "/") / f"{simple}.kt"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"package {package}\n\nclass {simple} {{\n{body}}}\n",
+                            encoding="utf-8")
+        return sources
+
+    def main(self, *runs, declared=None):
         summary_path = Path(self.temp.name) / "summary.md"
+        sources = self.declare(declared if declared is not None else runs[0][1])
         with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_path)}), \
                 contextlib.redirect_stdout(io.StringIO()) as output:
-            code = runner.main(["--label", "API 29"], runner=self.gradle(*runs))
+            code = runner.main(["--label", "API 29"], runner=self.gradle(*runs),
+                               sources=sources)
         return code, output.getvalue(), summary_path.read_text(encoding="utf-8")
+
+    def test_crash_that_drops_later_tests_fails_even_if_the_retry_passes(self):
+        # A crash records the running test as failed and drops the rest of the suite.
+        code, output, text = self.main(
+            (1, {"a.A#x": PASSED, "a.A#y": FAILED}),
+            (0, {"a.A#y": PASSED}),
+            declared=["a.A#x", "a.A#y", "a.A#z", "b.B#w"],
+        )
+        self.assertEqual(1, code)
+        self.assertEqual(1, len(self.commands), "an incomplete first attempt is not retried")
+        self.assertIn("::error::Instrumented test failed on API 29: (not run) a.A#z", output)
+        self.assertIn("(not run) b.B#w", output)
+        self.assertIn("did not report every declared test", text)
+        result = json.loads((self.attempts / "result.json").read_text())
+        self.assertFalse(result["passed"])
+        self.assertEqual([], result["flaky"])
+
+    def test_incomplete_run_with_zero_exit_fails(self):
+        code, output, _ = self.main((0, {"a.A#x": PASSED}), declared=["a.A#x", "a.A#y"])
+        self.assertEqual(1, code)
+        self.assertIn("(not run) a.A#y", output)
+
+    def test_result_for_an_undeclared_test_fails(self):
+        code, output, _ = self.main((0, {"a.A#x": PASSED, "c.C#v": PASSED}),
+                                    declared=["a.A#x"])
+        self.assertEqual(1, code)
+        self.assertIn("(not declared in the sources) c.C#v", output)
 
     def test_flake_is_retried_once_with_only_failed_tests_and_keeps_both_attempts(self):
         code, output, text = self.main((1, {"a.A#x": FAILED, "a.A#y": PASSED}),

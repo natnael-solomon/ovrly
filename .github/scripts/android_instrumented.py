@@ -5,6 +5,12 @@ on the retry is a flake: the job passes, and the job summary and a warning name 
 that flakes twice in 48 hours, or twice on one PR, is quarantined with @Ignore and an issue
 on the same day. Jobs are never re-run to get a green result.
 
+Every test declared in app/src/androidTest must appear in the first attempt's results. Without
+that check a process crash or an aborted run, which drops the remaining tests from the XML,
+followed by a passing retry of the one reported failure, would look green. A first attempt
+with missing or undeclared tests fails without a retry. The orchestrator (build.gradle.kts)
+keeps a crash from dropping later tests in the first place.
+
 The first attempt's JUnit XML, HTML report and coverage data are moved under
 app/build/instrumented/attempt-1/ and each retried test's under attempt-2/run-N/, so no run
 overwrites another; jacocoDebugReport reads coverage from every run.
@@ -13,6 +19,7 @@ overwrites another; jacocoDebugReport reads coverage from every run.
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -28,6 +35,7 @@ OUTPUTS = {
     "report": BUILD / "reports" / "androidTests" / "connected",
 }
 ATTEMPTS = BUILD / "instrumented"
+SOURCES = ANDROID / "app" / "src" / "androidTest" / "java"
 GRADLE = [
     "sh", "gradlew", "--no-daemon", "--console=plain", "--build-cache",
     "--dependency-verification=strict", "-Povrly.coverage=true",
@@ -59,6 +67,43 @@ def test_cases(results):
             if cases.get(name) != FAILED:
                 cases[name] = outcome
     return cases
+
+
+CLASS = re.compile(
+    r"^[ \t]*(?:(?:public|internal|open|final|abstract)\s+)*class\s+(\w+)", re.M
+)
+TEST = re.compile(
+    r"@Test\b(?:\s*\([^)]*\))?(?:\s+@[\w.]+(?:\([^)]*\))?)*"
+    r"\s+(?:fun\s+`?(\w+)|(?:public\s+)?void\s+(\w+)\s*\()"
+)
+
+
+def expected_tests(sources=None):
+    """Every `package.Class#method` with @Test under the androidTest sources."""
+    tests = set()
+    for path in sorted(Path(sources or SOURCES).rglob("*")):
+        if path.suffix not in (".kt", ".java"):
+            continue
+        text = path.read_text(encoding="utf-8")
+        package = re.search(r"^package\s+([\w.]+)", text, re.M)
+        classes = [(match.start(), match.group(1)) for match in CLASS.finditer(text)]
+        for match in TEST.finditer(text):
+            owner = [name for start, name in classes if start < match.start()]
+            if not owner:
+                raise ValueError(f"@Test outside a class in {path}")
+            prefix = f"{package.group(1)}." if package else ""
+            tests.add(f"{prefix}{owner[-1]}#{match.group(1) or match.group(2)}")
+    if not tests:
+        raise ValueError("No instrumented tests were found in the sources")
+    return tests
+
+
+def inventory_problems(expected, cases):
+    """Declared tests missing from the results, and reported tests nobody declared."""
+    missing = sorted(set(expected) - set(cases))
+    unknown = sorted(set(cases) - set(expected))
+    return ([f"(not run) {name}" for name in missing]
+            + [f"(not declared in the sources) {name}" for name in unknown])
 
 
 def failures(cases):
@@ -119,8 +164,14 @@ def run_retry(tests, runner=subprocess.run):
     return returncode, cases
 
 
-def evaluate(first_code, first, second_code=None, second=None):
+def evaluate(first_code, first, second_code=None, second=None, expected=None):
     """Return (passed, flaky, failed, reason) for one or two attempts."""
+    problems = inventory_problems(expected, first) if expected is not None else []
+    if problems:
+        return False, [], problems, (
+            f"The first attempt did not report every declared test ({len(problems)} "
+            "inventory problem(s)); a crash or abort may have dropped tests. Not retried."
+        )
     retry, reason = plan_retry(first_code, first)
     if first_code == 0:
         if not first:
@@ -155,23 +206,25 @@ def summary(label, first, second, flaky, failed, reason):
     return "\n".join(lines)
 
 
-def main(argv=None, runner=subprocess.run):
+def main(argv=None, runner=subprocess.run, sources=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--label", required=True, help="Device label, e.g. 'API 34'")
     args = parser.parse_args(argv)
     shutil.rmtree(ATTEMPTS, ignore_errors=True)
+    expected = expected_tests(sources)
     first_code, first = run_attempt(1, runner=runner)
     retry, _ = plan_retry(first_code, first)
     second_code = second = None
-    if retry:
+    if retry and not inventory_problems(expected, first):
         second_code, second = run_retry(retry, runner)
-    passed, flaky, failed, reason = evaluate(first_code, first, second_code, second)
+    passed, flaky, failed, reason = evaluate(first_code, first, second_code, second, expected)
     text = summary(args.label, first, second, flaky, failed, reason)
     (ATTEMPTS / "result.json").write_text(json.dumps({
         "label": args.label,
         "passed": passed,
         "flaky": flaky,
         "failed": failed,
+        "expected": sorted(expected),
         "first_attempt": first,
         "retry": second,
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")

@@ -131,6 +131,9 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
         animationsDisabled = true
+        // Each instrumented test runs in its own process, so a crash fails only that test
+        // instead of silently dropping every later one from the results.
+        execution = "ANDROIDX_TEST_ORCHESTRATOR"
     }
     testCoverage { jacocoVersion = jacocoToolVersion }
     sourceSets {
@@ -243,4 +246,6 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestUtil("androidx.test:orchestrator:1.6.1")
+    androidTestUtil("androidx.test.services:test-services:1.6.0")
 }
