@@ -31,6 +31,10 @@ Compact controls and the larger demo are mutually exclusive modes of one foregro
 | Start capture or voice from the companion | Close the demo. Capture starting through another route also closes it. |
 | Close a demo | Do not restart capture or voice. |
 | Change theme or opacity | Update the active window without restarting capture. |
+| Stop from the compact overlay | Ask "Continue research in queue" or "Keep only available results" (or keep recording), then pass the answer to capture through `StopChoiceHandler`; the overlay never closes a session itself. |
+| Hide the live results panel | Keep capture running; Stop stays on the pill and in the capture notification. |
+
+The compact overlay's live results panel reads `OverlayStore.liveSource`, which is "not connected" until a capture session starts the polling adapter (`LiveResultsConnection.start`); fixture results are labelled and reachable only from previews, tests and a debug-only launcher. See [Live overlay results](../android/README.md#live-overlay-results).
 
 ### Window and layout
 
@@ -49,7 +53,7 @@ Use authorized devices and approved content:
 - Permission revocation, close/notification/task cleanup and confirmed versus cancelled demo entry during capture.
 - Theme persistence and no automatic restart of media access after closing the demo.
 
-Unit tests cover palette contrast, fallback decisions and demo-entry policy. They do not test GPU composition or physical-device behavior.
+Unit tests cover palette contrast, fallback decisions, demo-entry policy, live claim-state mapping (including `UNKNOWN` never reading as assessed), spoken order, update notices, poll backoff, demo isolation and the Stop choice. They do not test GPU composition or physical-device behavior.
 
 ## Backend foundation
 

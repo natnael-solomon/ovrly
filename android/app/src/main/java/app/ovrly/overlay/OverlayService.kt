@@ -41,21 +41,29 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import app.ovrly.AppNotifications
+import app.ovrly.BuildConfig
 import app.ovrly.MainActivity
 import app.ovrly.capture.CapturePhase
-import app.ovrly.capture.CaptureService
 import app.ovrly.capture.CaptureStore
 import app.ovrly.ui.GlassOverlay
 import app.ovrly.ui.OverlayAppearance
 import app.ovrly.ui.OverlayVisual
 import app.ovrly.ui.AppearanceStore
 import app.ovrly.ui.DemoOverlayPanel
+import app.ovrly.ui.LiveCompactOverlay
+import app.ovrly.ui.LiveOverlayLayout
+import app.ovrly.ui.LiveOverlayModel
+import app.ovrly.ui.LivePanelActions
 import app.ovrly.ui.LocalWindowBlur
 import app.ovrly.ui.OvrlyTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -69,6 +77,12 @@ object OverlayStore {
     val demo = mutableDemo.asStateFlow()
     internal fun demo(value: Boolean) { mutableDemo.value = value }
     internal val blur = MutableStateFlow(BlurMode.FALLBACK)
+
+    /**
+     * Live results for the compact overlay. [NotConnectedLiveResultsSource] until the polling
+     * adapter over the #18 client is installed; never a fixture.
+     */
+    internal val liveSource = MutableStateFlow<LiveResultsSource>(NotConnectedLiveResultsSource)
 }
 
 class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelStoreOwner {
@@ -81,6 +95,17 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelSto
     private lateinit var wm: WindowManager
     private var usableSize by mutableStateOf(IntSize(1, 1))
     private var demoDragHeight = 0
+    private var compactDragLimit = Int.MAX_VALUE
+    private val fixture = MutableStateFlow<FixtureLiveResultsSource?>(null)
+    private var fixtureJob: Job? = null
+    private val livePanel = LivePanelController { continueResearch ->
+        val preview = fixture.value
+        if (preview != null) {
+            preview.close(continueResearch)
+        } else {
+            CaptureServiceStopChoice(this).onStopChoice(continueResearch)
+        }
+    }
     private var compactPosition = 24 to 180
     private var pendingCompactPosition: Pair<Int, Int>? = null
     // Drag coordinates are physical screen coordinates, independent of text direction.
@@ -118,7 +143,13 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelSto
                     CaptureStore.message("Demo closed because a real capture started.")
                     stopSelf()
                 }
+                if (capture.busy) closeFixture()
+                livePanel.onCaptureRunning(capture.busy)
             }
+        }
+        lifecycleScope.launch {
+            combine(fixture, OverlayStore.liveSource) { preview, live -> preview ?: live }
+                .collectLatest { source -> source.results.collect(livePanel::onResults) }
         }
     }
 
@@ -144,6 +175,15 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelSto
             if (root == null) stopSelf()
             return Service.START_NOT_STICKY
         }
+        val preview = intent.action == SHOW_LIVE_FIXTURE
+        if (preview && (!BuildConfig.DEBUG || CaptureStore.state.value.busy)) {
+            if (root == null) stopSelf()
+            return Service.START_NOT_STICKY
+        }
+        when {
+            preview -> openFixture()
+            intent.action != RESET -> closeFixture()
+        }
         try {
             val modeChanged = intent.action != RESET && OverlayStore.demo.value != demo
             if (modeChanged && demo) compactPosition = params.x to params.y
@@ -151,9 +191,8 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelSto
             if (intent.action != RESET) OverlayStore.demo(demo)
             ServiceCompat.startForeground(this, 102,
                 AppNotifications.build(this,
-                    if (OverlayStore.demo.value) "ovrly demo / simulated content" else "ovrly overlay is visible",
-                    if (OverlayStore.demo.value) "No recording, research or microphone. Tap Close demo to dismiss."
-                    else "Idle overlay does not record. Hiding does not stop an active capture.",
+                    notificationTitle(),
+                    notificationText(),
                     HIDE, OverlayService::class.java,
                     actionLabel = if (OverlayStore.demo.value) "Close demo" else "Hide overlay (capture continues)"),
                 if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
@@ -173,7 +212,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelSto
     private fun attachOverlay() {
         val frame = DragSurface(this, onMove = { x, y -> moveTo(x, y) },
             currentPosition = { params.x to params.y },
-            canDrag = { y -> !OverlayStore.demo.value || y < demoDragHeight })
+            canDrag = { y -> y < dragLimit() })
         frame.setViewTreeLifecycleOwner(this)
         frame.setViewTreeSavedStateRegistryOwner(this)
         frame.setViewTreeViewModelStoreOwner(this)
@@ -185,6 +224,11 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelSto
             val dark by AppearanceStore.dark.collectAsState()
             val demo by OverlayStore.demo.collectAsState()
             val blur by OverlayStore.blur.collectAsState()
+            val preview by fixture.collectAsState()
+            val live by OverlayStore.liveSource.collectAsState()
+            val source = preview ?: live
+            val results by source.results.collectAsState()
+            val panel by livePanel.state.collectAsState()
             val visual = when (capture.phase) {
                 CapturePhase.RECORDING -> OverlayVisual.Recording(capture.seconds)
                 CapturePhase.FINISHED, CapturePhase.ERROR -> OverlayVisual.Captured
@@ -203,7 +247,25 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelSto
                             CustomAccessibilityAction("Move overlay down") { moveBy(0, 48); true },
                         )
                     }
-                    if (demo) {
+                    val listShown = livePanelShown(demo, results, panel)
+                    SideEffect { releaseDragLimit(listShown) }
+                    val shown = overlayContent(demo, results, source.label)
+                    if (shown is OverlayContent.Live) {
+                        val pill = recordingPill(visual, opaque)
+                        val fixtureShown = preview != null
+                        LiveCompactOverlay(
+                            model = LiveOverlayModel(shown.results, panel, shown.sourceLabel),
+                            actions = liveActions(),
+                            modifier = moving,
+                            layout = LiveOverlayLayout(
+                                higherOpacity = opaque,
+                                maxHeight = livePanelMaxHeight(density)
+                            ),
+                            pill = pill.takeIf {
+                                showRecordingPill(fixtureShown, shown.results, capture)
+                            }
+                        )
+                    } else {
                         DemoOverlayPanel(
                             blurLabel = blur.label,
                             onClose = { stopSelf() },
@@ -217,14 +279,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelSto
                             maxHeight = (geometry.height / density).dp,
                             onHeaderHeight = { demoDragHeight = it },
                         )
-                    } else GlassOverlay(
-                        state = visual, higherOpacity = opaque,
-                        onSetup = { openCompanion(MainActivity.ACTION_SETUP) },
-                        onStopCapture = { startService(Intent(this@OverlayService, CaptureService::class.java).setAction(CaptureService.STOP)) },
-                        onCancelResearch = { CaptureStore.message("Research is not connected; there is no research task to cancel.") },
-                        onDetails = { openCompanion(MainActivity.ACTION_DETAILS) },
-                        modifier = moving,
-                    )
+                    }
                 }
             }
         }
@@ -255,6 +310,72 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelSto
                 }
             }
         }
+    }
+
+    private fun releaseDragLimit(listShown: Boolean) {
+        if (!listShown) compactDragLimit = Int.MAX_VALUE
+    }
+
+    private fun livePanelMaxHeight(density: Float) =
+        (usableSize.height * LIVE_PANEL_HEIGHT_SHARE / density).dp
+
+    private fun dragLimit() = if (OverlayStore.demo.value) demoDragHeight else compactDragLimit
+
+    private fun notificationTitle() = when {
+        OverlayStore.demo.value -> "ovrly demo / simulated content"
+        fixture.value != null -> "ovrly overlay / fixture results"
+        else -> "ovrly overlay is visible"
+    }
+
+    private fun notificationText() = when {
+        OverlayStore.demo.value -> DEMO_NOTIFICATION_TEXT
+        fixture.value != null -> "Synthetic results. No recording, research or network request."
+        else -> "Idle overlay does not record. Hiding does not stop an active capture."
+    }
+
+    private fun liveActions() = LivePanelActions(
+        onHide = { livePanel.setPanelVisible(false) },
+        onShow = { livePanel.setPanelVisible(true) },
+        onOpenClaim = livePanel::openClaim,
+        onCloseClaim = livePanel::closeClaim,
+        onDismissNotice = livePanel::dismissNotice,
+        onRequestStop = livePanel::requestStop,
+        onStopChoice = livePanel::chooseStop,
+        onCancelStop = livePanel::cancelStop,
+        onListTop = { compactDragLimit = it }
+    )
+
+    private fun recordingPill(visual: OverlayVisual, opaque: Boolean): @Composable () -> Unit = {
+        GlassOverlay(
+            state = visual,
+            higherOpacity = opaque,
+            onSetup = { openCompanion(MainActivity.ACTION_SETUP) },
+            onStopCapture = livePanel::requestStop,
+            onCancelResearch = { CaptureStore.message(NO_RESEARCH_TO_CANCEL) },
+            onDetails = { openCompanion(MainActivity.ACTION_DETAILS) }
+        )
+    }
+
+    /** Debug builds only: replaces the live source with the labelled fixture timeline. */
+    private fun openFixture() {
+        closeFixture()
+        val source = FixtureLiveResultsSource()
+        livePanel.reset()
+        fixture.value = source
+        fixtureJob = lifecycleScope.launch {
+            while (true) {
+                delay(FIXTURE_STEP_MS)
+                if (!source.advance()) break
+            }
+        }
+    }
+
+    private fun closeFixture() {
+        if (fixture.value == null && fixtureJob == null) return
+        fixtureJob?.cancel()
+        fixtureJob = null
+        fixture.value = null
+        livePanel.reset()
     }
 
     private fun openCompanion(action: String) {
@@ -328,6 +449,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelSto
     }
 
     override fun onDestroy() {
+        closeFixture()
         compose?.disposeComposition()
         overlayWindow?.close()
         overlayWindow = null
@@ -346,6 +468,15 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner, ViewModelSto
         const val SHOW_DEMO = "show_demo"
         const val HIDE = "hide"
         const val RESET = "reset_position"
+
+        /** Debug builds only: show the compact panel with [FixtureLiveResultsSource]. */
+        const val SHOW_LIVE_FIXTURE = "show_live_fixture"
+        private const val FIXTURE_STEP_MS = 5_000L
+        private const val LIVE_PANEL_HEIGHT_SHARE = 0.6f
+        private const val DEMO_NOTIFICATION_TEXT =
+            "No recording, research or microphone. Tap Close demo to dismiss."
+        private const val NO_RESEARCH_TO_CANCEL =
+            "Research is not connected; there is no research task to cancel."
     }
 }
 

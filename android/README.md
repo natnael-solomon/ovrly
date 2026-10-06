@@ -299,6 +299,57 @@ retry, close with both choices, no server session without chunks, a pending
 close blocking replacement, a stale worker unable to write into a new capture,
 unconfigured server) and `CaptureStopLogTest` (a normal stop is not logged as
 an interruption).
+
+## Live overlay results
+
+AN-07 (#31) adds the compact overlay's live results panel in `app.ovrly.overlay`. The
+panel reads `OverlayStore.liveSource`. Until `LiveResultsConnection.start` is called for a
+capture session, it holds `NotConnectedLiveResultsSource`, which reports "not connected" and
+never emits claims, so builds look as before apart from the Stop choice.
+
+| Piece | Behavior |
+| --- | --- |
+| `LiveResultsSource` | Emits `LiveResults`: the session phase, the captured duration and missing time, claim-extraction progress and claims in spoken order (capture-relative start, then status order). |
+| `reduceLiveResults` | Folds one capture status poll (`CaptureApiCodec.parseStatus`) and the latest report version of the same investigation into `LiveResults`. Per-claim `processing_status` maps to waiting, checking evidence, provisional or assessed; failed and cancelled stay incomplete. A provisional assessment the user saw that is then replaced becomes updated, with the before and after assessment and the report's change summary. `UNKNOWN` statuses, a missing status and `UNKNOWN` assessments render as "Unknown state" and never as assessed. A report of another investigation is ignored. |
+| `LivePanelController` | Hide and show, the "Assessment updated" notices, claim detail and the Stop prompt. Hiding the panel never stops capture. |
+| `StopChoiceHandler.onStopChoice(continueResearch: Boolean)` | Called once after the user picks "Continue research in queue" (`true`) or "Keep only available results" (`false`). `CaptureServiceStopChoice` sends `CaptureService.STOP` with the Boolean extra `CaptureService.EXTRA_CONTINUE_RESEARCH`, which `CaptureService` passes to `CaptureControl` to close the session with `continue_research`. |
+| `PollingLiveResultsSource` | The live adapter. Each poll reads the capture status and the investigation through an injected `LiveResultsFetcher` (to be backed by `CaptureSessionApi.status` and `OvrlyApi.getInvestigation`; this module has no HTTP code of its own), every 2 s while healthy. Failures back off 4, 8, 16 then 30 s, keep the last results on screen with "reconnecting", and after 8 consecutive failures stop with "connection lost". Polling ends when the session is abandoned, closed with "Keep only available results", or closed with "Continue research in queue" once claim extraction is complete and every claim is assessed, failed or cancelled. After close it polls every 5 s for at most 120 polls (10 minutes), then stops with "stopped waiting for updates", so a claim in an unknown state cannot keep it polling. |
+| `LiveResultsConnection.start(scope, fetcher, sessionId)` / `stop()` | The integration seam: installs the polling source as `OverlayStore.liveSource` for one session, or returns to "not connected". |
+| `FixtureLiveResultsSource` | Development, previews and tests only. Labelled "Fixture / not live". Built from `packages/contracts` fixtures (the `capture-status-waiting` session and the `partial` report, checked by `LiveResultsFixtureTest`) plus an Android-side version 2 that finalizes one claim. |
+
+The compact overlay keeps the recording pill. Stop on the pill opens the choice with a
+third option, "Keep recording"; the choice replaces the results panel while it is open. The
+panel is capped at 60% of the usable screen height; its header (with Stop and hide) stays
+fixed and everything below it scrolls, so it stays usable at 200% text. Once a live source
+is connected the panel shows "Live results", the session phase, "Captured segment analyzed" with the captured length (not
+the full video) and any time not received, a non-blocking "Assessment updated" notice, and
+the claim list; tapping a notice or a claim opens a minimal in-panel detail that explains
+the change. After "Keep only available results" or an abandoned session, unfinished claims
+read "Incomplete". The panel's close control hides it and leaves a "Show live results"
+button; capture continues, and Stop stays available on the pill and in the capture
+notification. The window drags only by the header so the area below it can scroll.
+
+`DemoOverlayPanel` is unchanged and remains labelled "DEMO / SIMULATED"; the service
+renders it from `OverlayContent.Demo`, which carries no results, and
+`LivePanelControllerTest` checks that its signature accepts no overlay or contract types.
+
+Debug builds include `LiveFixtureActivity` (in `src/debug`, absent from release) for device
+screenshots of the fixture panel without recording or network requests. It needs the
+overlay permission and is refused while capture is running:
+
+```text
+adb shell am start -n app.ovrly/.overlay.LiveFixtureActivity
+```
+
+The fixture advances every five seconds through waiting, checking evidence, provisional and
+updated; its Stop choice closes the fixture session instead of calling capture. Previews
+for both themes and 200% text are in `ui/LiveResultsPreviews.kt`.
+
+Not yet wired: a `LiveResultsFetcher` over `CaptureSessionApi.status` and
+`OvrlyApi.getInvestigation`, and the `LiveResultsConnection.start` call when a capture
+session opens. The production `ServerCaptureSessionApi` still answers
+`CAPTURE_API_NOT_CONFIGURED`, so live polling has nothing to read yet.
+
 ## Gallery and demo
 
 Open `app/src/main/java/app/ovrly/ui/GalleryPreviews.kt` in Studio's Design or Split view. `GlassOverlay.kt` contains the live-control previews. Gallery selection does not change the live overlay.

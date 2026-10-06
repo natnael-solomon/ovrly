@@ -483,8 +483,6 @@
     <ID>MaxLineLength:OverlayService.kt$OverlayService$CaptureStore.message("Overlay permission is off. Enable it in Android settings; capture consent is separate.")</ID>
     <ID>MaxLineLength:OverlayService.kt$OverlayService$CaptureStore.message("Overlay permission was revoked. Any capture continues until stopped in the companion or notification.")</ID>
     <ID>MaxLineLength:OverlayService.kt$OverlayService$CaptureStore.message("The overlay could not be displayed. Check overlay permission. Capture can still be stopped in the companion or notification.")</ID>
-    <ID>MaxLineLength:OverlayService.kt$OverlayService$onCancelResearch = { CaptureStore.message("Research is not connected; there is no research task to cancel.") }</ID>
-    <ID>MaxLineLength:OverlayService.kt$OverlayService$onStopCapture = { startService(Intent(this@OverlayService, CaptureService::class.java).setAction(CaptureService.STOP)) }</ID>
     <ID>MaxLineLength:OverlayWindow.kt$OverlayWindow$if (mode == BlurMode.NATIVE) (24 * context.resources.displayMetrics.density).toInt().coerceAtMost(100) else 0</ID>
     <ID>MaxLineLength:OvrlyTheme.kt$drawRect(glare, topLeft = Offset(0f, 0f), size = Size(band, size.height), blendMode = BlendMode.SrcAtop)</ID>
     <ID>MaxLineLength:SampleReports.kt$"An example of a claim that needs a place, a measurement and a comparison. No temperature data or source was retrieved."</ID>
