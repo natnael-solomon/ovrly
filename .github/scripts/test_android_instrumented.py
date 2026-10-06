@@ -45,6 +45,63 @@ class ResultParsingTest(unittest.TestCase):
             self.assertEqual({"a.A#x": FAILED}, read_cases(temporary))
 
 
+ASSUMPTION_SKIP = (
+    '<testcase name="replay" classname="app.ovrly.capture.ScreenTextReplayTest" time="0.014">'
+    "<failure>org.junit.AssumptionViolatedException: RES-02 replay runs only with -e res02Mode\n"
+    "at org.junit.Assume.assumeTrue(Assume.java:68)\n"
+    "at app.ovrly.capture.ScreenTextReplayTest.replay(ScreenTextReplayTest.kt:57)\n"
+    "</failure></testcase>"
+)
+
+
+class SkipClassificationTest(unittest.TestCase):
+    def cases(self, body):
+        with tempfile.TemporaryDirectory() as temporary:
+            (Path(temporary) / "TEST.xml").write_text(
+                f'<testsuite name="device">{body}</testsuite>', encoding="utf-8")
+            return read_cases(temporary)
+
+    def test_assumption_violation_reported_as_failure_is_skipped(self):
+        # The exact shape AGP wrote for an assumeTrue skip on #112.
+        self.assertEqual({"app.ovrly.capture.ScreenTextReplayTest#replay": SKIPPED},
+                         self.cases(ASSUMPTION_SKIP))
+
+    def test_internal_assumption_class_and_type_attribute_are_skips(self):
+        cases = self.cases(
+            '<testcase classname="a.A" name="x"><failure>'
+            "org.junit.internal.AssumptionViolatedException: got: false\n</failure></testcase>"
+            '<testcase classname="a.A" name="y"><error type="org.junit.AssumptionViolatedException"'
+            ' message="no device feature"/></testcase>')
+        self.assertEqual({"a.A#x": SKIPPED, "a.A#y": SKIPPED}, cases)
+
+    def test_skipped_element_alone_is_skipped(self):
+        self.assertEqual({"a.A#x": SKIPPED},
+                         self.cases('<testcase classname="a.A" name="x"><skipped/></testcase>'))
+
+    def test_real_failures_stay_failures(self):
+        cases = self.cases(
+            '<testcase classname="a.A" name="x"><failure>java.lang.AssertionError: '
+            "expected AssumptionViolatedException to be thrown\n</failure></testcase>"
+            '<testcase classname="a.A" name="y"><failure message="org.junit.'
+            'AssumptionViolatedException in a message">java.lang.IllegalStateException: boom'
+            "</failure></testcase>"
+            '<testcase classname="a.A" name="z"><failure>'
+            "org.junit.AssumptionViolatedException: skipped\n</failure>"
+            "<error>java.lang.RuntimeException: teardown crashed</error></testcase>")
+        self.assertEqual({"a.A#x": FAILED, "a.A#y": FAILED, "a.A#z": FAILED}, cases)
+
+    def test_skip_does_not_fail_or_retry_the_run(self):
+        first = self.cases(ASSUMPTION_SKIP + '<testcase classname="a.A" name="x"/>')
+        expected = set(first)
+        self.assertEqual(([], "All instrumented tests passed on the first attempt."),
+                         plan_retry(0, first))
+        passed, flaky, failed, _ = evaluate(0, first, expected=expected)
+        self.assertTrue(passed)
+        self.assertEqual(([], []), (flaky, failed))
+        text = summary("API 34", first, None, [], [], "ok")
+        self.assertIn("1 passed, 0 failed, 1 skipped", text)
+
+
 class InventoryTest(unittest.TestCase):
     def test_parses_kotlin_and_java_tests_with_extra_annotations(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -137,6 +194,25 @@ class RetryPolicyTest(unittest.TestCase):
         self.assertIn("Never re-run", text)
 
 
+class FakeEmulator:
+    def __init__(self):
+        self.calls = []
+        self.ready = True
+        self.stuck = None
+
+    def wait(self):
+        self.calls.append("wait")
+        if not self.ready:
+            raise runner.android_emulator.EmulatorError("Emulator not ready")
+
+    def diagnose(self, target):
+        self.calls.append("diagnose")
+        return self.stuck
+
+    def stop(self):
+        self.calls.append("stop")
+
+
 class RunnerTest(unittest.TestCase):
     """main() with a fake Gradle that writes JUnit XML where AGP would."""
 
@@ -156,20 +232,24 @@ class RunnerTest(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.commands = []
+        self.timeouts = []
+        self.emulator = FakeEmulator()
 
     def gradle(self, *runs):
+        """Each run is (exit code, cases) or (exit code, cases, "timeout")."""
         queue = list(runs)
 
-        def run(command, cwd, check):
+        def run(command, cwd, timeout):
             self.commands.append(command)
-            code, cases = queue.pop(0)
+            self.timeouts.append(timeout)
+            code, cases, *mode = queue.pop(0)
             results = self.outputs["results"] / "debug"
             results.mkdir(parents=True)
             (results / "TEST-device.xml").write_text(junit(cases))
             coverage = self.outputs["coverage"] / "device"
             coverage.mkdir(parents=True)
             (coverage / "coverage.ec").write_bytes(b"ec")
-            return SimpleNamespace(returncode=code)
+            return SimpleNamespace(returncode=code, timed_out=mode == ["timeout"])
         return run
 
     def declare(self, names):
@@ -195,8 +275,52 @@ class RunnerTest(unittest.TestCase):
         with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_path)}), \
                 contextlib.redirect_stdout(io.StringIO()) as output:
             code = runner.main(["--label", "API 29"], runner=self.gradle(*runs),
-                               sources=sources)
-        return code, output.getvalue(), summary_path.read_text(encoding="utf-8")
+                               sources=sources, emulator=self.emulator)
+        text = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
+        return code, output.getvalue(), text
+
+    def test_waits_for_the_device_and_always_stops_the_emulator(self):
+        code, _, _ = self.main((0, {"a.A#x": PASSED}))
+        self.assertEqual(0, code)
+        self.assertEqual(["wait", "stop"], self.emulator.calls)
+        self.assertIn(f"timeout_msec={runner.TEST_TIMEOUT_MS}", " ".join(self.commands[0]))
+        self.assertLessEqual(self.timeouts[0], runner.TEST_BUDGET_S)
+
+    def test_device_never_ready_runs_no_test_and_fails(self):
+        self.emulator.ready = False
+        code, output, _ = self.main((0, {"a.A#x": PASSED}))
+        self.assertEqual(1, code)
+        self.assertEqual([], self.commands)
+        self.assertIn("no test was run", output)
+        self.assertEqual(["wait", "diagnose", "stop"], self.emulator.calls)
+
+    def test_hung_first_attempt_fails_fast_names_the_test_and_is_not_retried(self):
+        self.emulator.stuck = "a.A#y"
+        code, output, text = self.main((1, {"a.A#x": PASSED}, "timeout"),
+                                       declared=["a.A#x", "a.A#y"])
+        self.assertEqual(1, code)
+        self.assertEqual(1, len(self.commands))
+        self.assertIn("::error::Instrumented test failed on API 29: (timed out) a.A#y", output)
+        self.assertIn("killed while running a.A#y", text)
+        self.assertEqual(["wait", "diagnose", "stop"], self.emulator.calls)
+        result = json.loads((self.attempts / "result.json").read_text())
+        self.assertEqual(["(timed out) a.A#y"], result["timed_out"])
+
+    def test_hung_retry_fails_and_stops_later_retries(self):
+        self.emulator.stuck = "a.A#x"
+        code, output, _ = self.main(
+            (1, {"a.A#x": FAILED, "b.B#y": FAILED}),
+            (1, {}, "timeout"),
+        )
+        self.assertEqual(1, code)
+        self.assertEqual(2, len(self.commands), "no retry after a timed-out retry")
+        self.assertIn("(timed out) a.A#x", output)
+        self.assertIn("Instrumented test failed on API 29: b.B#y", output)
+
+    def test_emulator_is_stopped_even_when_the_suite_raises(self):
+        with self.assertRaises(ValueError):
+            self.main((0, {}), declared=[])
+        self.assertEqual(["stop"], self.emulator.calls)
 
     def test_crash_that_drops_later_tests_fails_even_if_the_retry_passes(self):
         # A crash records the running test as failed and drops the rest of the suite.

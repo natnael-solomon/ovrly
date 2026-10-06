@@ -296,4 +296,13 @@ class LocalStoreTest {
             assertTrue(column, statement in OvrlyDatabase.MIGRATION_1_2_SQL)
         }
     }
+
+    @Test
+    fun aStoredReadThatNoLongerParsesIsTreatedAsMissing() = runBlocking {
+        val complete = result("complete")
+        jobs.recordRead(complete)
+        dao.upsert(dao.byServerId(complete.id)!!.copy(investigationJson = "{\"broken\":true}"))
+        assertNull(jobs.cachedInvestigation(complete.id))
+        assertNull(jobs.cachedInvestigation("00000000-0000-4000-8000-000000000999"))
+    }
 }
