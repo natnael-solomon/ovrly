@@ -23,7 +23,6 @@ import app.ovrly.data.SIGN_IN_UNAVAILABLE
  * that a saved report cannot yet be restored on another device.
  */
 
-
 @Composable
 internal fun AccountSection(
     state: AccountUiState,

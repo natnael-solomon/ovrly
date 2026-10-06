@@ -29,6 +29,7 @@ internal data class AccountUiState(
     val busy: Boolean = false,
     val notice: String? = null
 )
+
 /** One published version in the picker. */
 internal data class VersionChoice(val version: Int, val label: String, val fixture: Boolean)
 
