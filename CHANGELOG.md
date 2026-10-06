@@ -4,6 +4,10 @@
 
 ### Added
 
+- Backend `.env.example` now lists every `OVRLY_` setting with its default (job timing
+  and retries, stub reports, evidence stages), and the backend README has a
+  single-service deployment note for EthioDeploy (#21).
+
 - Opt-in backend quota infrastructure (#22): transactional daily check and upload
   reservations, active-check admission limits, a Scholarxiv near-exhaustion intake
   pause with typed retryable errors, shared request concurrency slots and a

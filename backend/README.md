@@ -141,6 +141,24 @@ buckets, and `0011_quotas` adds daily admission counters and expiring provider
 request slots. Future schema changes require a reviewed migration
 and upgrade/downgrade coverage, not `create_all()` during API startup.
 
+### Single-service deployment (EthioDeploy)
+
+On a host with one web service and no separate worker, such as EthioDeploy Free
+([BC-D03](../docs/decisions/BC-D03-provider-hosting.md)), run from `backend/` after
+`uv sync --frozen`. The start command derives the Psycopg URL from the hosted
+Postgres `DATABASE_URL`, migrates, then listens on the host's port:
+
+```sh
+export OVRLY_DATABASE_URL="postgresql+psycopg://${DATABASE_URL#*://}"
+uv run --frozen alembic upgrade head
+exec uv run --frozen uvicorn services.api.main:create_app --factory --host 0.0.0.0 --port "$PORT"
+```
+
+Set `OVRLY_EMBED_WORKER=1`, use `/healthz` as the health check and store
+`OVRLY_SCHOLARXIV_API_KEY` as a host secret. Do not set `OVRLY_API_PORT`; it only
+configures the development helper. Never set `OVRLY_STUB_REPORTS` on a public deploy.
+This deployment has not been verified.
+
 ### Durable jobs and recovery
 
 `services/jobs` implements the BE-04 engine. `queue.py` is the PostgreSQL
