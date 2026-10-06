@@ -113,17 +113,14 @@ class OverlayService :
     private var panelHeaderHeight = 0
     private val fixture = MutableStateFlow<FixtureLiveResultsSource?>(null)
     private var fixtureJob: Job? = null
-    private val livePanel = LivePanelController(
-        { continueResearch ->
-            val preview = fixture.value
-            if (preview != null) {
-                preview.close(continueResearch)
-            } else {
-                CaptureServiceStopChoice(this).onStopChoice(continueResearch)
-            }
-        },
-        OverlayStore.autoExpand
-    )
+    private val livePanel = LivePanelController(OverlayStore.autoExpand) { continueResearch ->
+        val preview = fixture.value
+        if (preview != null) {
+            preview.close(continueResearch)
+        } else {
+            CaptureServiceStopChoice(this).onStopChoice(continueResearch)
+        }
+    }
 
     /** The live form on screen; null for the demo and the idle controls. */
     private var form: LiveOverlayForm? = null

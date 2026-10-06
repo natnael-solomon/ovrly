@@ -81,20 +81,20 @@ class LivePanelControllerTest {
     @Test fun aSessionExpandsOnceEvenAcrossOverlayRestarts() {
         val steps = polls()
         val memory = AutoExpandMemory()
-        val first = LivePanelController({}, memory)
+        val first = LivePanelController(memory) {}
         first.onCaptureRunning(true)
         first.onResults(steps[0], "session-1")
         first.onResults(steps[1], "session-1")
         assertTrue(first.state.value.expanded)
 
         // The overlay is hidden and shown again mid-capture: a new controller, same session.
-        val again = LivePanelController({}, memory)
+        val again = LivePanelController(memory) {}
         again.onCaptureRunning(true)
         again.onResults(steps[0], "session-1")
         again.onResults(steps[1], "session-1")
         assertFalse(again.state.value.expanded)
 
-        val next = LivePanelController({}, memory)
+        val next = LivePanelController(memory) {}
         next.onCaptureRunning(true)
         next.onResults(steps[0], "session-2")
         next.onResults(steps[1], "session-2")

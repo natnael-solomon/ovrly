@@ -107,6 +107,10 @@ internal fun researchSettled(results: LiveResults): Boolean =
 internal class AutoExpandMemory {
     @Volatile var spentFor: String? = null
 
+    /** [state], spent if [session] already had its automatic expand. */
+    fun recall(state: LivePanelState, session: String?): LivePanelState =
+        if (session != null && spentFor == session) state.copy(autoExpandSpent = true) else state
+
     /** [state] with its automatic expand spent, remembered for [session] when there is one. */
     fun spend(state: LivePanelState, session: String?): LivePanelState {
         session?.let { spentFor = it }
@@ -119,8 +123,8 @@ internal class AutoExpandMemory {
  * [StopChoiceHandler], and only after the user picked one of the two Stop choices.
  */
 internal class LivePanelController(
-    private val stopChoice: StopChoiceHandler,
-    private val memory: AutoExpandMemory = AutoExpandMemory()
+    private val memory: AutoExpandMemory = AutoExpandMemory(),
+    private val stopChoice: StopChoiceHandler
 ) {
     private val mutable = MutableStateFlow(LivePanelState())
     val state: StateFlow<LivePanelState> = mutable.asStateFlow()
@@ -144,9 +148,7 @@ internal class LivePanelController(
      */
     fun onResults(results: LiveResults, sessionKey: String? = null) {
         session = sessionKey
-        if (sessionKey != null && memory.spentFor == sessionKey) {
-            mutable.update { if (it.autoExpandSpent) it else it.copy(autoExpandSpent = true) }
-        }
+        mutable.update { memory.recall(it, sessionKey) }
         val before = last?.claims?.size ?: 0
         val fresh = newAssessmentUpdates(last, results).map { it.id }
         last = results
