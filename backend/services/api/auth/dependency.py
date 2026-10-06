@@ -102,19 +102,22 @@ async def current_principal(request: Request) -> Principal:
     return Principal(id=row.id, kind=row.kind)
 
 
-async def lock_active_principal(connection: AsyncConnection, principal: Principal) -> None:
-    """Share-lock the caller's principal row for the rest of the transaction.
+async def lock_active_principal(
+    connection: AsyncConnection, principal: Principal, *, exclusive: bool = False
+) -> None:
+    """Lock the caller's principal row for the rest of the transaction.
 
     ``current_principal`` authenticates on its own connection, so a second-device link
     (BC-D07) can merge the caller after authentication. The share lock waits for a link in
     progress; a principal merged into an account is refused exactly like a revoked
     credential, so nothing is written under it after its saved reports moved.
+    Admission quotas use an exclusive lock to serialize counters; saves use a share lock.
     """
     row = (
         await connection.execute(
             select(principals.c.merged_into)
             .where(principals.c.id == principal.id)
-            .with_for_update(read=True)
+            .with_for_update(read=not exclusive)
         )
     ).first()
     if row is None or row.merged_into is not None:

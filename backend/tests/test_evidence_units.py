@@ -3,6 +3,7 @@ BM25, retrieval, assessment, the overall label and citation validation."""
 
 import json
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -69,6 +70,11 @@ class FakeBucket:
 
     async def block(self, seconds):
         self.blocks.append(seconds)
+
+    @asynccontextmanager
+    async def request(self):
+        await self.acquire()
+        yield
 
 
 def fixture_report() -> ReportVersion:

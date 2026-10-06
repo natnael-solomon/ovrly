@@ -34,12 +34,14 @@ from services.api.schemas import (
 from services.jobs.models import jobs
 from services.jobs.queue import JobQueue, StageKey
 from services.models import investigations, reanalysis_requests, report_versions
+from services.quotas import charge, lock_owner
 from services.reports import (
     REANALYSIS_STAGE,
     NextVersion,
     publish_report_version,
     summarize_job,
 )
+from services.settings import Settings
 
 REANALYSIS_VERSION: Final = 1
 
@@ -206,9 +208,11 @@ async def request_reanalysis(
     investigation_id: uuid.UUID,
     body: Reanalysis,
     key: str,
+    config: Settings,
 ) -> dict[str, Any]:
     """Validate, publish (corrections only), enqueue and record one reanalysis request."""
     digest = request_hash(investigation_id, body)
+    await lock_owner(connection, principal, config)
     await load_owned(connection, investigations, investigation_id, principal, for_update=True)
     replayed = await replay(connection, principal, key, digest)
     if replayed is not None:
@@ -231,6 +235,7 @@ async def request_reanalysis(
             "REPORT_VERSION_STALE",
             f"Reanalysis must start from the latest report version, {latest.version}",
         )
+    await charge(connection, principal, config, checks=1, investigation_id=investigation_id)
     published_version = None
     target_version = latest.version
     pending_claims: list[str] = []

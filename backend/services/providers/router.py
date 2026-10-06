@@ -99,15 +99,15 @@ class RouterClient:
         if not route.startswith("auto:"):
             body["models"] = [route]
         for attempt in range(RATE_LIMIT_ATTEMPTS):
-            await self.bucket.acquire()
-            response, raw = await send(
-                self.client,
-                PROVIDER,
-                "POST",
-                self._url(COMPLETIONS),
-                headers=self._headers(),
-                json=body,
-            )
+            async with self.bucket.request():
+                response, raw = await send(
+                    self.client,
+                    PROVIDER,
+                    "POST",
+                    self._url(COMPLETIONS),
+                    headers=self._headers(),
+                    json=body,
+                )
             if response.status_code != 429:
                 break
             # Hold every worker for the provider's Retry-After, then try again.
@@ -137,15 +137,15 @@ class RouterClient:
         if not isinstance(decision_id, str) or not decision_id:
             return
         try:
-            await self.bucket.acquire()
-            await send(
-                self.client,
-                PROVIDER,
-                "POST",
-                self._url(FEEDBACK),
-                headers=self._headers(),
-                json={"decision_id": decision_id, "feedback": "regenerated"},
-            )
+            async with self.bucket.request():
+                await send(
+                    self.client,
+                    PROVIDER,
+                    "POST",
+                    self._url(FEEDBACK),
+                    headers=self._headers(),
+                    json={"decision_id": decision_id, "feedback": "regenerated"},
+                )
         except (ProviderError, RateLimited):
             # Feedback is best effort; it never changes the outcome of the call.
             return

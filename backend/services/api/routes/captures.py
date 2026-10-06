@@ -42,6 +42,7 @@ from services.jobs.models import jobs
 from services.jobs.queue import JobQueue
 from services.models import capture_chunks, capture_sessions, investigations, principals
 from services.pipeline.stub_reports import sync_capture_stub
+from services.quotas import charge, lock_owner
 from services.reports import latest_reports
 
 router = APIRouter(tags=["captures"])
@@ -75,6 +76,7 @@ async def create_capture(
 ) -> CaptureSession:
     key = _idempotency_key(idempotency_key)
     async with engine(request).begin() as connection:
+        await lock_owner(connection, principal, settings(request))
         # Match retention's lock order; also serialize concurrent create replays.
         await connection.execute(
             select(principals.c.id).where(principals.c.id == principal.id).with_for_update()
@@ -95,6 +97,7 @@ async def create_capture(
             return session_response(session, [], session.started_at).model_copy(
                 update={"state": "open", "closed_at": None}
             )
+        await charge(connection, principal, settings(request), checks=1)
         identifier = uuid.uuid4()
         await connection.execute(
             insert(investigations).values(
@@ -212,6 +215,7 @@ async def reserve(
 ) -> None:
     chunk = metadata.chunk
     async with engine(request).begin() as connection:
+        await lock_owner(connection, principal, settings(request))
         session = await load_owned(
             connection, capture_sessions, capture_id, principal, for_update=True
         )
@@ -249,6 +253,7 @@ async def reserve(
             > settings(request).upload_max_bytes
         ):
             raise invalid("CAPTURE_TOO_LARGE", "Capture byte limit exceeded", 413)
+        await charge(connection, principal, settings(request), upload_bytes=chunk.size_bytes)
         await connection.execute(
             insert(capture_chunks).values(
                 session_id=capture_id,

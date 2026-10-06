@@ -4,6 +4,12 @@
 
 ### Added
 
+- Opt-in backend quota infrastructure (#22): transactional daily check and upload
+  reservations, active-check admission limits, a Scholarxiv near-exhaustion intake
+  pause with typed retryable errors, shared request concurrency slots and a
+  content-free operator quota summary. Proposed limits remain disabled by default;
+  owner approval and Groq/Voxide/claim-stage integration remain pending.
+
 - Android Inbox and Report screens (AN-08, #34): Your space now shows an Inbox of
   checks with stage and age (never a queue position), Cancel with confirmation,
   Try again and Continue checking, offline and update-needed notes, and a Library

@@ -65,11 +65,21 @@ class Settings(BaseSettings):
     evidence_provider_timeout_seconds: float = Field(default=20, gt=0, le=120)
     # Optional contact address for the Crossref polite pool; never required.
     crossref_mailto: str = Field(default="", max_length=200)
+    # Proposed BC-D06 demo policy; opt-in until the product owner approves the limits.
+    quotas_enabled: bool = False
+    quota_daily_checks: int = Field(default=6, ge=1, le=1000)
+    quota_active_checks: int = Field(default=2, ge=1, le=100)
+    quota_daily_upload_bytes: int = Field(default=DEFAULT_UPLOAD_MAX_BYTES, gt=0)
+    quota_claims_per_run: int = Field(default=5, ge=1, le=100)
+    quota_provider_concurrency: int = Field(default=2, ge=1, le=10)
+    quota_provider_reserve: int = Field(default=50, ge=1, le=1200)
 
     @model_validator(mode="after")
     def backoff_bounds(self) -> Self:
         if self.job_retry_max_backoff_seconds < self.job_retry_backoff_seconds:
             raise ValueError("job_retry_max_backoff_seconds must be at least the base backoff")
+        if self.quotas_enabled and self.quota_provider_reserve >= self.scholarxiv_requests_per_hour:
+            raise ValueError("quota_provider_reserve must be below scholarxiv_requests_per_hour")
         return self
 
     @field_validator("database_url")

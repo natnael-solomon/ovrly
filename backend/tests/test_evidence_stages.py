@@ -373,11 +373,20 @@ async def test_retrieval_failures_are_typed(client, app, providers):
     assert len(providers.requests) == before
 
 
-async def test_claim_budget_keeps_extra_claims_visible_and_provisional(client, app, providers):
+@pytest.mark.parametrize("quota_policy", [False, True])
+async def test_claim_budget_keeps_extra_claims_visible_and_provisional(
+    client, app, providers, quota_policy
+):
     headers = await guest(client)
     investigation_id = await create_investigation(client, headers, "budget")
     base = await publish_claims(app, investigation_id)
-    evidence = stages(app, providers, evidence_max_claims=1)
+    evidence = stages(
+        app,
+        providers,
+        evidence_max_claims=20 if quota_policy else 1,
+        quotas_enabled=quota_policy,
+        quota_claims_per_run=1,
+    )
     await queue_retrieval(app, investigation_id, base.version)
     await run(app, evidence.retrieval, RETRIEVAL_STAGE, investigation_id)
     await run(app, evidence.assessment, ASSESSMENT_STAGE, investigation_id)
