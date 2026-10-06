@@ -137,6 +137,25 @@ class RetryPolicyTest(unittest.TestCase):
         self.assertIn("Never re-run", text)
 
 
+class FakeEmulator:
+    def __init__(self):
+        self.calls = []
+        self.ready = True
+        self.stuck = None
+
+    def wait(self):
+        self.calls.append("wait")
+        if not self.ready:
+            raise runner.android_emulator.EmulatorError("Emulator not ready")
+
+    def diagnose(self, target):
+        self.calls.append("diagnose")
+        return self.stuck
+
+    def stop(self):
+        self.calls.append("stop")
+
+
 class RunnerTest(unittest.TestCase):
     """main() with a fake Gradle that writes JUnit XML where AGP would."""
 
@@ -156,20 +175,24 @@ class RunnerTest(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.commands = []
+        self.timeouts = []
+        self.emulator = FakeEmulator()
 
     def gradle(self, *runs):
+        """Each run is (exit code, cases) or (exit code, cases, "timeout")."""
         queue = list(runs)
 
-        def run(command, cwd, check):
+        def run(command, cwd, timeout):
             self.commands.append(command)
-            code, cases = queue.pop(0)
+            self.timeouts.append(timeout)
+            code, cases, *mode = queue.pop(0)
             results = self.outputs["results"] / "debug"
             results.mkdir(parents=True)
             (results / "TEST-device.xml").write_text(junit(cases))
             coverage = self.outputs["coverage"] / "device"
             coverage.mkdir(parents=True)
             (coverage / "coverage.ec").write_bytes(b"ec")
-            return SimpleNamespace(returncode=code)
+            return SimpleNamespace(returncode=code, timed_out=mode == ["timeout"])
         return run
 
     def declare(self, names):
@@ -195,8 +218,52 @@ class RunnerTest(unittest.TestCase):
         with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_path)}), \
                 contextlib.redirect_stdout(io.StringIO()) as output:
             code = runner.main(["--label", "API 29"], runner=self.gradle(*runs),
-                               sources=sources)
-        return code, output.getvalue(), summary_path.read_text(encoding="utf-8")
+                               sources=sources, emulator=self.emulator)
+        text = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
+        return code, output.getvalue(), text
+
+    def test_waits_for_the_device_and_always_stops_the_emulator(self):
+        code, _, _ = self.main((0, {"a.A#x": PASSED}))
+        self.assertEqual(0, code)
+        self.assertEqual(["wait", "stop"], self.emulator.calls)
+        self.assertIn(f"timeout_msec={runner.TEST_TIMEOUT_MS}", " ".join(self.commands[0]))
+        self.assertLessEqual(self.timeouts[0], runner.TEST_BUDGET_S)
+
+    def test_device_never_ready_runs_no_test_and_fails(self):
+        self.emulator.ready = False
+        code, output, _ = self.main((0, {"a.A#x": PASSED}))
+        self.assertEqual(1, code)
+        self.assertEqual([], self.commands)
+        self.assertIn("no test was run", output)
+        self.assertEqual(["wait", "diagnose", "stop"], self.emulator.calls)
+
+    def test_hung_first_attempt_fails_fast_names_the_test_and_is_not_retried(self):
+        self.emulator.stuck = "a.A#y"
+        code, output, text = self.main((1, {"a.A#x": PASSED}, "timeout"),
+                                       declared=["a.A#x", "a.A#y"])
+        self.assertEqual(1, code)
+        self.assertEqual(1, len(self.commands))
+        self.assertIn("::error::Instrumented test failed on API 29: (timed out) a.A#y", output)
+        self.assertIn("killed while running a.A#y", text)
+        self.assertEqual(["wait", "diagnose", "stop"], self.emulator.calls)
+        result = json.loads((self.attempts / "result.json").read_text())
+        self.assertEqual(["(timed out) a.A#y"], result["timed_out"])
+
+    def test_hung_retry_fails_and_stops_later_retries(self):
+        self.emulator.stuck = "a.A#x"
+        code, output, _ = self.main(
+            (1, {"a.A#x": FAILED, "b.B#y": FAILED}),
+            (1, {}, "timeout"),
+        )
+        self.assertEqual(1, code)
+        self.assertEqual(2, len(self.commands), "no retry after a timed-out retry")
+        self.assertIn("(timed out) a.A#x", output)
+        self.assertIn("Instrumented test failed on API 29: b.B#y", output)
+
+    def test_emulator_is_stopped_even_when_the_suite_raises(self):
+        with self.assertRaises(ValueError):
+            self.main((0, {}), declared=[])
+        self.assertEqual(["stop"], self.emulator.calls)
 
     def test_crash_that_drops_later_tests_fails_even_if_the_retry_passes(self):
         # A crash records the running test as failed and drops the rest of the suite.

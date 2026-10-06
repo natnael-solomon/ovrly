@@ -11,6 +11,13 @@ followed by a passing retry of the one reported failure, would look green. A fir
 with missing or undeclared tests fails without a retry. The orchestrator (build.gradle.kts)
 keeps a crash from dropping later tests in the first place.
 
+Hangs fail fast and name the test: the runner applies a per-test timeout (timeout_msec), and
+all Gradle runs share a time budget. A run that exceeds it is killed with its process group,
+logcat and process state are saved next to its results, and the test that had started but
+not finished is reported; nothing is retried after a timeout. Before the first run the device
+must have booted with its system services published, and the emulator is always stopped here
+(gracefully, then killed) so that a hung emulator shutdown cannot hold the job.
+
 The first attempt's JUnit XML, HTML report and coverage data are moved under
 app/build/instrumented/attempt-1/ and each retried test's under attempt-2/run-N/, so no run
 overwrites another; jacocoDebugReport reads coverage from every run.
@@ -21,10 +28,15 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from types import SimpleNamespace
+
+import android_emulator
 
 ROOT = Path(__file__).resolve().parents[2]
 ANDROID = ROOT / "android"
@@ -36,9 +48,14 @@ OUTPUTS = {
 }
 ATTEMPTS = BUILD / "instrumented"
 SOURCES = ANDROID / "app" / "src" / "androidTest" / "java"
+# The 3-minute capture limit test runs for about 3.5 minutes; nothing else comes close.
+TEST_TIMEOUT_MS = 300_000
+TEST_BUDGET_S = 14 * 60
+KILL_GRACE_S = 15
 GRADLE = [
     "sh", "gradlew", "--no-daemon", "--console=plain", "--build-cache",
     "--dependency-verification=strict", "-Povrly.coverage=true",
+    f"-Pandroid.testInstrumentationRunnerArguments.timeout_msec={TEST_TIMEOUT_MS}",
     ":app:connectedDebugAndroidTest",
 ]
 CLASS_ARGUMENT = "-Pandroid.testInstrumentationRunnerArguments.class="
@@ -141,31 +158,78 @@ def collect_run(target):
     return test_cases(target / "results")
 
 
-def run_gradle(target, extra, runner):
+def run_with_timeout(command, cwd, timeout):
+    """Run command in its own process group; kill the whole group if it outlives timeout."""
+    process = subprocess.Popen(command, cwd=cwd, start_new_session=True)
+    try:
+        return SimpleNamespace(returncode=process.wait(timeout=timeout), timed_out=False)
+    except subprocess.TimeoutExpired:
+        for sig, wait in ((signal.SIGTERM, KILL_GRACE_S), (signal.SIGKILL, None)):
+            try:
+                os.killpg(process.pid, sig)
+            except ProcessLookupError:
+                break
+            try:
+                process.wait(timeout=wait)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+        process.wait()
+        return SimpleNamespace(returncode=process.returncode, timed_out=True)
+
+
+class Run(SimpleNamespace):
+    """One Gradle run: returncode, cases, and the test left running if it timed out."""
+
+
+def run_gradle(target, extra, runner, timeout, emulator):
     for source in OUTPUTS.values():
         shutil.rmtree(source, ignore_errors=True)
-    returncode = runner([*GRADLE, *extra], cwd=ANDROID, check=False).returncode
-    return returncode, collect_run(target)
+    if timeout <= 0:
+        collect_run(target)
+        return Run(returncode=1, cases={}, timed_out=True, stuck=None)
+    done = runner([*GRADLE, *extra], cwd=ANDROID, timeout=timeout)
+    timed_out = getattr(done, "timed_out", False)
+    cases = collect_run(target)
+    stuck = emulator.diagnose(target / "diagnostics") if timed_out else None
+    return Run(returncode=done.returncode, cases=cases, timed_out=timed_out, stuck=stuck)
 
 
-def run_attempt(number, extra=(), runner=subprocess.run):
-    return run_gradle(ATTEMPTS / f"attempt-{number}", list(extra), runner)
+def run_attempt(number, runner, deadline, emulator, clock=time.monotonic):
+    return run_gradle(ATTEMPTS / f"attempt-{number}", [], runner, deadline - clock(), emulator)
 
 
-def run_retry(tests, runner=subprocess.run):
+def run_retry(tests, runner, deadline, emulator, clock=time.monotonic):
     """Retry each failed test in its own run: the runner's `class` argument honours one
-    `Class#method` entry per run, so a combined list would leave tests unretried."""
-    returncode, cases = 0, {}
+    `Class#method` entry per run, so a combined list would leave tests unretried. A run that
+    times out ends the retries; tests not retried stay failed."""
+    returncode, cases, timeouts = 0, {}, []
     for index, name in enumerate(tests, start=1):
-        code, ran = run_gradle(ATTEMPTS / "attempt-2" / f"run-{index}",
-                               [CLASS_ARGUMENT + name], runner)
-        returncode = returncode or code
-        cases.update(ran)
-    return returncode, cases
+        run = run_gradle(ATTEMPTS / "attempt-2" / f"run-{index}", [CLASS_ARGUMENT + name],
+                         runner, deadline - clock(), emulator)
+        returncode = returncode or run.returncode
+        cases.update(run.cases)
+        if run.timed_out:
+            timeouts.append(run.stuck or name)
+            break
+    return returncode, cases, timeouts
 
 
-def evaluate(first_code, first, second_code=None, second=None, expected=None):
-    """Return (passed, flaky, failed, reason) for one or two attempts."""
+def evaluate(first_code, first, second_code=None, second=None, expected=None,
+             first_timeout=None, retry_timeouts=()):
+    """Return (passed, flaky, failed, reason) for one or two attempts.
+
+    first_timeout is None when the first attempt finished, otherwise the test it was
+    running when the time budget ran out ("" when unknown); retry_timeouts names tests
+    whose retry ran out of time.
+    """
+    if first_timeout is not None:
+        stuck = first_timeout or "unknown test (see diagnostics/logcat.txt)"
+        return False, [], [f"(timed out) {stuck}"], (
+            f"The first attempt exceeded the {TEST_BUDGET_S // 60}-minute budget and was "
+            f"killed while running {stuck}; logcat and process state are in "
+            "attempt-1/diagnostics. Not retried."
+        )
     problems = inventory_problems(expected, first) if expected is not None else []
     if problems:
         return False, [], problems, (
@@ -180,6 +244,9 @@ def evaluate(first_code, first, second_code=None, second=None, expected=None):
     if not retry or second is None:
         return False, [], retry or ["(Gradle failure without a failing test)"], reason
     flaky, failed = classify(first, second)
+    if retry_timeouts:
+        failed = sorted(set(failed) | {f"(timed out) {name}" for name in retry_timeouts})
+        reason += " A retry ran out of time; see attempt-2/run-N/diagnostics."
     if second_code != 0 and not failed:
         failed = ["(retry failed without a failing test)"]
     return not failed, flaky, failed, reason
@@ -206,27 +273,66 @@ def summary(label, first, second, flaky, failed, reason):
     return "\n".join(lines)
 
 
-def main(argv=None, runner=subprocess.run, sources=None):
+class Emulator:
+    """The CI emulator, through android_emulator; tests substitute a fake."""
+
+    def wait(self):
+        android_emulator.wait_until_ready()
+
+    def diagnose(self, target):
+        return android_emulator.diagnose(target)
+
+    def stop(self):
+        android_emulator.stop()
+
+
+def main(argv=None, runner=run_with_timeout, sources=None, emulator=None,
+         clock=time.monotonic):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--label", required=True, help="Device label, e.g. 'API 34'")
     args = parser.parse_args(argv)
+    emulator = emulator or Emulator()
     shutil.rmtree(ATTEMPTS, ignore_errors=True)
+    ATTEMPTS.mkdir(parents=True)
+    try:
+        return run_suite(args.label, runner, sources, emulator, clock)
+    finally:
+        try:
+            emulator.stop()
+        except android_emulator.EmulatorError as error:
+            print(f"::error::{error}")
+
+
+def run_suite(label, runner, sources, emulator, clock):
     expected = expected_tests(sources)
-    first_code, first = run_attempt(1, runner=runner)
+    try:
+        emulator.wait()
+    except android_emulator.EmulatorError as error:
+        emulator.diagnose(ATTEMPTS / "boot-diagnostics")
+        print(f"::error::{error}; no test was run (see boot-diagnostics).")
+        return 1
+    deadline = clock() + TEST_BUDGET_S
+    first_run = run_attempt(1, runner, deadline, emulator, clock)
+    first_code, first = first_run.returncode, first_run.cases
+    first_timeout = (first_run.stuck or "") if first_run.timed_out else None
     retry, _ = plan_retry(first_code, first)
     second_code = second = None
-    if retry and not inventory_problems(expected, first):
-        second_code, second = run_retry(retry, runner)
-    passed, flaky, failed, reason = evaluate(first_code, first, second_code, second, expected)
-    text = summary(args.label, first, second, flaky, failed, reason)
+    retry_timeouts = []
+    if retry and first_timeout is None and not inventory_problems(expected, first):
+        second_code, second, retry_timeouts = run_retry(retry, runner, deadline, emulator,
+                                                        clock)
+    passed, flaky, failed, reason = evaluate(first_code, first, second_code, second, expected,
+                                             first_timeout, retry_timeouts)
+    text = summary(label, first, second, flaky, failed, reason)
     (ATTEMPTS / "result.json").write_text(json.dumps({
-        "label": args.label,
+        "label": label,
         "passed": passed,
         "flaky": flaky,
         "failed": failed,
         "expected": sorted(expected),
         "first_attempt": first,
         "retry": second,
+        "timed_out": [name for name in failed if name.startswith("(timed out)")],
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(text)
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -234,9 +340,9 @@ def main(argv=None, runner=subprocess.run, sources=None):
         with Path(summary_path).open("a", encoding="utf-8") as stream:
             stream.write(text)
     for name in flaky:
-        print(f"::warning::Flaky instrumented test on {args.label}: {name}")
+        print(f"::warning::Flaky instrumented test on {label}: {name}")
     for name in failed:
-        print(f"::error::Instrumented test failed on {args.label}: {name}")
+        print(f"::error::Instrumented test failed on {label}: {name}")
     return 0 if passed else 1
 
 
