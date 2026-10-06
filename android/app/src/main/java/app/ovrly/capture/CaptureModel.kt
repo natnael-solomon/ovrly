@@ -136,9 +136,36 @@ data class CaptureState(
             upload.status != UploadStatus.NONE &&
             upload.status != UploadStatus.NOT_SENT
 
-    /** [message] followed by the upload summary, for status text. */
+    /** [message] followed by the upload summary, for status text; a Stop gets one short line. */
     val displayMessage: String
-        get() = upload.summary()?.let { "$message $it" } ?: message
+        get() = if (message.startsWith(STOPPED)) {
+            stoppedLine(upload) + message.removePrefix(STOPPED).takeIf { it.isNotBlank() }
+                ?.let { ".$it" }.orEmpty()
+        } else {
+            upload.summary()?.let { "$message $it" } ?: message
+        }
+
+    companion object {
+        /** The stop reason of a user Stop; [displayMessage] turns it into the short stop line. */
+        const val STOPPED = "Stopped."
+
+        /** For example "Stopped · 16 sent · research continues". */
+        internal fun stoppedLine(upload: UploadProgress): String = buildList {
+            add("Stopped")
+            val server = if (upload.testServer) " to the test server" else ""
+            if (upload.chunks > 0) add("${upload.sent} sent$server")
+            if (upload.unsent > 0) {
+                val wifi = if (upload.wifiOnly) ", waiting for Wi-Fi" else ""
+                add("${upload.unsent} on device$wifi")
+            }
+            when (upload.continueResearch) {
+                true -> add("research continues")
+                false -> add("research will not continue")
+                null -> Unit
+            }
+            upload.detail?.takeIf { upload.status == UploadStatus.NOT_SENT }?.let(::add)
+        }.joinToString(" · ")
+    }
 }
 
 object CaptureStore {

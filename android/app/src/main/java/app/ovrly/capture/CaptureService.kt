@@ -75,7 +75,7 @@ class CaptureService : Service() {
                 sessionLifecycle.stop()
                 stopSelf()
             } else {
-                finish("Capture stopped. Research is not connected.")
+                finish(CaptureState.STOPPED)
             }
             return START_NOT_STICKY
         }

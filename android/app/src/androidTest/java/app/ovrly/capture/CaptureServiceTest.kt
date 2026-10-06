@@ -93,7 +93,7 @@ class CaptureServiceTest {
         CaptureControl.stop(context)
 
         val state = awaitPhase(CapturePhase.FINISHED)
-        assertTrue(state.message, state.message.startsWith("Capture stopped."))
+        assertTrue(state.message, state.message.startsWith(CaptureState.STOPPED))
         assertTrue(state.hasLocalCapture)
         assertReleased()
     }

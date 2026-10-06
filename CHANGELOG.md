@@ -11,7 +11,9 @@
   results panel polls the capture status and investigation once the server session exists,
   and capture investigations are stored in the Room store like shares. `captureApi=memory` in
   `api.local.properties` keeps the labelled in-memory test server for offline demonstrations.
-  The live panel labels stub report versions (`fixture`) as "Fixture / not live".
+  The live panel labels stub report versions (`fixture`) as "Fixture / not live". After a
+  user Stop, the companion's capture status reads as one line, for example "Stopped · 16
+  sent · research continues", instead of "Research is not connected".
 
 - Android Inbox and Report screens (AN-08, #34): Your space now shows an Inbox of
   checks with stage and age (never a queue position), Cancel with confirmation,
