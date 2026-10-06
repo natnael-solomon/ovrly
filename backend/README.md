@@ -757,7 +757,13 @@ independent opt-in. All API and worker processes must have the same configuratio
 | `OVRLY_QUOTA_PROVIDER_CONCURRENCY` | 2 simultaneous Scholarxiv requests across workers, including Papers, Router, retries and feedback |
 | `OVRLY_QUOTA_PROVIDER_RESERVE` | 50 local tokens; must be less than `OVRLY_SCHOLARXIV_REQUESTS_PER_HOUR` when enabled |
 
-Admission is serialized on the principal before locking owned records. Daily
+Admission is serialized on the principal before locking owned records. The
+admission lock is `FOR NO KEY UPDATE`: it serializes admissions and conflicts
+with saves and account links, but not with the `FOR KEY SHARE` lock a worker
+takes when it inserts a principal-owned job. The global lock order is principal,
+then owned objects (investigation, capture session), then the reanalysis
+request, then jobs, so a chunk upload cannot deadlock with a capture stage that
+holds the session and enqueues its successors. Daily
 counters, the accepted record and queued work commit or roll back together.
 Idempotent investigation/capture/reanalysis replays do not charge again, even
 while intake is paused. Chunk retries reuse their reservation. New upload
@@ -774,11 +780,16 @@ to the reserve and can increase while accepted research continues.
 
 The provider stop covers new checks, captures, upload targets and reanalyses;
 existing capture uploads, reads, saves and Stop/cancel remain usable. On the
-worker, opt-in Scholarxiv calls reserve a DB-backed request slot before taking
-a token; no token is spent when no slot is available. Calls exceeding the
+worker, opt-in Scholarxiv calls take a token and then a DB-backed request slot.
+Normal contention waits instead of failing the stage: the token refills with
+jittered sleeps and a busy slot is polled with capped exponential backoff and
+jitter. Only a total wait longer than `max_wait_seconds` (300 seconds) raises
+`RateLimited`, and a token taken for a request that got no slot is refunded.
+Calls exceeding the
 configured evidence-provider timeout fail with a typed provider error; slots
 release on success, failure and cancellation, and expired crash leases can be
-reclaimed without a sweeper. No database connection is held during the call.
+reclaimed without a sweeper. No database connection is held while waiting or
+during the call.
 Without the opt-in, the existing waiting token-bucket behavior is unchanged.
 
 Operator summary, from `backend/` with the usual database configuration:
@@ -802,8 +813,9 @@ these are not per-person abuse controls. The weighted `TokenBucket.acquire(amoun
 primitive is available for future adapters, not proof that those adapters use it.
 The existing per-input size/duration caps and #77 retention policy are unchanged.
 Tests in `tests/test_quotas.py` cover atomic admission, replay, daily reset, shared
-byte reservations, provider pause, multi-process capacity and failure cleanup
-using synthetic data and local PostgreSQL.
+byte reservations, provider pause, multi-process capacity, waiting for a busy
+request slot, the admission lock against a concurrent capture-stage publish
+and failure cleanup using synthetic data and local PostgreSQL.
 
 ## Local checks
 

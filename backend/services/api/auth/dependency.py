@@ -112,12 +112,21 @@ async def lock_active_principal(
     progress; a principal merged into an account is refused exactly like a revoked
     credential, so nothing is written under it after its saved reports moved.
     Admission quotas use an exclusive lock to serialize counters; saves use a share lock.
+
+    The exclusive lock is ``FOR NO KEY UPDATE``, not ``FOR UPDATE``. It still serializes
+    admissions against each other, against a save's share lock and against a link, but it
+    does not conflict with the ``FOR KEY SHARE`` lock that PostgreSQL takes when a worker
+    inserts a row referencing the principal (for example a job's ``owner_id``). A worker
+    that holds an owned object and then enqueues a job therefore cannot deadlock with an
+    admission waiting for that object. The global lock order is: principal (``FOR NO KEY
+    UPDATE`` or ``FOR SHARE``), then owned objects (investigation, capture session), then
+    the reanalysis request, then jobs.
     """
     row = (
         await connection.execute(
             select(principals.c.merged_into)
             .where(principals.c.id == principal.id)
-            .with_for_update(read=not exclusive)
+            .with_for_update(read=not exclusive, key_share=exclusive)
         )
     ).first()
     if row is None or row.merged_into is not None:

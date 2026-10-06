@@ -18,6 +18,7 @@ from services.settings import Settings
 
 
 async def lock_owner(connection: AsyncConnection, principal: Principal, config: Settings) -> None:
+    """Take the admission lock first: principal (NO KEY UPDATE), owned objects, request, jobs."""
     if not config.quotas_enabled:
         return
     await lock_active_principal(connection, principal, exclusive=True)

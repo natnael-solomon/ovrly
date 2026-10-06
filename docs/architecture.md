@@ -130,13 +130,18 @@ Hosted model weights stay with the provider. Credentials stay on the server; pro
 
 `services/quotas.py` applies the proposed #22 daily checks/upload reservations
 and active-check admission limits in the API's existing transactions, serialized
-by principal before owned-object locks. `quota_usage` retains one UTC-day row
+by principal before owned-object locks. The principal admission lock is
+`FOR NO KEY UPDATE`, so it never blocks a worker's foreign-key insert of a
+principal-owned job; the lock order is principal, owned objects, reanalysis
+request, jobs. `quota_usage` retains one UTC-day row
 per principal; deletion of content does not refund it. Existing replays and
 accepted chunk retries do not spend quota again. The same gate pauses new intake
 when the configured Scholarxiv local bucket is below its reserve.
 `services/providers/budget.py` reuses the shared bucket and adds expiring,
-lease-fenced `provider_slots` for opt-in outbound concurrency; no connection is
-held over the network. Papers, Router and feedback all use that path.
+lease-fenced `provider_slots` for opt-in outbound concurrency; a busy slot or an
+empty bucket is waited for with jittered backoff up to the bucket's maximum wait
+before the stage is rescheduled, and no connection is
+held while waiting or over the network. Papers, Router and feedback all use that path.
 `services/quota_summary.py` is an operator-only read command, not an API endpoint
 or provider dashboard. Groq/Voxide and the missing stage integrations remain
 explicitly unintegrated. See the [backend quota setup](../backend/README.md#opt-in-admission-quotas-22)

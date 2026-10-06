@@ -3,12 +3,13 @@ import json
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from pydantic import ValidationError
 from recovery.test_captures import DATA, close, create, put
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from test_intake_api import URL_BODY, assert_error, guest
 from test_reports_api import publish
 
@@ -29,6 +30,7 @@ from services.models import (
     quota_usage,
     report_versions,
 )
+from services.pipeline.capture import publish_capture_stage
 from services.providers.budget import TokenBucket
 from services.providers.http import ProviderError
 from services.quota_summary import summary
@@ -123,6 +125,67 @@ async def test_active_limit_serializes_concurrent_admissions_and_preserves_repla
     assert (await usage(app, owner_id)).checks == 2
     other, _, _ = await owner(client, app)
     assert (await check(client, other, "other")).status_code == 202
+
+
+async def test_chunk_put_and_capture_publish_for_one_owner_do_not_deadlock(app, client):
+    """The admission lock (principal, then session) must not block a publisher's job insert.
+
+    The publisher holds the capture session and, before enqueueing successors, waits until
+    the chunk PUT is blocked on that session while holding the principal's admission lock.
+    With ``FOR UPDATE`` the job's foreign-key ``FOR KEY SHARE`` would then deadlock.
+    """
+    headers = await guest(client)
+    session = await create(client, headers)
+    assert (await put(client, headers, session)).status_code == 200
+    capture_id = uuid.UUID(session["id"])
+    async with app.state.database.engine.begin() as connection:
+        owner_id, root = (
+            await connection.execute(
+                select(capture_sessions.c.owner_id, capture_chunks.c.job_id)
+                .join(capture_chunks, capture_chunks.c.session_id == capture_sessions.c.id)
+                .where(capture_sessions.c.id == capture_id, capture_chunks.c.seq == 0)
+            )
+        ).one()
+        # Claim this job first without touching other tests' queued work.
+        await connection.execute(
+            update(jobs)
+            .where(jobs.c.id == root)
+            .values(available_at=func.now() - timedelta(days=365))
+        )
+    app.state.quota_test_owners.add(owner_id)
+    locked = asyncio.Event()
+
+    class Barrier(JobQueue):
+        async def enqueue(self, connection, *args, **kwargs):
+            if not locked.is_set():
+                pid = await connection.scalar(select(func.pg_backend_pid()))
+                locked.set()
+                blocked = text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_locks"
+                    " WHERE NOT granted AND :pid = ANY(pg_blocking_pids(pid)))"
+                )
+                while True:
+                    async with self.database.engine.connect() as probe:
+                        if await probe.scalar(blocked, {"pid": pid}):
+                            break
+                    await asyncio.sleep(0.01)
+            return await super().enqueue(connection, *args, **kwargs)
+
+    queue = Barrier(app.state.database)
+    claim = await queue.claim("deadlock-test", ["media_validation"], 30)
+    assert claim is not None and claim.id == root
+    assert await queue.start(claim.lease)
+
+    async def upload():
+        await locked.wait()
+        return await put(client, headers, session, 1)
+
+    published, response = await asyncio.wait_for(
+        asyncio.gather(publish_capture_stage(queue, claim, {}), upload()), 30
+    )
+    assert published is not None
+    assert response.status_code == 200, response.text
+    assert (await usage(app, owner_id)).upload_bytes == 2 * len(DATA)
 
 
 async def test_daily_budget_survives_cancel_and_content_deletion_then_resets_utc(app, client):
@@ -294,9 +357,10 @@ async def test_request_slots_are_shared_release_on_cancel_and_recover_expiry(dat
     try:
         async with a.request():
             with pytest.raises(RateLimited):
-                async with b.request():
+                async with replace(b, max_wait_seconds=0.2).request():
                     pytest.fail("Second process exceeded concurrency")
             async with first.engine.connect() as connection:
+                # The timed-out waiter refunded its unit.
                 assert await TokenBucket.balance(connection, name, 10) < 9.1
                 assert await TokenBucket.balance(connection, name, 10) >= 9
         entered = asyncio.Event()
@@ -356,37 +420,125 @@ async def test_weighted_bucket_and_invalid_costs(database_url):
         await database.close()
 
 
-async def test_two_slots_reject_third_and_rate_limit_releases_slot(database_url):
+async def slot_count(database, name):
+    async with database.engine.connect() as connection:
+        return await connection.scalar(
+            select(func.count())
+            .select_from(provider_slots)
+            .where(provider_slots.c.provider == name)
+        )
+
+
+async def test_third_concurrent_request_waits_for_a_slot(database_url):
+    config = Settings(database_url=database_url, _env_file=None)
+    databases = [Database(config) for _ in range(3)]
+    name = "two-slots-" + uuid.uuid4().hex
+    active, peak = 0, 0
+
+    async def call(database):
+        nonlocal active, peak
+        async with TokenBucket(database, name, 100, concurrency=2).request():
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.2)
+            active -= 1
+
+    try:
+        await asyncio.wait_for(asyncio.gather(*(call(d) for d in databases)), 30)
+        assert peak == 2
+        assert await slot_count(databases[0], name) == 0
+    finally:
+        for database in databases:
+            await database.close()
+
+
+async def test_slot_wait_past_the_limit_raises_and_rate_limit_releases_slot(database_url):
     database = Database(Settings(database_url=database_url, _env_file=None))
-    bucket = TokenBucket(database, "two-slots-" + uuid.uuid4().hex, 2, concurrency=2)
+    bucket = TokenBucket(
+        database, "two-slots-" + uuid.uuid4().hex, 3, concurrency=2, max_wait_seconds=0.3
+    )
     try:
         async with bucket.request(), bucket.request():
             with pytest.raises(RateLimited):
                 async with bucket.request():
                     pytest.fail("A third request exceeded the two-slot limit")
-            async with database.engine.connect() as connection:
-                assert (
-                    await connection.scalar(
-                        select(func.count())
-                        .select_from(provider_slots)
-                        .where(provider_slots.c.provider == bucket.name)
-                    )
-                    == 2
-                )
+            assert await slot_count(database, bucket.name) == 2
+        # The third request's unit was refunded; spend it so the bucket is empty.
+        await bucket.acquire()
         with pytest.raises(RateLimited):
             async with bucket.request():
                 pytest.fail("A request with no rate units was admitted")
-        async with database.engine.connect() as connection:
-            assert (
-                await connection.scalar(
-                    select(func.count())
-                    .select_from(provider_slots)
-                    .where(provider_slots.c.provider == bucket.name)
-                )
-                == 0
-            )
+        assert await slot_count(database, bucket.name) == 0
     finally:
         await database.close()
+
+
+async def test_request_waits_with_backoff_and_gives_up_past_the_limit(monkeypatch):
+    now = [0.0]
+    slept = []
+    slots = [None, None, None, 0]
+    released = []
+
+    async def sleep(seconds):
+        slept.append(seconds)
+        now[0] += seconds
+
+    async def take(self, amount=1):
+        return 0.0
+
+    async def slot(self, lease_id):
+        return slots.pop(0)
+
+    async def refund(self, amount=1):
+        released.append(amount)
+
+    class Released:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def execute(self, statement):
+            return None
+
+    monkeypatch.setattr(TokenBucket, "_take", take)
+    monkeypatch.setattr(TokenBucket, "_slot", slot)
+    monkeypatch.setattr(TokenBucket, "_refund", refund)
+    engine = SimpleNamespace(begin=Released)
+    bucket = TokenBucket(
+        SimpleNamespace(engine=engine),
+        "synthetic",
+        100,
+        max_wait_seconds=10,
+        sleep=sleep,
+        concurrency=2,
+        clock=lambda: now[0],
+    )
+    async with bucket.request():
+        pass
+    # Capped exponential backoff with full jitter: each pause is within [backoff/2, backoff].
+    assert 0.025 <= slept[0] <= 0.05
+    assert 0.05 <= slept[1] <= 0.1
+    assert 0.1 <= slept[2] <= 0.2
+    assert not released
+    slots.extend([None] * 100)
+    slept.clear()
+    with pytest.raises(RateLimited):
+        async with bucket.request():
+            pytest.fail("A request waited past max_wait_seconds")
+    assert sum(slept) <= 10.0 + 1e-9 and now[0] >= 10.0
+    assert released == [1]
+
+    async def slow_refill(self, amount=1):
+        return 11.0
+
+    monkeypatch.setattr(TokenBucket, "_take", slow_refill)
+    slept.clear()
+    with pytest.raises(RateLimited):
+        async with bucket.request():
+            pytest.fail("A request waited for units past max_wait_seconds")
+    assert not slept
 
 
 async def test_expired_capture_and_rejected_principal_cannot_hold_or_spend_quota(app, client):
