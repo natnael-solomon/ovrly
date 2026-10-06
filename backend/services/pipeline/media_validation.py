@@ -342,6 +342,8 @@ async def _prepare(
                 video_duration = await _probe_video_packets(settings, limits, snapshot, "%+2")
             if video_duration is None:
                 raise InvalidMedia("Missing decoded video duration") from None
+            if video_duration > settings.max_shared_duration_seconds:
+                raise MediaTooLong
             limit_duration = await _probe_video_packets(
                 settings, limits, snapshot, f"{settings.max_shared_duration_seconds}%+1"
             )

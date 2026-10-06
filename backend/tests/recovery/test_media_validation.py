@@ -32,8 +32,8 @@ def media_worker(harness, config, **overrides):
     )
 
 
-def executable(tmp_path, code):
-    tool = tmp_path / "media-tool"
+def executable(tmp_path, code, name="media-tool"):
+    tool = tmp_path / name
     tool.write_text(f"#!{sys.executable} -S\n" + code)
     tool.chmod(0o700)
     return str(tool)
@@ -518,12 +518,21 @@ payload.setdefault("format", {})["duration"] = "1.000000"
 print(json.dumps(payload))
 """,
     )
+    ffmpeg_with_decoded_duration = executable(
+        tmp_path,
+        """
+print("out_time_us=2000000")
+print("progress=end")
+""",
+        "media-ffmpeg",
+    )
     config = media_settings(
         harness,
         embed_worker=True,
         storage_dir=tmp_path / "uploads",
         artifacts_dir=tmp_path / "artifacts",
         ffprobe_path=ffprobe_with_understated_duration,
+        ffmpeg_path=ffmpeg_with_decoded_duration,
         max_shared_duration_seconds=1,
     )
     app = create_app(config)
