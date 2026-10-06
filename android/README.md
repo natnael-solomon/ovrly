@@ -428,6 +428,7 @@ sh gradlew --no-daemon --console=plain :app:assembleDebugAndroidTest
 | `CaptureServiceTest` | `CaptureService` with a real MediaProjection: start and Stop, Stop with a continuation choice (the first choice wins), the 3-minute limit, playback-audio permission denied, consent not granted, and the projection stopped by the system mid-capture. After every stop the playback recorder, notification and service are gone, the platform lists no projection for the app (`dumpsys media_projection`, checked positive while recording) and every capture display, in any state, is removed, which only the app's `VirtualDisplay.release()` can do. One accommodation: on Android 10 (API 29) the platform keeps the display of a projection it stopped until the app's process dies, and `release()` can no longer remove it, so for that one path the display check runs only from API 30 and the test asserts the stop reported no cleanup issue; counts are taken against the value before start, so the kept display does not affect later tests. |
 | `CaptureUploadsTest` | The Wi-Fi-only preference is saved and reschedules the upload chain on unmetered networks, and `CaptureUploadWorker` under WorkManager sends every chunk to the in-memory server and closes it with either choice. |
 | `OverlayServiceTest` | `OverlayService` show, hide, repeated show and demo/fixture/reset modes leave exactly one window, then none; a refused or mid-display revoked overlay permission leaves none; `OverlayWindow` shows and closes one window. Windows are counted from `dumpsys window`. |
+| `InboxScreenTest`, `ReportScreenTest`, `AppShellTest` | The #34 screens on the device, built from the shared result fixtures (debug assets): the empty, loading, offline, waking and update-needed Inbox; rows with stage and age and their Try again, Open the new check and Cancel (confirmed, or kept) actions; a busy row; the Report's work and coverage cards, version picker, notice, claim detail, evidence cards, stale, fixture and earlier-version notes, failed and no-claims states and flagged sources; the correction sheet (validation, save, cancel) and the full-video sheet (no expansion until a check is picked and the match confirmed); Your space with Inbox, Library and labeled samples, a real report closing when the tab changes, Explore topics and search, a sample report's save and back, the capture bar and Back. `AppShellTest` runs on API 29 only: on API 31+ the CI emulators' software GPU loses colour buffers drawing the chrome wordmark and sample artwork, and the emulator goes offline. |
 
 The fixture provider (`ShareFixtureProvider`) is declared in the androidTest
 manifest, so it runs in the test package's own process and uid; it is plain Java
@@ -458,6 +459,17 @@ crash fails only that test. `.github/scripts/android_instrumented.py` also
 requires every `@Test` declared in `src/androidTest` to appear in the first
 attempt's results; missing or undeclared tests fail the job without a retry, so
 an aborted run cannot pass on a retry of the one test it reported.
+
+Before the first test, `.github/scripts/android_emulator.py` waits until the
+emulator reports `sys.boot_completed` and publishes the input, package, activity,
+window and settings services (at most 3 minutes), and the emulator is always
+stopped afterwards: `emu kill`, then a forced kill after 60 seconds. Each test
+has a 5-minute timeout (`timeout_msec`), and all Gradle runs share a 14-minute
+budget. A run that exceeds it is killed, logcat, processes and activities are
+saved under `app/build/instrumented/.../diagnostics/`, and the test that was
+running is reported; nothing is retried after a timeout. API 29 cold-boots
+without a snapshot: resumed from a snapshot, its emulator reported boot before
+the input service existed and hung in its own shutdown.
 
 Flake policy: `.github/scripts/android_instrumented.py` retries each failed test
 once, in its own run, in the same job and names flakes in the job summary and as warnings. A
@@ -507,6 +519,8 @@ shows the job in progress. Report saves and export are #36 and #39.
 | `ChecksViewStateTest` | The Inbox row and Report view of each of the six result fixtures (corrected version 2 with original wording and evidence, provisional capture-timebase partial with an unassessed claim and contradicting evidence, failed with its code and no findings, cancelled, retracted and shallow sources, no claims without a verdict), retry and continue rules, a requested cancel, unknown values rendered neutrally, claim changes between versions, correction validation, ages, full-video candidates, a retried check offering the new one, failed, cancelled and unknown-source checks never offered as a full video, and a fixture version labelled from its own flag. |
 | `ReportApiTest` | Correction, expansion (with the confirmed full video and its echo in the receipt) and deeper bodies and keys, a typed reanalysis refusal, cancel without a body, the list stored for the Inbox and failing as a whole on one unreadable item, version listing and caching, a retry creating a new check of the same link, and a retry reusing its stored key after a failed answer, then pointing at the new check and never retrying again, and a list read while a share waits importing nothing new. |
 | `OpenReportSessionTest` | A close, another open or a version change during a slow load keeps the newer state; a report not stored yet shows nothing; reanalysis keys stay the same per request and change with the chosen video, the base version or after an answer. |
+| `ReportLoaderTest` | The shown version against the one it superseded, the version list labels, an earlier version read once and shown read-only with its fixture flag, re-reading the list after an invalidation, offline and failed-version notes, no request for a check without a report, and staleness from the cached latest version. |
+| `ReportApiModelsTest`, `ReportLabelsTest` | The BE-10 inline bodies built in code enforce their rules (ids, versions, timestamps, the confirmed full video, request limits) and malformed bodies fail to parse; every contract value on these screens has distinct words, unknown values read as not recognised and never as a verdict, only retracted, withdrawn and corrected sources warn, and coverage, intervals, source titles, failures and commands read as specified. |
 
 Compose previews of the six fixtures and the Inbox are in
 `src/debug/java/app/ovrly/ui/ReportFixturePreviews.kt`. The debug build adds
