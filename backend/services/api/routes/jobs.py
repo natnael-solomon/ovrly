@@ -48,16 +48,15 @@ async def require_empty_body(request: Request) -> None:
             )
 
 
-async def _forward_cancel(
-    connection: AsyncConnection, queue: JobQueue, row: Row[Any]
-) -> CancelOutcome | None:
-    """A published reanalysis step hands the request on to a successor (retrieval,
-    assessment or the next expansion check). Cancelling the receipt job cancels the job the
-    request points at now; ``None`` when there is nothing to forward to."""
+async def _lock_request(connection: AsyncConnection, row: Row[Any]) -> UUID | None:
+    """Lock the reanalysis request a job works for and return the job it points at now.
+
+    Lock order, shared with ``publish_evidence_stage`` and retention: the request row
+    first, then jobs. ``None`` when the job works for no request."""
     request_id = reanalysis_request_of(row.stage, row.payload)
     if request_id is None:
         return None
-    current = await connection.scalar(
+    current: UUID | None = await connection.scalar(
         select(reanalysis_requests.c.job_id)
         .where(
             reanalysis_requests.c.id == request_id,
@@ -65,12 +64,7 @@ async def _forward_cancel(
         )
         .with_for_update()
     )
-    if current is None or current == row.id:
-        return None
-    state = await connection.scalar(select(jobs.c.state).where(jobs.c.id == current))
-    if state == JobState.CANCELLED.value:
-        return CancelOutcome.EFFECTIVE
-    return await queue.request_cancel(current, connection=connection)
+    return current
 
 
 async def cancel_owned_job(
@@ -79,20 +73,32 @@ async def cancel_owned_job(
     """Cancel one of the caller's jobs inside ``connection``; replays the stored receipt.
 
     Shared by the cancel route and the ``queue_cancel`` voice action. Missing, other-owner,
-    legacy ownerless and deleted jobs raise the same 404.
+    legacy ownerless and deleted jobs raise the same 404. A published reanalysis step has
+    handed its request on to a successor (retrieval, assessment or the next expansion
+    check); cancelling it cancels the job the request points at now.
     """
+    # Read without a lock to find the request; a job's stage and payload never change.
+    peek = await load_owned(connection, jobs, job_id, principal)
+    if peek.state == JobState.DELETED.value:
+        # A tombstone may be purged meanwhile, which locks it before its request row.
+        raise not_found()
+    current = await _lock_request(connection, peek)
     row = await load_owned(connection, jobs, job_id, principal, for_update=True)
     # Deletion revokes reads, including a previously stored cancellation receipt.
     if row.state == JobState.DELETED.value:
         raise not_found()
     if row.cancel_outcome is not None:
         return CancelOutcome(row.cancel_outcome)
-    outcome: CancelOutcome | None = None
     if row.state == JobState.CANCELLED.value:
         outcome = CancelOutcome.EFFECTIVE
-    elif row.state == JobState.PUBLISHED.value:
-        outcome = await _forward_cancel(connection, queue, row)
-    if outcome is None:
+    elif row.state == JobState.PUBLISHED.value and current is not None and current != job_id:
+        state = await connection.scalar(select(jobs.c.state).where(jobs.c.id == current))
+        outcome = (
+            CancelOutcome.EFFECTIVE
+            if state == JobState.CANCELLED.value
+            else await queue.request_cancel(current, connection=connection)
+        )
+    else:
         outcome = await queue.request_cancel(job_id, connection=connection)
     await connection.execute(
         update(jobs).where(jobs.c.id == job_id).values(cancel_outcome=outcome.value)

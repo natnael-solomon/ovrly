@@ -162,7 +162,7 @@ async def publish_evidence_stage(
     request_id = reanalysis_request_of(job.key.stage, job.payload)
     async with queue.database.engine.begin() as connection:
         if request_id is not None:
-            # Same lock order as a forwarded cancel: the request row, then its jobs.
+            # Lock order shared with cancel_owned_job and retention: the request row, then jobs.
             await connection.execute(
                 select(reanalysis_requests.c.id)
                 .where(reanalysis_requests.c.id == request_id)
