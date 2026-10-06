@@ -4,6 +4,12 @@
 
 ### Added
 
+- Opt-in backend quota infrastructure (#22): transactional daily check and upload
+  reservations, active-check admission limits, a Scholarxiv near-exhaustion intake
+  pause with typed retryable errors, shared request concurrency slots and a
+  content-free operator quota summary. Proposed limits remain disabled by default;
+  owner approval and Groq/Voxide/claim-stage integration remain pending.
+
 - Live capture wiring (#31): capture chunks now go to the backend. `data/CaptureApi.kt`
   sends `/v1/captures` create (with `Idempotency-Key`), multipart chunk `PUT`, close with
   `continue_research` and status through the AN-03 API client and guest credential, and

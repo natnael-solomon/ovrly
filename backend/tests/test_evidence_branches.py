@@ -276,7 +276,7 @@ async def test_an_empty_bucket_waits_with_jitter_and_gives_up_past_the_limit(mon
     waits = [12.0, 0.0]
     slept = []
 
-    async def take(self):
+    async def take(self, amount=1):
         return waits.pop(0)
 
     async def sleep(seconds):

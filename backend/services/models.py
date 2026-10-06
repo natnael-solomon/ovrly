@@ -4,6 +4,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -46,6 +47,29 @@ credentials = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("revoked_at", DateTime(timezone=True), nullable=True),
     UniqueConstraint("token_hash", name="uq_credentials_token_hash"),
+)
+
+quota_usage = Table(
+    "quota_usage",
+    metadata,
+    Column(
+        "owner_id",
+        UUID(as_uuid=True),
+        ForeignKey("principals.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("day", Date, nullable=False),
+    Column("checks", Integer, nullable=False),
+    Column("upload_bytes", BigInteger, nullable=False),
+)
+
+provider_slots = Table(
+    "provider_slots",
+    metadata,
+    Column("provider", String(64), primary_key=True),
+    Column("slot", Integer, primary_key=True),
+    Column("lease_id", UUID(as_uuid=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
 )
 
 uploads = Table(

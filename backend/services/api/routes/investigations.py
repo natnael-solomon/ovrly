@@ -44,6 +44,7 @@ from services.pipeline.intake import (
     INTAKE_VERSION,
     intake_stage_key,
 )
+from services.quotas import charge, lock_owner
 from services.reports import latest_reports, summarize_job
 
 router = APIRouter(tags=["investigations"])
@@ -283,6 +284,14 @@ async def _create(
     key: str,
     digest: str,
 ) -> tuple[int, dict[str, Any]]:
+    await lock_owner(connection, principal, settings(request))
+    stored = await connection.scalar(
+        select(idempotency_keys.c.key).where(
+            idempotency_keys.c.owner_id == principal.id, idempotency_keys.c.key == key
+        )
+    )
+    if stored is not None:
+        return await _replay(connection, principal.id, key, digest)
     now = datetime.now(UTC)
     source = body.source
     upload_id = None
@@ -299,6 +308,7 @@ async def _create(
         upload_id = upload.id
     else:
         source_url = str(source.url)
+    await charge(connection, principal, settings(request), checks=1)
     row = (
         await connection.execute(
             insert(investigations)
