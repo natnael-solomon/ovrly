@@ -89,6 +89,7 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_JOB_RETRY_BACKOFF_SECONDS` | 1; positive, at most 60. Base of the exponential backoff |
 | `OVRLY_JOB_RETRY_MAX_BACKOFF_SECONDS` | 60; positive, at most 3600 and at least the base. Caps backoff and provider retry-after hints |
 | `OVRLY_GOOGLE_CLIENT_ID` | Empty; Google Web client ID that linked ID tokens must be issued for (BC-D07). Configuration, not a secret. Empty leaves `POST /v1/principals/link` unavailable with 503 `ACCOUNT_LINK_UNAVAILABLE` |
+| `OVRLY_STUB_REPORTS` | `0`. **Development only.** `1` makes both worker modes follow each `intake` job with one report version built from `packages/contracts/fixtures/results/complete.json`, so clients have report data before the assessment pipeline (#27). See [Reports, saves and voice actions](#reports-saves-and-voice-actions). There is no production environment flag to refuse it against; never enable it for real users |
 
 The helper checks for at least 2 GiB free on the checkout filesystem before and
 after dependency/image setup and after database startup. It stops further work if
@@ -131,7 +132,9 @@ adds the retry class, per-class retry counters and the provider request id to
 `jobs`, `0005_account_link` adds `google_sub` (unique), `merged_into` and
 `merged_at` to `principals`, and `0006_job_ownership` adds the nullable
 `owner_id` and `cancel_outcome` columns to `jobs`. `0007_captures` adds capture
-sessions and chunk reservations/receipts. Future schema changes require a reviewed migration
+sessions and chunk reservations/receipts. `0008_reports` adds immutable
+`report_versions` (with a trigger that rejects `UPDATE`), `saved_reports`,
+`reanalysis_requests` and the `voice_actions` audit table. Future schema changes require a reviewed migration
 and upgrade/downgrade coverage, not `create_all()` during API startup.
 
 ### Durable jobs and recovery
@@ -430,13 +433,13 @@ schema with the contracts validator.
 | Route | Behavior |
 | --- | --- |
 | `POST /v1/principals/guest` | Mints a guest principal and an opaque bearer token (`ovk_` prefix, 256 random bits). Only a SHA-256 digest is stored; the token is returned once and never logged. 201. |
-| `POST /v1/principals/link` | Body `{"provider": "google", "id_token": ...}`, bearer-authenticated as the calling guest ([BC-D07](../docs/decisions/BC-D07-account-link.md)). The token is verified against `OVRLY_GOOGLE_CLIENT_ID`. Unknown subject: the caller is upgraded in place (`kind` becomes `account`, credential stays valid, every object keeps its owner) and the response is `200 {principal_id, kind, linked: true, merged_saved_reports, credential: null}`; repeating it is the same 200. Subject already owned by another principal A: in one transaction the caller's explicitly saved reports move to A (`transfer_saved_reports`, zero until #33 adds the table), the caller's credentials are revoked, `merged_into` is recorded, and the response carries `principal_id = A` plus a new `credential` for A. Investigations, uploads and idempotency keys stay with the revoked guest. Already linked to a different subject: 409 `ACCOUNT_ALREADY_LINKED`. Bad token: 401 `INVALID_ID_TOKEN`. No client ID configured: 503 `ACCOUNT_LINK_UNAVAILABLE`. |
+| `POST /v1/principals/link` | Body `{"provider": "google", "id_token": ...}`, bearer-authenticated as the calling guest ([BC-D07](../docs/decisions/BC-D07-account-link.md)). The token is verified against `OVRLY_GOOGLE_CLIENT_ID`. Unknown subject: the caller is upgraded in place (`kind` becomes `account`, credential stays valid, every object keeps its owner) and the response is `200 {principal_id, kind, linked: true, merged_saved_reports, credential: null}`; repeating it is the same 200. Subject already owned by another principal A: in one transaction the caller's explicitly saved reports move to A (`transfer_saved_reports`; a report both had saved keeps A's save, and `merged_saved_reports` counts the saves that moved), the caller's credentials are revoked, `merged_into` is recorded, and the response carries `principal_id = A` plus a new `credential` for A. Investigations, uploads and idempotency keys stay with the revoked guest. Already linked to a different subject: 409 `ACCOUNT_ALREADY_LINKED`. Bad token: 401 `INVALID_ID_TOKEN`. No client ID configured: 503 `ACCOUNT_LINK_UNAVAILABLE`. |
 | `POST /v1/uploads` | Declares `size_bytes`, `sha256` and optional `content_type`; returns a scoped `target`, `max_bytes` and `expires_at`. Over the byte limit: 413 `UPLOAD_TOO_LARGE`. |
 | `PUT /v1/uploads/{id}/content` | Streams raw bytes to the target while holding the upload row lock, so a concurrent completion waits for the whole body. Exceeding the smaller of the limit and the declared size discards the partial content with 413. Expired: 410 `UPLOAD_EXPIRED`. |
 | `POST /v1/uploads/{id}/complete` | Re-reads the stored bytes and compares size and SHA-256 with the declaration. Mismatch deletes the bytes and returns 409 `UPLOAD_MISMATCH`; missing bytes return 409 `UPLOAD_CONTENT_MISSING`. Completing twice returns the same 200. |
 | `POST /v1/investigations` | Requires `Idempotency-Key` (400 if missing or longer than 200 characters). Body: `{"source": {"kind": "url", "url": ...}}` or `{"source": {"kind": "upload", "upload_id": ...}}`, each with optional `duration_ms`. Writes the investigation, the key and the `intake` job in one transaction before answering 202. Same key and body replays the original 202 body; same key with a different body is 409 `IDEMPOTENCY_KEY_REUSED`. Keys are scoped per owner. |
 | `GET /v1/investigations` | Newest-first list of the caller's investigations (at most 100). |
-| `GET /v1/investigations/{id}` | `state`, `stage`, a coverage placeholder, `version` and a safe `error` object or `null`. `state` reflects the intake job: `queued` or `leased` read as `queued`, `running` as `running`, `failed` as `failed` with a `PROCESSING_FAILED` error unless a specific code was recorded, `cancelled` or `deleted` as `cancelled`; a published job leaves the stored state. Lease owners, fencing tokens, retry classes and failure types are never exposed. |
+| `GET /v1/investigations/{id}` | The contract read model (`packages/contracts/schemas/investigation.schema.json`): `state`, `stage`, a coverage placeholder, `version`, a safe `error` object or `null`, `source`, timestamps, plus `processing_status`, `job` and `report`. `state` reflects the intake job: `queued` or `leased` read as `queued`, `running` as `running`, `failed` as `failed` with a `PROCESSING_FAILED` error unless a specific code was recorded, `cancelled` or `deleted` as `cancelled`; a published job leaves the stored state. `report` is the latest published version or `null`; a provisional report reads `processing_status: partial` (state `running`), a final one `complete` (state `completed`), and `version` then equals `report.version`. Without a report, queued reads `waiting` and running `checking`. A failed investigation has `processing_status: failed`, an error and never a report; cancelled keeps a report published before the cancel. `job` is the most recently created live job of the investigation (intake, reanalysis or capture chunk), with only the client-visible columns of `JobSummary`; it is `null` when every job is deleted. Lease owners, fencing tokens and failure types are never exposed. POST 202 and list items use the same model. |
 
 Every route except guest minting requires `Authorization: Bearer <token>`.
 Missing credentials return 401 `AUTHENTICATION_REQUIRED`; malformed, unknown or
@@ -473,9 +476,94 @@ are mirrored there; the new read models (`Claim`, `Evidence`, `Assessment`,
 `ReportVersion`, `JobSummary`, `InvestigationReadModel`) generate the six
 result fixtures through `packages/contracts/roundtrip.py`, and
 `tests/test_contract_roundtrip.py` fails when a model and its fixture drift.
-No route emits the read models yet: `GET /v1/investigations/{id}` still returns
-`InvestigationResponse`, and adopting `InvestigationReadModel` (adding
-`processing_status`, `job` and `report`) is #33 work.
+The investigation routes (`POST /v1/investigations` 202, `GET
+/v1/investigations[/{id}]`) emit `InvestigationReadModel`, and the report routes
+below emit `ReportVersion` (BE-10, #33).
+
+## Reports, saves and voice actions
+
+BE-10 (#33). Every route requires the bearer principal and is
+owner-scoped: another owner's investigation, report or job is the same 404
+`NOT_FOUND` as a missing one, and the voice endpoint answers it with
+`VOICE_TARGET_NOT_FOUND`.
+
+| Route | Behavior |
+| --- | --- |
+| `GET /v1/investigations/{id}/reports` | `{investigation_id, items}`: every published version, oldest first, with `id`, `version`, `created_at`, `provisional`, `change_summary`, `supersedes` and `fixture`, without claims or evidence. Empty `items` when no report exists. |
+| `GET /v1/investigations/{id}/reports/{version}` | The full immutable `ReportVersion`. A missing version is 404; `version` below 1 or not an integer is 422. |
+| `POST /v1/reports/{report_id}/save` | No body. Saves the caller's snapshot of the version and returns `{report_id, investigation_id, version, saved_at, report}`. Idempotent: a repeat returns 200 with the same body and the original `saved_at`. Report ids are canonical lowercase UUID strings; anything else is 404. A report the caller already saved stays saveable after a second-device link moved the save. |
+| `GET /v1/investigations/{id}/reports/{version}/export` | The allowlisted export payload (decision 0003 contents): each claim's normalized meaning, interval, correction flag and assessment; source links with type, inspection level, retraction status and relation; `provisional`, `fixture`, the report version, `retrieved_at` (the retrieval date) and plain-language `limitations`. Transcript wording, evidence excerpts, assessment notes, media and identity are never included. On-device export (AN-11) covers the submission; this is the server-built equivalent. |
+| `POST /v1/investigations/{id}/reanalyze` | Requires `Idempotency-Key`. Body `{"reason": "correction", "base_version", "claim_id", "proposition"}`, `{"reason": "expansion", "base_version", "match_confirmed": true}` or `{"reason": "deeper", "base_version"}`; 202 with `{id, investigation_id, reason, base_version, published_version, job, created_at}`. See below. |
+| `GET /v1/reports/saved` | The caller's saves, newest first, at most 100, including saves moved to this account by BC-D07. Used by AN-10 recovery. |
+| `POST /v1/voice/actions` | Body per `packages/contracts/schemas/voice-action-request.schema.json`. Executes one action of the BC-D04 allowlist against one owned target and answers 200 with `result` `accepted` or `denied` per `voice-action-response.schema.json`; see below. |
+
+Report versions are written once by `services/reports.py
+publish_report_version`, which locks the investigation so versions run 1, 2, 3
+and each names the one it supersedes; a database trigger rejects any `UPDATE`
+of `report_versions`. The assessment pipeline (#27) and reanalysis (below)
+are the future publishers. A save copies the version's payload into
+`saved_reports` without a foreign key to it, so a save moved to an account
+survives the expiry of the guest workspace that produced it.
+
+Voice actions reuse the REST logic: `open_check` loads the owned
+investigation, `save_report` is the save above and `queue_cancel` is the job
+cancel with its durable receipt (`effective` answers "Cancelled the check.",
+`requested` "Stopping the check.", a published or failed job
+`VOICE_ACTION_INVALID_STATE`). The queue has no transition out of a terminal job
+state and its retry is a worker-side lease operation, so `queue_retry` and
+`queue_continue` change nothing: a queued, leased or running job is accepted
+("The check is already in progress.") and a published, failed or cancelled job
+is denied with `VOICE_ACTION_INVALID_STATE`; a new check or `POST .../reanalyze`
+is the path forward. An action name outside the allowlist with a well-formed
+`request_id` is a 200 denial with `VOICE_ACTION_UNSUPPORTED`; for an allowlisted
+action a missing or mismatched target or an extra field (for example
+`confirmed`) is 422 `VALIDATION_FAILED`. The server does not emit
+`VOICE_TARGET_NOT_OWNED`, so a voice request cannot probe whether another
+caller's object exists. Every request writes one `voice_actions` row in the same
+transaction as the action: the structured request, the outcome and the response.
+No transcript or audio is received or stored, and the log line carries only the
+action name and result. Repeating a `request_id` replays the stored response
+without running the action again; reusing it for a different action or target is
+409 `IDEMPOTENCY_KEY_REUSED`.
+
+Reanalysis starts from the latest version only: another `base_version` is 409
+`REPORT_VERSION_STALE`, and an investigation without a report is 409
+`REPORT_NOT_AVAILABLE` (action `retry`). A **correction** publishes a new version at
+once (`published_version`): the claim keeps its original wording, gains
+`correction` with the superseded proposition attributed to the user, and loses its
+evidence and assessment until the job reruns that claim alone; every other claim
+keeps its assessment, and earlier versions never change. A missing claim is 422
+`CLAIM_NOT_IN_VERSION`, an identical meaning 422 `CORRECTION_UNCHANGED`.
+**Expansion** to the full video requires `match_confirmed: true` (otherwise 422
+`MATCH_CONFIRMATION_REQUIRED`); **deeper** searches further. Neither changes content
+at once (`published_version` null). Every reason enqueues one owner-scoped
+`reanalysis` job in the same transaction, whose payload names the version to
+supersede and the claims to rerun (no user text). Its job summary reports the
+contract stage the work starts at (`retrieval`, or `media_validation` for an
+expansion), since `reanalysis` is a handler name, not a contract stage. The owner
+can cancel it through
+`POST /v1/jobs/{id}/cancel`. The assessment pipeline (#27) registers the production
+`reanalysis` handler; until then these jobs stay queued. Same key and body replays
+the 202 body; the same key with a different body is 409 `IDEMPOTENCY_KEY_REUSED`.
+`reanalysis_requests` keeps one row per accepted request.
+
+Saves take a share lock on the caller's principal row. A save racing a
+second-device link waits for it and, once the guest is merged, is refused with 401
+`INVALID_CREDENTIAL` like any revoked credential, so no save is stranded under a
+merged guest after `transfer_saved_reports` ran; this covers the voice
+`save_report` action too.
+
+`OVRLY_STUB_REPORTS=1` is a **development-only** bridge until #27: after the
+`intake` stage the worker publishes one report version per investigation from
+`packages/contracts/fixtures/results/complete.json` (version 1, provisional,
+synthetic claims, stored with `fixture` true and a change summary starting
+"Development fixture, not a check of this media"). It is off by default, logs a
+warning at startup when on, needs the repository's `packages/contracts`
+directory next to `backend/`, and `publish_stub_report` raises
+`StubReportsDisabled` when called without the opt-in. With the same opt-in a
+stub `reanalysis` handler publishes one fixture version per request, adding a
+placeholder `insufficient_evidence` assessment for each unassessed claim. Never
+present a stub as a check. #27 removes both.
 
 ## Local checks
 
@@ -510,7 +598,15 @@ client identity, cross-owner 404s, idempotent replay and 409, upload limits,
 expiry and hash mismatch, the job-state view of investigations, account
 linking with an injected token verifier (in-place upgrade, idempotent repeat,
 second-device merge, the owner invariant and the Google verifier's outcome
-mapping with a patched library call), and the shared error shape validated
+mapping with a patched library call), report versions, saves and voice
+actions (cross-owner 404 on every route, immutability, save idempotency, saved
+reports moving on a second-device link while investigations and uploads stay,
+a save refused while a concurrent link merges the guest, reanalysis
+(correction versioning, confirmed expansion, replay, stale bases, the stub
+handler) and the export allowlist,
+the allowlist, malformed requests, replay and the audit row, the stub path
+refused when disabled, with responses validated against the contract schemas),
+and the shared error shape validated
 against `packages/contracts/schemas/error.schema.json`. The test database is
 migrated to `head` once per session. No provider keys, Google calls or
 personal media are needed; upload tests use synthetic bytes in a temporary

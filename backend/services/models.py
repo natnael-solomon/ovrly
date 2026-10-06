@@ -160,3 +160,105 @@ capture_chunks = Table(
         index=True,
     ),
 )
+
+# BE-10 (#33). A report version is immutable (a database trigger rejects UPDATE); corrections
+# and expansions insert a new version. ``owner_id`` repeats the investigation's owner so the
+# owner-scoped loader applies directly.
+report_versions = Table(
+    "report_versions",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column(
+        "investigation_id",
+        UUID(as_uuid=True),
+        ForeignKey("investigations.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column(
+        "owner_id",
+        UUID(as_uuid=True),
+        ForeignKey("principals.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("version", Integer, nullable=False),
+    Column("change_summary", Text, nullable=False),
+    # True only for development stub reports built from the contract fixtures.
+    Column("fixture", Boolean, nullable=False),
+    Column("payload", JSONB, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint(
+        "investigation_id", "version", name="uq_report_versions_investigation_version"
+    ),
+    Index("ix_report_versions_owner_id", "owner_id"),
+)
+
+# An explicit save keeps a snapshot of the version, with no foreign key to it: saves moved to
+# an account by a second-device link (BC-D07) must survive the guest's workspace expiry.
+saved_reports = Table(
+    "saved_reports",
+    metadata,
+    Column(
+        "owner_id",
+        UUID(as_uuid=True),
+        ForeignKey("principals.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("report_id", UUID(as_uuid=True), primary_key=True),
+    Column("investigation_id", UUID(as_uuid=True), nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("report", JSONB, nullable=False),
+    Column("saved_at", DateTime(timezone=True), nullable=False),
+    Index("ix_saved_reports_owner_saved", "owner_id", "saved_at"),
+)
+
+# One row per accepted reanalysis request (BE-10): the idempotency record, the version a
+# correction published at once and the version the reanalysis job published later.
+reanalysis_requests = Table(
+    "reanalysis_requests",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column(
+        "owner_id",
+        UUID(as_uuid=True),
+        ForeignKey("principals.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column(
+        "investigation_id",
+        UUID(as_uuid=True),
+        ForeignKey("investigations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("idempotency_key", String(200), nullable=False),
+    Column("request_hash", String(64), nullable=False),
+    Column("reason", String(16), nullable=False),
+    Column("base_version", Integer, nullable=False),
+    Column("published_version", Integer, nullable=True),
+    Column("result_version", Integer, nullable=True),
+    Column("job_id", UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True),
+    Column("response", JSONB, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("owner_id", "idempotency_key", name="uq_reanalysis_requests_owner_key"),
+)
+
+# Audit and replay record of each voice action (BC-D04). No transcript or audio is received
+# or stored; only the structured request and the response sent back.
+voice_actions = Table(
+    "voice_actions",
+    metadata,
+    Column(
+        "owner_id",
+        UUID(as_uuid=True),
+        ForeignKey("principals.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("request_id", String(128), primary_key=True),
+    Column("action", String(64), nullable=False),
+    Column("target_kind", String(16), nullable=True),
+    Column("target_id", String(128), nullable=True),
+    Column("result", String(16), nullable=False),
+    Column("error_code", String(64), nullable=True),
+    Column("response", JSONB, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)

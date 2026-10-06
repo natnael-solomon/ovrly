@@ -9,14 +9,14 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import insert, select, text, update
+from sqlalchemy import delete, insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from services.api.auth.credentials import hash_token, mint_token
 from services.api.auth.dependency import Principal
 from services.api.auth.google import VerifiedIdentity
 from services.api.errors import ApiError
-from services.models import credentials, principals
+from services.models import credentials, principals, saved_reports
 
 ACCOUNT_KIND = "account"
 
@@ -42,12 +42,26 @@ async def transfer_saved_reports(
 ) -> int:
     """Move the explicitly saved reports of ``from_principal`` to ``to_principal``.
 
-    Saved reports have no table yet; BE-10 (#33) adds it and the ``UPDATE ... WHERE
-    owner_id = from_principal`` this function then issues. Until then nothing is
-    transferable and the count is zero. Investigations, uploads, idempotency keys and
-    temporary history are deliberately not transferred (BC-D07).
+    Runs in the caller's link transaction and touches only rows owned by ``from_principal``.
+    A report both principals saved keeps the account's earlier save and drops the guest's
+    duplicate; the count is the number of saves that moved. Investigations, uploads,
+    idempotency keys and temporary history are deliberately not transferred (BC-D07).
     """
-    return 0
+    already_saved = select(saved_reports.c.report_id).where(
+        saved_reports.c.owner_id == to_principal
+    )
+    await connection.execute(
+        delete(saved_reports).where(
+            saved_reports.c.owner_id == from_principal,
+            saved_reports.c.report_id.in_(already_saved),
+        )
+    )
+    moved = await connection.execute(
+        update(saved_reports)
+        .where(saved_reports.c.owner_id == from_principal)
+        .values(owner_id=to_principal)
+    )
+    return moved.rowcount
 
 
 async def link_account(

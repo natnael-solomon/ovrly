@@ -524,8 +524,18 @@ async def test_investigation_state_reflects_job_state(
         assert body["error"] is None
     else:
         assert body["error"]["code"] == expected_error
-    for internal in ("worker-host-1234", "PrivateExceptionType", "transient", "leased", "lease"):
+    # Lease owners and failure types never appear. The retry class and the raw job state are
+    # client-visible only inside the contract's job summary (job.schema.json).
+    for internal in ("worker-host-1234", "PrivateExceptionType", "lease_owner", "fencing"):
         assert internal not in fetched.text
+    outside_job = json.dumps({key: value for key, value in body.items() if key != "job"})
+    for internal in ("transient", "leased"):
+        assert internal not in outside_job
+    if job_state == "deleted":
+        assert body["job"] is None
+    else:
+        assert body["job"]["state"] == job_state and body["job"]["retry_class"] == "transient"
+    CONTRACT_VALIDATOR.validate(body, "investigation.schema.json")
     listed = await client.get("/v1/investigations", headers=headers)
     assert listed.json()["items"][0]["state"] == expected_state
 

@@ -55,7 +55,7 @@ round-trip check reports whole-file diffs).
 | `investigation-create-request.schema.json` | `InvestigationCreateRequest`; `UrlSource` or `UploadSource` discriminated on `kind` | `POST /v1/investigations` body. |
 | `investigation.schema.json` | `InvestigationReadModel` (`InvestigationResponse` plus `processing_status`, `job`, `report`) | `POST /v1/investigations` 202, `GET /v1/investigations[/{id}]`; the six result fixtures. |
 | `job.schema.json` | `JobSummary` (client-visible columns of `jobs`) | Nested in an investigation; voice `job` targets. |
-| `report-version.schema.json` | `ReportVersion` | Nested in an investigation; `GET .../reports/{version}` in #33. |
+| `report-version.schema.json` | `ReportVersion` | Nested in an investigation; `GET /v1/investigations/{id}/reports/{version}` and the `report` snapshot of the inline `SavedReport` component (BE-10, #33). |
 | `claim.schema.json` | `Claim`, `ClaimCorrection` | Items of `report.claims`. |
 | `evidence.schema.json` | `Evidence`, `EvidenceSource` | Items of `report.evidence`. |
 | `assessment.schema.json` | `Assessment`, `EvidenceRelation` | Items of `report.assessments`. |
@@ -70,11 +70,11 @@ round-trip check reports whole-file diffs).
 request models and `InvestigationResponse`, `UploadResponse` existed before this
 revision and are unchanged; `Coverage`, `Interval`, `Claim`, `ClaimCorrection`,
 `EvidenceSource`, `Evidence`, `EvidenceRelation`, `Assessment`, `ReportVersion`,
-`JobSummary` and `InvestigationReadModel` are new read models that no route emits
-yet. `GET /v1/investigations/{id}` still returns the nine-field
-`InvestigationResponse`; adopting `InvestigationReadModel` there (adding
-`processing_status`, `job` and `report`) is #19 part 2 / #33 work, which is why
-those three fields are required in the schema rather than optional.
+`JobSummary` and `InvestigationReadModel` are read models. Since BE-10 (#33)
+`POST /v1/investigations` (202), `GET /v1/investigations/{id}` and the list items
+return `InvestigationReadModel`, so `processing_status`, `job` and `report` are
+always present, as the schema requires; `backend/tests/test_investigation_read_model.py`
+validates the live responses in each status against `investigation.schema.json`.
 
 ### Investigation read model
 
@@ -365,11 +365,27 @@ the validator checks that echo. No voice denial is retryable without the caller
 changing something, so every fixture uses `retryable: false`; the
 `retryable`/`action` values above are proposals for #33 to confirm.
 
-The code names are final only after review with the BE-10 (#33) owner. Request
-bodies that fail schema validation (missing target, unknown action, extra
-fields) are rejected by the framework before a handler runs and do not produce
-a voice-action response; #33 decides the HTTP status and whether that generic
-validation error also uses the shared error shape.
+The code names are final only after review with the BE-10 (#33) owner. The
+BE-10 server (`backend/services/api/routes/voice.py`) answers as follows:
+
+- A well-formed `request_id` with an action name of 1 to 64 characters outside
+  the allowlist is a 200 denial with `VOICE_ACTION_UNSUPPORTED`, echoing the
+  target only when it is well-formed (the `unsupported-action` fixture).
+- For an allowlisted action, a body that fails the request schema (missing or
+  mismatched target, extra fields such as `confirmed`, a bad `request_id`) is
+  422 `VALIDATION_FAILED` in the shared error shape, with no voice response and
+  no audit row.
+- A missing target and another caller's target are both
+  `VOICE_TARGET_NOT_FOUND`, matching the 404 policy of every REST route. The
+  server does not emit `VOICE_TARGET_NOT_OWNED`; it stays in the schema, so
+  the `cross-owner-denied` fixture remains valid contract data but does not
+  describe this server.
+- `queue_retry` and `queue_continue` never change a job: the queue has no
+  transition out of a terminal state. They are accepted for a queued, leased
+  or running job and denied with `VOICE_ACTION_INVALID_STATE` for a published,
+  failed or cancelled one.
+- Repeating a `request_id` (per caller) replays the stored response; reusing it
+  for a different action or target is 409 `IDEMPOTENCY_KEY_REUSED`.
 
 ### Provisional status and the client-local action
 
@@ -438,17 +454,27 @@ copy them.
 `openapi.json` is an OpenAPI 3.1 document for the routes the backend serves
 today (`/v1/principals/guest`, `/v1/uploads`, `/v1/uploads/{id}/content`,
 `/v1/uploads/{id}/complete`, `/v1/investigations`,
-`/v1/investigations/{id}`, `/v1/jobs/{job_id}/cancel`, `/v1/jobs/{job_id}`) plus
-`POST /v1/voice/actions`. Every request and
+`/v1/investigations/{id}`, `/v1/jobs/{job_id}/cancel`, `/v1/jobs/{job_id}`, the
+capture routes, and from BE-10 (#33) `/v1/investigations/{id}/reports`,
+`/v1/investigations/{id}/reports/{version}`,
+`/v1/investigations/{id}/reports/{version}/export`,
+`/v1/investigations/{id}/reanalyze`, `/v1/reports/{report_id}/save` and
+`/v1/reports/saved`) plus `POST /v1/voice/actions`. Every request and
 response schema is a `$ref` into `schemas/`, through named components
 (`#/components/schemas/Investigation` is `schemas/investigation.schema.json`),
 so the document cannot describe a shape the JSON Schemas and the fixtures do not
-have. The two small FastAPI-only bodies without a schema file
-(`GuestPrincipalRequest`, `GuestPrincipalResponse`, `InvestigationList`) are
-defined inline and mirror `services/api/schemas.py`. `info.version` must equal
-`VERSION`. Capture-session, capture-chunk, job, report-version, claim,
+have. The small FastAPI-only bodies without a schema file
+(`GuestPrincipalRequest`, `GuestPrincipalResponse`, `AccountLinkRequest`,
+`AccountLinkResponse`, `InvestigationList` and, from BE-10, `ReportVersionList`,
+`ReportVersionSummary`, `SavedReport`, `SavedReportList`, `ReanalysisRequest`,
+`ReanalysisResponse` and `ReportExport`) are defined inline
+and mirror `services/api/schemas.py`. The BE-10 bodies are inline so the
+Android schema cross-check (`ContractEnumsTest`) needs no change until the
+Android side models them; their nested report is
+`schemas/report-version.schema.json`. `info.version` must equal
+`VERSION`. Capture-session, capture-chunk, job, claim,
 evidence and assessment schemas are published as components for the Android
-models before their own endpoints exist (#33 and the pipeline tasks); the
+models before their own endpoints exist (the pipeline tasks); the
 spectral override list in `.spectral.yaml` names them and shrinks as paths are
 added. The document is hand-maintained; the FastAPI-generated document at
 `/openapi.json` is bootstrap output and is not the contract.
@@ -589,8 +615,8 @@ schema/fixture link in #62, #18 and #33.
 
 ## Not in this package
 
-- Adoption of `InvestigationReadModel` by the live routes, `GET
-  .../reports/{version}` and reanalysis: #33 and the pipeline tasks.
+- Real assessment content: the pipeline tasks (#27). Reanalysis and the export payload (BE-10) are published as the
+  inline `ReanalysisRequest`, `ReanalysisResponse` and `ReportExport` components.
   When they land, their paths join `openapi.json` and the matching spectral
   override entries are removed.
 - Android models for the new schemas: #62 part 2, from the handoff above. Until

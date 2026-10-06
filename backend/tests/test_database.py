@@ -30,7 +30,7 @@ def test_migration_roundtrip_and_drift(database_url):
         )
         assert result.returncode == 0, result.stdout + result.stderr
         if args == ["current"]:
-            assert "0007_captures (head)" in result.stdout
+            assert "0008_reports (head)" in result.stdout
 
 
 async def test_real_database_connection_and_disposal(database_url):

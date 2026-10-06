@@ -15,6 +15,7 @@ from services.jobs.handlers import JobHandler, default_handlers
 from services.jobs.queue import JobQueue
 from services.jobs.retries import RetryPolicy
 from services.logging import configure_logging
+from services.pipeline.stub_reports import enable_stub_reports
 from services.privacy import RETENTION_STAGE, Retention
 from services.settings import Settings, load_settings
 from services.worker.runtime import Worker
@@ -40,6 +41,8 @@ def create_app(
         active_handlers = dict(
             handlers if handlers is not None else default_handlers(app.state.upload_store)
         )
+        if config.stub_reports:
+            enable_stub_reports(active_handlers)
         if config.retention_enabled:
             active_handlers[RETENTION_STAGE] = retention.run
         else:

@@ -102,4 +102,23 @@ async def current_principal(request: Request) -> Principal:
     return Principal(id=row.id, kind=row.kind)
 
 
+async def lock_active_principal(connection: AsyncConnection, principal: Principal) -> None:
+    """Share-lock the caller's principal row for the rest of the transaction.
+
+    ``current_principal`` authenticates on its own connection, so a second-device link
+    (BC-D07) can merge the caller after authentication. The share lock waits for a link in
+    progress; a principal merged into an account is refused exactly like a revoked
+    credential, so nothing is written under it after its saved reports moved.
+    """
+    row = (
+        await connection.execute(
+            select(principals.c.merged_into)
+            .where(principals.c.id == principal.id)
+            .with_for_update(read=True)
+        )
+    ).first()
+    if row is None or row.merged_into is not None:
+        raise _invalid_credential()
+
+
 CurrentPrincipal = Annotated[Principal, Depends(current_principal)]

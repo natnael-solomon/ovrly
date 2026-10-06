@@ -4,6 +4,26 @@
 
 ### Added
 
+- Backend report versions, explicit saves, reanalysis, export and voice actions
+  (BE-10, #33): immutable, owner-scoped report versions with change summaries
+  (`GET /v1/investigations/{id}/reports[/{version}]`), idempotent saves with a
+  snapshot (`POST /v1/reports/{id}/save`, `GET /v1/reports/saved`) that move to
+  the account on a second-device link (BC-D07) and cannot be stranded by a
+  concurrent link, `POST /v1/investigations/{id}/reanalyze` (a user correction
+  publishes a new version that keeps the original wording and reruns only that
+  claim; expansion requires a confirmed match; deeper search; each enqueues an
+  owner-scoped job), an allowlisted export payload with provisional flag and
+  retrieval date (`GET .../reports/{version}/export`), the full contract read
+  model (`processing_status`, `job`, `report`) from every investigation route so
+  current Android clients can parse it, and `POST /v1/voice/actions`
+  enforcing the BC-D04 allowlist with ownership checks, typed denials, replay by
+  `request_id` and an audit row per action without any transcript. Migration
+  `0008_reports`. A development-only `OVRLY_STUB_REPORTS` setting (off by
+  default) publishes a clearly labelled fixture report until the assessment
+  pipeline (#27) exists. The operations join the `0.2.0-draft` OpenAPI document
+  as additions. Real assessment content and the production reanalysis handler
+  arrive with #27.
+
 - Incremental backend capture sessions with owner-scoped multipart chunk intake,
   durable duplicate receipts, gap/modality manifests, a 180000ms timeline cap,
   explicit Stop continuation and polling. Each chunk enters the durable queue
