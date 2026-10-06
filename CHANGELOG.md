@@ -20,6 +20,13 @@
   in the job with 90% floors for capture, share and contract parsing and at most
   a one-point drop against `main` (#13).
 
+- Capture pipeline orchestration (#24): successful byte validation atomically
+  queues `asr` and `device_text`, then `claim_extraction` after both publish,
+  with owner-scoped, idempotent per-chunk jobs and Stop cancellation across the
+  chain. Capture polling reads claim progress from the latest report, including
+  fixture-labelled stub versions. Real stage handlers and real-claims validation
+  remain #20/#25; queued work is not reported as successful analysis.
+
 - Report versions carry `fixture` (true only for development stub versions) in every
   report read, including the `report` of an investigation, so clients can label stub
   claims as a fixture rather than live results. Additive to `0.2.0-draft`; the

@@ -389,14 +389,45 @@ audio/frame streams must be packaged before using this transport.
 
 Each accepted chunk is available to the worker before close. Both worker modes
 register `CaptureProcessor`, which re-verifies stored bytes under a session lock
-and publishes a durable validation result. **ASR, OCR and claim analysis remain
-#20/#25/#27/#29**: a published validation job still reads `waiting`, with empty
-`claims` and `claim_extraction_status: not_started`, never complete/no-claims
-(the development-only `OVRLY_STUB_REPORTS` changes this for fixture reports; see
-[Reports, saves and voice actions](#reports-saves-and-voice-actions)).
-The per-claim envelope is typed for the pipeline handoff; no synthetic finding
-is emitted by the API. Android codecs mirror the additions, but device upload
-and polling integration remain AN-07.
+and publishes a durable validation result. Publication atomically queues `asr`
+and `device_text` for that chunk; only after **both** publish does
+`claim_extraction` enter the queue. All four use the contract stage names and
+the identifier-only payload `{"capture_id": "<uuid>", "seq": 0}`, with ownership
+on the job row. Previously queued validation payloads using `session_id` and
+`owner_id` remain readable; successors use the new payload. Stage keys retain
+the capture/sequence hash and version 1, changing only the stage name.
+
+`services/pipeline/capture.py` publishes and enqueues in one transaction with
+the existing lease/generation fence. Session locks serialize the two observation
+publishers with Stop and retention; retries cannot duplicate successors, a
+failed prerequisite cannot start extraction, and Stop without continuation
+cancels all queued/in-flight stages, not just byte validation. A publication
+transaction failure releases the lease for retry. No migration or replay of
+already published pre-orchestration validation jobs is performed.
+
+The production **ASR, device-text and claim handlers remain #20/#25**; absent
+handlers leave their jobs queued, never successful placeholders. Register them
+under `asr`, `device_text` and `claim_extraction` in both worker modes. Their
+published results must contain the real stage artifacts; orchestration neither
+transcribes nor extracts claims. Retrieval/assessment remain #27.
+
+Capture polling keeps each validation job ID as the stable chunk receipt while
+reporting failures, cancellation and active work across its downstream stages.
+It reads claims from the **latest report version**, independent of
+`OVRLY_STUB_REPORTS`: unassessed claims are `checking` (or `cancelled` after Stop
+without continuation), provisional assessments are `partial`, and final
+assessments are `complete`. Extraction is `not_started` without a report,
+`partial` for a provisional report and `complete` for a final report, including
+a final report with no claims. Byte validation alone never means no claims.
+Investigation job summaries include the downstream capture stages too.
+
+The #33 capture stub exercises report progression with `OVRLY_STUB_REPORTS=1`;
+it still generates only explicitly labelled fixture reports after validation
+and does not install pretend production ASR/text/claim handlers. Recovery tests
+use synthetic observation results to exercise the fan-in separately. The final
+end-to-end run with real claims waits for #20/#25. See
+[Reports, saves and voice actions](#reports-saves-and-voice-actions).
+Android device upload and polling integration remain AN-07.
 
 The existing upload byte budget applies to the whole session, including pending
 reservations. Multipart metadata is limited to 8192 bytes and total transport
@@ -591,9 +622,11 @@ a Stop without continuing) with `claim_extraction_status` `partial` or `complete
 Every such version is stored with `fixture` true, carries `"fixture": true` in the
 report read model and starts its change summary with "Development fixture, not a
 check of this media". A real (non-fixture) report is never superseded by the stub.
-Without the opt-in, capture validation, polling and close behave exactly as described
-under [Incremental capture API](#incremental-capture-api). Never present a stub as a
-check. #27 removes all of it.
+Polling reads the latest stored report even without the opt-in; turning it off
+prevents new stub publication, not visibility of an existing fixture-labelled
+report. The production capture-stage orchestration is independent of this flag,
+as described under [Incremental capture API](#incremental-capture-api).
+Never present a stub as a check. #27 replaces stub production with real reports.
 
 ## Local checks
 

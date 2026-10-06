@@ -9,6 +9,7 @@ deletion cannot publish or otherwise mutate the job.
 
 import logging
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -292,14 +293,23 @@ class JobQueue:
             raise LeaseLost(f"Lease on job {lease.job_id} is no longer current")
         return bool(row.cancel_requested)
 
-    async def publish(self, lease: Lease, result: dict[str, Any]) -> PublishedResult:
+    async def publish(
+        self,
+        lease: Lease,
+        result: dict[str, Any],
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> PublishedResult:
         """Publish a stage result and mark the job published in one transaction.
 
         The update is compare-and-set against the lease owner, fencing token and
         generation; the stage-key uniqueness of ``job_results`` rejects any duplicate.
+        A supplied connection lets orchestration enqueue successors in the same transaction.
         """
         try:
-            async with self.database.engine.begin() as connection:
+            async with (
+                self.database.engine.begin() if connection is None else nullcontext(connection)
+            ) as connection:
                 row = (
                     await connection.execute(
                         update(jobs)
