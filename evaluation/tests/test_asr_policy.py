@@ -134,6 +134,32 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual((second.status, second.reason), (UNAVAILABLE, REASON_UNKNOWN_OUTCOME))
         self.assertEqual(second.attempts, [{"recognizer": "hosted", "result": "duplicate_send_blocked"}])
 
+    def test_retry_after_known_failure_is_allowed(self):
+        ledger = set()
+        primary = Double("hosted", ProviderError("rate_limited"))
+        first = transcribe_chunk(chunk(), primary, ledger=ledger)
+        self.assertEqual(first.reason, REASON_QUOTA)
+        self.assertEqual(ledger, set())
+        for kind in ("offline", "transient", "model_unavailable"):
+            primary.result = ProviderError(kind)
+            transcribe_chunk(chunk(), primary, ledger=ledger)
+        self.assertEqual(ledger, set())
+        primary.result = said((0, 1, "after quota"))
+        second = transcribe_chunk(chunk(), primary, ledger=ledger)
+        self.assertEqual((second.status, second.recognizer), (OK, "hosted"))
+        self.assertEqual(ledger, {("hosted", 3)})
+        third = transcribe_chunk(chunk(), primary, ledger=ledger)
+        self.assertEqual(third.attempts, [{"recognizer": "hosted", "result": "duplicate_send_blocked"}])
+
+    def test_malformed_segment_items_use_the_fallback(self):
+        fallback = Double("large-v3", said((0, 1, "fallback")))
+        for bad in (["oops"], [{"start": 0, "end": 1, "text": 5}], [None]):
+            out = transcribe_chunk(chunk(), Double("hosted", {"segments": bad}), fallback)
+            self.assertEqual((out.status, out.recognizer), (OK, "large-v3"))
+            self.assertEqual(out.attempts[0]["result"], "invalid_response")
+        out = transcribe_chunk(chunk(), Double("hosted", {"segments": ["oops"]}))
+        self.assertEqual((out.status, out.reason), (UNAVAILABLE, REASON_INVALID_RESPONSE))
+
     def test_never_success_shaped_on_failure(self):
         for kind in ("rate_limited", "transient", "unknown_outcome", "offline", "model_unavailable"):
             out = transcribe_chunk(chunk(), Double("hosted", ProviderError(kind)))

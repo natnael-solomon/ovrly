@@ -77,6 +77,7 @@ class ScreenTextReplayTest {
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val warm = Bitmap.createBitmap(MIN_EDGE, MIN_EDGE, Bitmap.Config.ARGB_8888)
         val warmed = runCatching { Tasks.await(recognizer.process(InputImage.fromBitmap(warm, 0))) }
+        warm.recycle()
         val reader = ScreenTextReader { SystemClock.elapsedRealtime() }
         emit(
             JSONObject()
@@ -115,12 +116,15 @@ class ScreenTextReplayTest {
             emit(row().put("mode", "full-image").put("status", UNAVAILABLE).put("wall_ms", 0))
             return
         }
-        emit(fullImage(recognizer, bitmap, row()))
+        val full = fullImage(recognizer, bitmap, row())
+        emit(full)
         val started = SystemClock.elapsedRealtimeNanos()
         val text = reader.read(bitmap, 0)
         val crop = row().put("mode", "production-crop").put("wall_ms", millisSince(started))
         emit(frameJson(text, bitmap.width, bitmap.height, crop))
-        bitmap.recycle()
+        // A timed-out ML Kit task is not cancelled and may still read the bitmap.
+        val inUse = full.optString("error") == TIMEOUT || text.frameInUse
+        if (!inUse) bitmap.recycle()
     }
 
     private fun fullImage(recognizer: TextRecognizer, bitmap: Bitmap, row: JSONObject): JSONObject {
@@ -152,23 +156,26 @@ class ScreenTextReplayTest {
 
     private fun clip(file: File, reader: ScreenTextReader, emit: (JSONObject) -> Unit) {
         val retriever = MediaMetadataRetriever()
-        retriever.setDataSource(file.path)
-        val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-        val durationMs = checkNotNull(duration).toLong()
-        emit(
-            JSONObject()
-                .put("type", "clip")
-                .put("file", file.name)
-                .put("duration_ms", durationMs)
-                .put("sha256", sha256(file.readBytes()))
-        )
-        val sampler = FrameSampler()
-        var probeMs = 0L
-        while (probeMs < durationMs) {
-            emit(probe(file, retriever, sampler, reader, probeMs))
-            probeMs += SamplingPolicy.PROBE_INTERVAL_MS
+        try {
+            retriever.setDataSource(file.path)
+            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val durationMs = checkNotNull(duration).toLong()
+            emit(
+                JSONObject()
+                    .put("type", "clip")
+                    .put("file", file.name)
+                    .put("duration_ms", durationMs)
+                    .put("sha256", sha256(file.readBytes()))
+            )
+            val sampler = FrameSampler()
+            var probeMs = 0L
+            while (probeMs < durationMs) {
+                emit(probe(file, retriever, sampler, reader, probeMs))
+                probeMs += SamplingPolicy.PROBE_INTERVAL_MS
+            }
+        } finally {
+            retriever.release()
         }
-        retriever.release()
     }
 
     private fun probe(
@@ -196,13 +203,16 @@ class ScreenTextReplayTest {
             .put("height", frame.height)
         val kept = decision == FrameSampler.Decision.CHANGED ||
             decision == FrameSampler.Decision.HEARTBEAT
+        var inUse = false
         if (kept || fixed) {
             val started = SystemClock.elapsedRealtimeNanos()
             val text = reader.read(frame, probeMs)
             row.put("read_ms", millisSince(started))
             frameJson(text, frame.width, frame.height, row)
+            inUse = text.frameInUse
         }
-        frame.recycle()
+        // A timed-out recognition may still read the frame; leave it to the collector.
+        if (!inUse) frame.recycle()
         return row
     }
 
@@ -298,6 +308,7 @@ class ScreenTextReplayTest {
         val IMAGE_TYPES = setOf("png", "jpg", "jpeg")
         val VIDEO_TYPES = setOf("mp4", "webm")
         const val UNAVAILABLE = "OCR_UNAVAILABLE"
+        const val TIMEOUT = "TimeoutException"
         const val UNDEFINED = ExifInterface.ORIENTATION_UNDEFINED
         const val MIN_EDGE = 32
         const val TIMEOUT_S = 30L

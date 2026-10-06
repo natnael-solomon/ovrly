@@ -115,12 +115,23 @@ def validate_segments(raw, length_ms):
     return segments, invalid
 
 
+def _segment_items(raw):
+    """Each segment must be an object whose text is a string or absent."""
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ProviderError("invalid_response", "segment is not an object")
+        text = item.get("text")
+        if text is not None and not isinstance(text, str):
+            raise ProviderError("invalid_response", "segment text is not a string")
+    return raw
+
+
 def _attempt(recognizer, chunk):
     """Run one recognizer; returns (outcome fields) or raises ProviderError."""
     response = recognizer.transcribe(chunk)
     if not isinstance(response, dict) or not isinstance(response.get("segments"), list):
         raise ProviderError("invalid_response", "missing segments list")
-    return validate_segments(response["segments"], chunk.length_ms)
+    return validate_segments(_segment_items(response["segments"]), chunk.length_ms)
 
 
 REASON_BY_KIND = {
@@ -138,8 +149,10 @@ def transcribe_chunk(chunk, primary, fallback=None, *, file_cap_bytes=None, ledg
 
     `primary` and `fallback` expose `name` and `transcribe(chunk) -> {"segments": [...]}`
     with segment times in seconds relative to the chunk. `ledger` (a set) records
-    `(recognizer, seq)` pairs already sent so a retry after an unknown outcome is visible
-    rather than silently duplicated; it is local bookkeeping, not proof of what the
+    `(recognizer, seq)` pairs whose send succeeded or ended with an unknown outcome, so
+    resending them is blocked and visible rather than silently duplicated. Known failures
+    (rate limited, offline, transient, model unavailable, invalid response) are not
+    recorded and can be retried. The ledger is local bookkeeping, not proof of what the
     provider billed or processed.
     """
     problem = audio_problem(chunk, file_cap_bytes)
@@ -151,13 +164,15 @@ def transcribe_chunk(chunk, primary, fallback=None, *, file_cap_bytes=None, ledg
         if ledger is not None and key in ledger:
             attempts.append({"recognizer": recognizer.name, "result": "duplicate_send_blocked"})
             continue
-        if ledger is not None:
-            ledger.add(key)
         try:
             segments, invalid = _attempt(recognizer, chunk)
         except ProviderError as error:
+            if ledger is not None and error.kind == "unknown_outcome":
+                ledger.add(key)
             attempts.append({"recognizer": recognizer.name, "result": error.kind})
             continue
+        if ledger is not None:
+            ledger.add(key)
         attempts.append({"recognizer": recognizer.name, "result": "ok"})
         return Outcome(
             chunk.seq,
