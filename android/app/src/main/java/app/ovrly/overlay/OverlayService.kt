@@ -398,7 +398,7 @@ class OverlayService :
             onStopCapture = { livePanel.setStopPrompt(true) },
             onCancelResearch = { CaptureStore.message(NO_RESEARCH_TO_CANCEL) },
             onDetails = { openCompanion(MainActivity.ACTION_DETAILS) },
-            modifier = compactModifier(resources.displayMetrics.density)
+            modifier = Modifier.compactMoves(resources.displayMetrics.density)
         )
     }
 
@@ -436,7 +436,7 @@ class OverlayService :
                 if (shown == LiveOverlayForm.EXPANDED) {
                     Modifier.semantics { customActions = verticalMoves("live results") }
                 } else {
-                    compactModifier(density)
+                    Modifier.compactMoves(density)
                 }
                 ).graphicsLayer { this.alpha = alpha },
             frame = frame.copy(animate = animate)
@@ -460,9 +460,9 @@ class OverlayService :
         )
     }
 
-    private fun compactModifier(density: Float): Modifier {
+    private fun Modifier.compactMoves(density: Float): Modifier {
         val maxWidth = (usableSize.width / density - 24).coerceAtLeast(48f)
-        return Modifier.widthIn(max = maxWidth.dp).semantics {
+        return widthIn(max = maxWidth.dp).semantics {
             customActions = listOf(
                 CustomAccessibilityAction("Move overlay left") {
                     moveBy(-48, 0)
