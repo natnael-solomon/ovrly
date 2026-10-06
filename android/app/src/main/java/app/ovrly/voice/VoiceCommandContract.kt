@@ -2,12 +2,22 @@ package app.ovrly.voice
 
 import org.json.JSONObject
 
-internal enum class VoiceCommandAction(val wireName: String, val label: String) {
-    OPEN_CHECK("open_check", "Open check"),
-    SAVE_REPORT("save_report", "Save report"),
-    QUEUE_CANCEL("queue_cancel", "Cancel check"),
-    QUEUE_RETRY("queue_retry", "Retry check"),
-    QUEUE_CONTINUE("queue_continue", "Continue check");
+internal enum class VoiceCommandAction(val wireName: String) {
+    OPEN_CHECK("open_check"),
+    SAVE_REPORT("save_report"),
+    QUEUE_CANCEL("queue_cancel"),
+    QUEUE_RETRY("queue_retry"),
+    QUEUE_CONTINUE("queue_continue");
+
+    /** How the action is named on screen. */
+    val label: String
+        get() = when (this) {
+            OPEN_CHECK -> "Open check"
+            SAVE_REPORT -> "Save report"
+            QUEUE_CANCEL -> "Cancel check"
+            QUEUE_RETRY -> "Retry check"
+            QUEUE_CONTINUE -> "Continue check"
+        }
 
     val requiresConfirmation: Boolean
         get() = this == QUEUE_CANCEL
