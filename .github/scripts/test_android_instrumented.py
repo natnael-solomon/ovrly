@@ -144,12 +144,25 @@ class RunnerTest(unittest.TestCase):
         self.assertNotIn(CLASS_ARGUMENT, " ".join(self.commands[0]))
         self.assertIn("::warning::Flaky instrumented test on API 29: a.A#x", output)
         self.assertIn("Flaky", text)
-        for attempt in (1, 2):
-            self.assertTrue((self.attempts / f"attempt-{attempt}/coverage/device/coverage.ec")
-                            .is_file())
+        for run in ("attempt-1", "attempt-2/run-1"):
+            self.assertTrue((self.attempts / run / "coverage/device/coverage.ec").is_file())
         result = json.loads((self.attempts / "result.json").read_text())
         self.assertEqual(["a.A#x"], result["flaky"])
         self.assertTrue(result["passed"])
+
+    def test_each_failed_test_is_retried_in_its_own_run(self):
+        code, output, _ = self.main(
+            (1, {"a.A#x": FAILED, "b.B#y": FAILED, "a.A#z": PASSED}),
+            (0, {"a.A#x": PASSED}),
+            (1, {"b.B#y": FAILED}),
+        )
+        self.assertEqual(1, code)
+        self.assertEqual([CLASS_ARGUMENT + "a.A#x", CLASS_ARGUMENT + "b.B#y"],
+                         [command[-1] for command in self.commands[1:]])
+        self.assertIn("::warning::Flaky instrumented test on API 29: a.A#x", output)
+        self.assertIn("::error::Instrumented test failed on API 29: b.B#y", output)
+        for run in ("run-1", "run-2"):
+            self.assertTrue((self.attempts / "attempt-2" / run / "results").is_dir())
 
     def test_real_failure_fails_after_one_retry(self):
         code, output, _ = self.main((1, {"a.A#x": FAILED}), (1, {"a.A#x": FAILED}))

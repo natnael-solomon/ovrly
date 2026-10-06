@@ -5,9 +5,9 @@ on the retry is a flake: the job passes, and the job summary and a warning name 
 that flakes twice in 48 hours, or twice on one PR, is quarantined with @Ignore and an issue
 on the same day. Jobs are never re-run to get a green result.
 
-Each attempt's JUnit XML, HTML report and coverage data are moved under
-app/build/instrumented/attempt-N/ so the retry cannot overwrite them; jacocoDebugReport reads
-coverage from every attempt.
+The first attempt's JUnit XML, HTML report and coverage data are moved under
+app/build/instrumented/attempt-1/ and each retried test's under attempt-2/run-N/, so no run
+overwrites another; jacocoDebugReport reads coverage from every run.
 """
 
 import argparse
@@ -86,9 +86,8 @@ def classify(first, second):
     return flaky, failed
 
 
-def collect_attempt(number):
-    """Move one attempt's outputs out of the way of the next Gradle run."""
-    target = ATTEMPTS / f"attempt-{number}"
+def collect_run(target):
+    """Move one Gradle run's outputs to target, out of the way of the next run."""
     shutil.rmtree(target, ignore_errors=True)
     target.mkdir(parents=True)
     for name, source in OUTPUTS.items():
@@ -97,11 +96,27 @@ def collect_attempt(number):
     return test_cases(target / "results")
 
 
-def run_attempt(number, extra, runner=subprocess.run):
+def run_gradle(target, extra, runner):
     for source in OUTPUTS.values():
         shutil.rmtree(source, ignore_errors=True)
     returncode = runner([*GRADLE, *extra], cwd=ANDROID, check=False).returncode
-    return returncode, collect_attempt(number)
+    return returncode, collect_run(target)
+
+
+def run_attempt(number, extra=(), runner=subprocess.run):
+    return run_gradle(ATTEMPTS / f"attempt-{number}", list(extra), runner)
+
+
+def run_retry(tests, runner=subprocess.run):
+    """Retry each failed test in its own run: the runner's `class` argument honours one
+    `Class#method` entry per run, so a combined list would leave tests unretried."""
+    returncode, cases = 0, {}
+    for index, name in enumerate(tests, start=1):
+        code, ran = run_gradle(ATTEMPTS / "attempt-2" / f"run-{index}",
+                               [CLASS_ARGUMENT + name], runner)
+        returncode = returncode or code
+        cases.update(ran)
+    return returncode, cases
 
 
 def evaluate(first_code, first, second_code=None, second=None):
@@ -145,11 +160,11 @@ def main(argv=None, runner=subprocess.run):
     parser.add_argument("--label", required=True, help="Device label, e.g. 'API 34'")
     args = parser.parse_args(argv)
     shutil.rmtree(ATTEMPTS, ignore_errors=True)
-    first_code, first = run_attempt(1, [], runner)
+    first_code, first = run_attempt(1, runner=runner)
     retry, _ = plan_retry(first_code, first)
     second_code = second = None
     if retry:
-        second_code, second = run_attempt(2, [CLASS_ARGUMENT + ",".join(retry)], runner)
+        second_code, second = run_retry(retry, runner)
     passed, flaky, failed, reason = evaluate(first_code, first, second_code, second)
     text = summary(args.label, first, second, flaky, failed, reason)
     (ATTEMPTS / "result.json").write_text(json.dumps({
