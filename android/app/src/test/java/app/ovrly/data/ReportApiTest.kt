@@ -5,6 +5,8 @@ import app.ovrly.contract.InvestigationCodec
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -234,5 +236,72 @@ class ReportApiTest {
         val body = ContractFixtures.element(server.take().body.readUtf8()).jsonObject
         assertEquals("\"$video\"", body.getValue("source_investigation_id").toString())
         assertEquals("true", body.getValue("match_confirmed").toString())
+    }
+
+    @Test
+    fun aReanalysisThroughTheServiceReadsTheCheckAgainOnlyWhenAccepted() = withServer { server ->
+        server.credentials.write("synthetic-token-1")
+        val investigation = InvestigationCodec.parseInvestigation(complete)
+        val checks = ChecksService(server.services(), keys = { "synthetic-key-12" })
+        assertEquals("synthetic-key-12", checks.newKey())
+        server.json(202, receipt("deeper", null))
+        server.json(200, complete)
+        server.error(409, "REPORT_VERSION_STALE")
+        val accepted = runBlocking {
+            checks.reanalyze(investigation, ReanalysisRequest.Deeper(2), "synthetic-key-12")
+        }
+        assertTrue(accepted is ApiResult.Success)
+        val refused = runBlocking {
+            checks.reanalyze(investigation, ReanalysisRequest.Deeper(2), "synthetic-key-13")
+        }
+        assertTrue(refused is ApiResult.Failure)
+        val paths = List(3) { server.take().path }
+        assertEquals(
+            listOf(
+                "/v1/investigations/$completeId/reanalyze",
+                "/v1/investigations/$completeId",
+                "/v1/investigations/$completeId/reanalyze"
+            ),
+            paths
+        )
+    }
+
+    @Test
+    fun aRetryOfAShareNotYetAcceptedIsLeftToReconciliation() = withServer { server ->
+        val services = server.services()
+        runBlocking {
+            services.jobs.startShare(
+                InvestigationRecord(
+                    localId = "share-2",
+                    state = LocalJobState.LOCAL_PENDING.wireName,
+                    sourceKind = "url",
+                    idempotencyKey = "synthetic-share-key",
+                    createdAt = 0,
+                    updatedAt = 0
+                )
+            )
+        }
+        val checks = ChecksService(services)
+        assertNull(runBlocking { checks.retry("share-2") })
+        assertNull(runBlocking { checks.retry("no-such-share") })
+        val waiting = InvestigationCodec.parseInvestigation(
+            ApiTestServer.intakeResponse("investigation-create-url")
+        )
+        assertNull("no job, nothing to cancel", runBlocking { checks.cancel(waiting) })
+        assertEquals(0, server.server.requestCount)
+    }
+
+    @Test
+    fun anUnreachableListMarksUnconfirmedProvisionalReportsStale() = withServer { server ->
+        server.credentials.write("synthetic-token-1")
+        val services = server.services()
+        val provisional = InvestigationCodec.parseInvestigation(partial)
+        runBlocking { services.jobs.recordRead(provisional) }
+        server.wall.addAndGet(11 * 60_000L)
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+        val failure = runBlocking { ChecksService(services).sync() }
+        assertTrue(failure is ApiFailure.Network)
+        assertTrue(runBlocking { services.jobs.cachedReport(provisional.id) }!!.stale)
     }
 }
