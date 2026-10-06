@@ -59,7 +59,7 @@ class FakeBucket:
     def __init__(self, tokens=1000):
         self.tokens = tokens
         self.taken = 0
-        self.drained = False
+        self.blocks = []
 
     async def acquire(self):
         if self.tokens <= 0:
@@ -67,9 +67,8 @@ class FakeBucket:
         self.tokens -= 1
         self.taken += 1
 
-    async def drain(self):
-        self.tokens = 0
-        self.drained = True
+    async def block(self, seconds):
+        self.blocks.append(seconds)
 
 
 def fixture_report() -> ReportVersion:
@@ -179,7 +178,7 @@ async def test_router_status_mapping():
         client, router, _, bucket = clients(providers)
         with pytest.raises(error):
             await router.structured("auto:quality", "s", "u", QueryPlan, CallBudget(2))
-        assert bucket.drained is (status == 429)
+        assert len(bucket.blocks) == (3 if status == 429 else 0)
         await client.aclose()
 
 
@@ -217,7 +216,7 @@ async def test_papers_search_parses_and_maps_failures():
         with pytest.raises(error) as raised:
             await papers.search("x", 5)
         if status == 429:
-            assert raised.value.retry_after_seconds == 120 and bucket.drained
+            assert raised.value.retry_after_seconds == 120 and bucket.blocks == [120] * 3
     bucket.tokens = 100
     providers.papers_status = 200
     providers.papers_body = b"not json"

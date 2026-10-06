@@ -2,22 +2,26 @@
 
 Flow: the stage that publishes claims (``claim_extraction``, #25) publishes a report version
 with claims and calls :func:`enqueue_retrieval`. ``retrieval`` searches, ranks and fetches
-passages for the claims in scope and stores them as its job result, then enqueues
-``assessment``, which labels relations, validates citations and publishes the next version.
-A failed assessment never redoes retrieval. A version published in between (a user
-correction, say) supersedes the run, which then publishes nothing.
+passages for the claims in scope and stores them as its job result. Publishing that result
+enqueues ``assessment`` in the same fenced transaction (:func:`publish_evidence_stage`);
+assessment labels relations, validates citations and publishes the next version. A failed
+assessment never redoes retrieval. A version published in between (a user correction, say)
+supersedes the run, which then publishes nothing. Long provider chains keep the lease alive
+with a background heartbeat (:func:`with_heartbeat`).
 """
 
+import asyncio
 import hashlib
 import logging
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Final, Literal
+from datetime import timedelta
+from typing import Any, Final, Literal, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import Row, select, update
+from sqlalchemy import Row, func, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from services.api.schemas import ReportVersion
@@ -26,7 +30,7 @@ from services.evidence.assessment import Assessor, CitationInvalid, validate_cit
 from services.evidence.retrieval import Budget, ClaimRetrieval, Retriever
 from services.jobs.handlers import JobContext, JobHandler
 from services.jobs.models import job_results, jobs
-from services.jobs.queue import ClaimedJob, Enqueued, JobQueue, StageKey
+from services.jobs.queue import ClaimedJob, Enqueued, JobQueue, PublishedResult, StageKey
 from services.jobs.retries import NonRetriableInput, Transient
 from services.models import (
     capture_sessions,
@@ -46,8 +50,12 @@ from services.settings import Settings
 RETRIEVAL_STAGE: Final = "retrieval"
 ASSESSMENT_STAGE: Final = "assessment"
 SCHOLARXIV_BUCKET: Final = "scholarxiv"
+# The full video may take many minutes to publish its first report; expansion re-checks
+# with backoff (30 s doubling, capped at 10 min) and gives up after this many checks.
+MAX_EXPANSION_POLLS: Final = 12
 Depth = Literal["standard", "deeper"]
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 
 class StagePayload(BaseModel):
@@ -115,6 +123,73 @@ async def enqueue_retrieval(
     return await queue.enqueue(
         connection, retrieval_key(payload), payload.model_dump(mode="json"), owner_id=owner_id
     )
+
+
+def expansion_delay(poll: int) -> float:
+    return float(min(30 * 2**poll, 600))
+
+
+async def with_heartbeat(context: JobContext, work: Awaitable[T]) -> T:
+    """Run ``work`` while extending the lease every third of its length. A lost lease or a
+    cancellation request stops the work and propagates from the heartbeat."""
+    task = asyncio.ensure_future(work)
+    interval = max(context.lease_seconds / 3, 1)
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=interval)
+            if done:
+                return task.result()
+            await context.heartbeat()
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+async def publish_evidence_stage(
+    queue: JobQueue, job: ClaimedJob, result: dict[str, Any]
+) -> PublishedResult:
+    """Publish an evidence stage and enqueue its successor in the same fenced transaction,
+    so a lost lease or a cancelled job never leaves an orphan successor behind."""
+    async with queue.database.engine.begin() as connection:
+        published = await queue.publish(job.lease, result, connection=connection)
+        if job.key.stage == RETRIEVAL_STAGE:
+            artifact = RetrievalArtifact.model_validate(result)
+            if artifact.claims and not artifact.superseded:
+                payload = StagePayload.model_validate(job.payload)
+                await queue.enqueue(
+                    connection,
+                    assessment_key(job.id),
+                    payload.model_copy(update={"retrieval_job_id": job.id}).model_dump(mode="json"),
+                    owner_id=payload.owner_id,
+                )
+        elif job.key.stage == REANALYSIS_STAGE and result.get("waiting_for_source"):
+            poll = int(result["poll"]) + 1
+            follow_up = await queue.enqueue(
+                connection,
+                StageKey(
+                    job.key.version,
+                    REANALYSIS_STAGE,
+                    _digest("reanalysis", job.payload["request_id"], "poll", poll),
+                ),
+                {**job.payload, "poll": poll},
+                owner_id=uuid.UUID(str(job.payload["owner_id"])),
+            )
+            if follow_up.created:
+                delay = timedelta(seconds=expansion_delay(poll - 1))
+                await connection.execute(
+                    update(jobs)
+                    .where(jobs.c.id == follow_up.job_id)
+                    .values(available_at=func.now() + delay)
+                )
+            # The request now points at the job that will finish it, so it stays visible
+            # and cancellable.
+            await connection.execute(
+                update(reanalysis_requests)
+                .where(reanalysis_requests.c.id == uuid.UUID(str(job.payload["request_id"])))
+                .values(job_id=follow_up.job_id)
+            )
+        return published
 
 
 def _payload(job: ClaimedJob) -> StagePayload:
@@ -202,7 +277,9 @@ class EvidenceStages:
         )
 
     async def retrieval(self, job: ClaimedJob, context: JobContext) -> dict[str, Any]:
-        payload = _payload(job)
+        return await with_heartbeat(context, self._retrieval(_payload(job), context))
+
+    async def _retrieval(self, payload: StagePayload, context: JobContext) -> dict[str, Any]:
         async with self.database.engine.connect() as connection:
             if not await _owned(connection, payload.investigation_id, payload.owner_id, False):
                 raise NonRetriableInput("investigation is missing or not owned by the job owner")
@@ -261,37 +338,40 @@ class EvidenceStages:
             # Nothing could be searched at all: retry the stage rather than publish a hollow
             # version. Partial failures are published with the affected claims unassessed.
             raise Transient("every search failed")
-        artifact = RetrievalArtifact(
+        # The assessment job is enqueued when this result is published.
+        return RetrievalArtifact(
             investigation_id=payload.investigation_id,
             base_version=payload.base_version,
             claims=results,
-        )
-        async with self.database.engine.begin() as connection:
-            await context.queue.enqueue(
-                connection,
-                assessment_key(job.id),
-                payload.model_copy(update={"retrieval_job_id": job.id}).model_dump(mode="json"),
-                owner_id=payload.owner_id,
-            )
-        return artifact.model_dump(mode="json")
+        ).model_dump(mode="json")
 
     async def assessment(self, job: ClaimedJob, context: JobContext) -> dict[str, Any]:
         payload = _payload(job)
         if payload.retrieval_job_id is None:
             raise NonRetriableInput("assessment payload names no retrieval job")
+        return await with_heartbeat(
+            context, self._assessment(payload, payload.retrieval_job_id, context)
+        )
+
+    async def _assessment(
+        self, payload: StagePayload, retrieval_job_id: uuid.UUID, context: JobContext
+    ) -> dict[str, Any]:
         async with self.database.engine.connect() as connection:
             source = (
                 await connection.execute(
                     select(jobs.c.state, job_results.c.result)
                     .select_from(jobs.outerjoin(job_results, job_results.c.job_id == jobs.c.id))
-                    .where(jobs.c.id == payload.retrieval_job_id)
+                    .where(jobs.c.id == retrieval_job_id)
                 )
             ).first()
-        if source is None or source.state in {"cancelled", "deleted", "failed"}:
+        # Assessment is enqueued only with a published retrieval result, so a missing one
+        # means the retrieval job was deleted.
+        if (
+            source is None
+            or source.result is None
+            or source.state in {"cancelled", "deleted", "failed"}
+        ):
             return {"skipped": "retrieval_unavailable"}
-        if source.result is None:
-            # Retrieval enqueued this job just before the worker published its result.
-            raise Transient("retrieval result not yet published")
         artifact = RetrievalArtifact.model_validate(source.result)
         if artifact.superseded:
             return {"skipped": "superseded"}
@@ -362,13 +442,14 @@ class EvidenceStages:
             base_version = int(job.payload["supersedes_version"])
             claim_ids = [str(c) for c in job.payload.get("claim_ids") or []]
             source = job.payload.get("source_investigation_id")
+            poll = int(job.payload.get("poll", 0))
         except (KeyError, ValueError, TypeError):
             raise NonRetriableInput("reanalysis payload is incomplete") from None
         if reason == "expansion":
             if not source:
                 raise NonRetriableInput("expansion names no source investigation")
             return await self._expand(
-                request_id, investigation_id, owner_id, base_version, uuid.UUID(str(source))
+                request_id, investigation_id, owner_id, base_version, uuid.UUID(str(source)), poll
             )
         if reason not in {"correction", "deeper"}:
             raise NonRetriableInput("unknown reanalysis reason")
@@ -394,8 +475,12 @@ class EvidenceStages:
         owner_id: uuid.UUID,
         base_version: int,
         source_id: uuid.UUID,
+        poll: int,
     ) -> dict[str, Any]:
-        """Bring the confirmed full video's latest report into the clip as a new version."""
+        """Bring the confirmed full video's latest report into the clip as a new version.
+
+        While the full video has no report yet the job publishes ``waiting_for_source`` and
+        :func:`publish_evidence_stage` schedules the next check with backoff."""
         async with self.database.engine.begin() as connection:
             if not await _owned(connection, investigation_id, owner_id, True):
                 raise NonRetriableInput("investigation is missing or not owned by the job owner")
@@ -406,8 +491,9 @@ class EvidenceStages:
                 return {"skipped": "superseded"}
             source = await _latest(connection, source_id)
             if source is None:
-                # The full video has not published a report yet; check again later.
-                raise Transient("the full-video investigation has no report yet")
+                if poll >= MAX_EXPANSION_POLLS:
+                    raise NonRetriableInput("the full-video investigation published no report")
+                return {"waiting_for_source": True, "poll": poll}
             clip = report_from_row(current.payload, current.fixture)
             full = report_from_row(source.payload, source.fixture)
             try:

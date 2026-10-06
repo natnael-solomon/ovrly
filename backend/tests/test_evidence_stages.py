@@ -6,6 +6,7 @@ import asyncio
 import json
 import uuid
 from datetime import timedelta
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -26,9 +27,10 @@ from services.evidence.stages import (
 )
 from services.jobs.handlers import JobContext, default_handlers
 from services.jobs.models import job_results, jobs
-from services.jobs.queue import JobQueue
+from services.jobs.queue import JobQueue, PublishRejected
 from services.jobs.retries import NonRetriableInput, RateLimited, Transient
 from services.models import investigations, provider_buckets, reanalysis_requests
+from services.pipeline.publish import publish_stage
 from services.pipeline.registry import worker_handlers
 from services.providers.budget import TokenBucket
 from services.reports import REANALYSIS_STAGE, NextVersion, publish_report_version
@@ -149,8 +151,22 @@ async def run(app, handler, stage, investigation_id, *, publish=True, on_error="
             await queue.release(claim.lease)
         raise
     if publish:
-        await queue.publish(claim.lease, result)
+        # The worker's publish path: fenced, with successors in the same transaction.
+        await publish_stage(queue, claim, result)
     return claim, result
+
+
+async def queued_assessments(app, investigation_id):
+    async with app.state.database.engine.connect() as connection:
+        return await connection.scalar(
+            select(func.count())
+            .select_from(jobs)
+            .where(
+                jobs.c.stage == ASSESSMENT_STAGE,
+                jobs.c.state == "queued",
+                jobs.c.payload["investigation_id"].astext == investigation_id,
+            )
+        )
 
 
 async def read(client, headers, investigation_id, version):
@@ -169,7 +185,7 @@ async def pipeline(app, providers, investigation_id, version, **extra):
     return await run(app, evidence.assessment, ASSESSMENT_STAGE, investigation_id)
 
 
-async def test_token_bucket_takes_refills_and_drains(app):
+async def test_token_bucket_takes_refills_and_blocks(app):
     bucket = TokenBucket(app.state.database, f"test-{uuid.uuid4().hex[:8]}", 2)
     await bucket.acquire()
     await bucket.acquire()
@@ -183,9 +199,17 @@ async def test_token_bucket_takes_refills_and_drains(app):
             .values(updated_at=provider_buckets.c.updated_at - timedelta(hours=1))
         )
     await bucket.acquire()
-    await bucket.drain()
+    await bucket.block(60)
     with pytest.raises(RateLimited):
         await bucket.acquire()
+    # A short wait is waited out instead of failing the stage: 10 tokens per second, held
+    # for 0.2 s by a Retry-After, so the next token comes about 0.3 s later.
+    fast = TokenBucket(app.state.database, f"test-{uuid.uuid4().hex[:8]}", 36000)
+    await fast.acquire()
+    await fast.block(0.2)
+    started = asyncio.get_running_loop().time()
+    await fast.acquire()
+    assert asyncio.get_running_loop().time() - started >= 0.25
     # Concurrent workers share one bucket: exactly the capacity is granted.
     shared = TokenBucket(app.state.database, f"test-{uuid.uuid4().hex[:8]}", 5)
     outcomes = await asyncio.gather(*(shared.acquire() for _ in range(8)), return_exceptions=True)
@@ -245,11 +269,10 @@ async def test_superseded_and_unpublished_retrievals_publish_nothing(client, app
     retrieval, result = await run(
         app, evidence.retrieval, RETRIEVAL_STAGE, investigation_id, publish=False
     )
-    # The worker has not published the retrieval result yet: assessment waits.
-    with pytest.raises(Transient):
-        await run(app, evidence.assessment, ASSESSMENT_STAGE, investigation_id)
-    queue = JobQueue(app.state.database)
-    await queue.publish(retrieval.lease, result)
+    # Assessment is only enqueued when the retrieval result is published.
+    assert await queued_assessments(app, investigation_id) == 0
+    await publish_stage(JobQueue(app.state.database), retrieval, result)
+    assert await queued_assessments(app, investigation_id) == 1
     await publish_claims(app, investigation_id)  # a newer version, e.g. after a correction
     _, skipped = await run(app, evidence.assessment, ASSESSMENT_STAGE, investigation_id)
     assert skipped == {"skipped": "superseded"}
@@ -263,34 +286,33 @@ async def test_superseded_and_unpublished_retrievals_publish_nothing(client, app
     await queue_retrieval(app, investigation_id, 2, claim_ids=["clm_not_there"])
     _, empty = await run(app, evidence.retrieval, RETRIEVAL_STAGE, investigation_id)
     assert empty["claims"] == [] and empty["superseded"] is False
-    async with app.state.database.engine.connect() as connection:
-        pending = await connection.scalar(
-            select(func.count())
-            .select_from(jobs)
-            .where(
-                jobs.c.stage == ASSESSMENT_STAGE,
-                jobs.c.state == "queued",
-                jobs.c.payload["investigation_id"].astext == investigation_id,
-            )
-        )
-    assert pending == 0
+    assert await queued_assessments(app, investigation_id) == 0
 
 
-async def test_cancelled_retrieval_skips_assessment(client, app, providers):
+async def test_cancelled_retrieval_queues_no_assessment(client, app, providers):
     headers = await guest(client)
     investigation_id = await create_investigation(client, headers, "cancel")
     base = await publish_claims(app, investigation_id)
     evidence = stages(app, providers)
     await queue_retrieval(app, investigation_id, base.version)
-    retrieval, _ = await run(
+    retrieval, result = await run(
         app, evidence.retrieval, RETRIEVAL_STAGE, investigation_id, publish=False
     )
+    queue = JobQueue(app.state.database)
+    await queue.request_cancel(retrieval.id)
+    # The fenced publish is refused, and the assessment enqueue rolls back with it.
+    with pytest.raises(PublishRejected):
+        await publish_stage(queue, retrieval, result)
+    assert await queued_assessments(app, investigation_id) == 0
+    # An assessment whose retrieval was cancelled after it was queued skips.
+    other = await create_investigation(client, headers, "cancel-late")
+    version = await publish_claims(app, other)
+    await queue_retrieval(app, other, version.version)
+    late, _ = await run(app, evidence.retrieval, RETRIEVAL_STAGE, other)
     async with app.state.database.engine.begin() as connection:
-        await connection.execute(
-            update(jobs).where(jobs.c.id == retrieval.id).values(state="cancelled")
-        )
-    _, result = await run(app, evidence.assessment, ASSESSMENT_STAGE, investigation_id)
-    assert result == {"skipped": "retrieval_unavailable"}
+        await connection.execute(update(jobs).where(jobs.c.id == late.id).values(state="cancelled"))
+    _, skipped = await run(app, evidence.assessment, ASSESSMENT_STAGE, other)
+    assert skipped == {"skipped": "retrieval_unavailable"}
 
 
 async def test_retrieval_failures_are_typed(client, app, providers):
@@ -419,11 +441,30 @@ async def test_reanalysis_expansion_merges_the_full_video(client, app, providers
     )
     assert first.status_code == 202, first.text
     evidence = stages(app, providers)
-    # The full video has no report yet: the job retries later instead of guessing.
-    with pytest.raises(Transient):
-        await run(app, evidence.reanalysis, REANALYSIS_STAGE, clip)
+    request_id = uuid.UUID(first.json()["id"])
+    # The full video has no report yet: the job publishes "waiting" and schedules a later
+    # check, which the request now points at so it stays visible and cancellable.
+    _, waiting = await run(app, evidence.reanalysis, REANALYSIS_STAGE, clip)
+    assert waiting == {"waiting_for_source": True, "poll": 0}
+    async with app.state.database.engine.connect() as connection:
+        follow_up = (
+            await connection.execute(
+                select(jobs, (jobs.c.available_at - func.now()).label("delay"))
+                .join(reanalysis_requests, reanalysis_requests.c.job_id == jobs.c.id)
+                .where(reanalysis_requests.c.id == request_id)
+            )
+        ).one()
+    assert follow_up.state == "queued" and follow_up.payload["poll"] == 1
+    assert timedelta(seconds=25) < follow_up.delay <= timedelta(seconds=30)
+    # A full video that never publishes ends the request instead of polling forever.
+    with pytest.raises(NonRetriableInput):
+        await evidence.reanalysis(SimpleNamespace(payload={**follow_up.payload, "poll": 12}), None)
     full_base = await publish_claims(app, full)
     await pipeline(app, providers, full, full_base.version)
+    async with app.state.database.engine.begin() as connection:
+        await connection.execute(
+            update(jobs).where(jobs.c.id == follow_up.id).values(available_at=func.now())
+        )
     _, result = await run(app, evidence.reanalysis, REANALYSIS_STAGE, clip)
     report = await read(client, headers, clip, result["version"])
     prefix = f"fv{full_base.version + 1}_"

@@ -14,9 +14,11 @@
   is computed and abstains when evidence is missing, and every version is
   citation-checked before it is published. Budgets per claim keep unreached claims
   visible but unassessed. Papers and Router calls share a PostgreSQL token bucket under
-  the account limit (migration `0010_provider_buckets`). The production `reanalysis`
-  handler reruns corrected claims, searches deeper, or brings in the confirmed full
-  video. Registered only with the server-side `OVRLY_SCHOLARXIV_API_KEY`; tests replay
+  the account limit (migration `0010_provider_buckets`); calls wait for a token and a
+  provider 429 holds the bucket for its `Retry-After`. Long stages heartbeat in the
+  background, and assessment is enqueued with the fenced retrieval publish. The
+  production `reanalysis` handler reruns corrected claims, searches deeper, or brings in
+  the confirmed full video once it has a report, re-checking with backoff. Registered only with the server-side `OVRLY_SCHOLARXIV_API_KEY`; tests replay
   synthetic cassettes and never call a provider.
 - Capture pipeline orchestration (#24): successful byte validation atomically
   queues `asr` and `device_text`, then `claim_extraction` after both publish,

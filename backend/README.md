@@ -662,7 +662,9 @@ is server-side only and never logged.
    - asks Crossref (`filter=updates:{doi}`) whether a journal DOI was retracted,
      withdrawn or corrected; arXiv-only papers and failed lookups stay `unknown`.
    The result is stored as the job result (the per-stage artifact), so a failed
-   assessment never repeats retrieval.
+   assessment never repeats retrieval. Publishing that result enqueues `assessment` in
+   the same fenced transaction, so a lost lease or a cancelled retrieval leaves no
+   assessment job behind.
 3. `assessment` (`services/evidence/assessment.py`) asks the router
    (`OVRLY_EVIDENCE_RELATION_ROUTE`, default `auto:quality`) how each passage relates
    to the claim: supports, challenges, qualifies, context or cannot_assess, with a
@@ -685,14 +687,19 @@ Router calls send only documented fields (`model`, `messages`, `models`, `max_to
 `temperature`), strip a leading `<think>` block, code fences and any preamble, validate
 the JSON against a schema, repair once, and report a discarded reply to the router as
 `regenerated`. Content is data in every prompt and no tools are offered. Router 401 or
-403 fails the stage as a configuration fault, 429 is `rate_limited`, and 5xx or an
-invalid reply leaves that claim unassessed rather than guessing.
+403 fails the stage as a configuration fault, a 429 that persists is `rate_limited`,
+and 5xx or an invalid reply leaves that claim unassessed rather than guessing.
+Retrieval and assessment extend their lease in the background every third of
+`OVRLY_JOB_LEASE_SECONDS` while provider calls run, and stop on a cancellation request.
 
 Papers and Router calls share one PostgreSQL token bucket (`provider_buckets`,
 migration `0010_provider_buckets`) across all worker processes, refilled at
 `OVRLY_SCHOLARXIV_REQUESTS_PER_HOUR` (default 1000, leaving headroom under the 1 200
-per hour Free account limit). An empty bucket or a provider 429 drains the bucket and
-retries the stage after the provider's `Retry-After`. Every outbound request carries a
+per hour Free account limit). An empty bucket makes the call wait for the next token,
+with jitter so waiting workers do not wake together; only a wait over 5 minutes makes
+the stage `rate_limited`. A provider 429 holds the bucket for its `Retry-After` (60 s if
+absent) for every worker, and the call is retried up to 3 times before the stage becomes
+`rate_limited`. Every outbound request carries a
 fresh `X-Request-Id`; logs record only the provider code, that id and the status.
 
 Federated search is opt-in (`OVRLY_SCHOLARXIV_FEDERATED=1`, Go plan and above). A Free
@@ -719,7 +726,10 @@ or a provider replay; the tests use a synthetic one.
 | `OVRLY_EVIDENCE_PROVIDER_TIMEOUT_SECONDS` | 20 |
 | `OVRLY_CROSSREF_MAILTO` | Empty; optional contact address for the Crossref polite pool |
 
-A `deeper` reanalysis doubles the search breadth within the hard caps above. Tests
+A `deeper` reanalysis doubles the search breadth within the hard caps above. An
+`expansion` whose full video has no report yet publishes a waiting result and schedules
+another check (30 s, doubling, capped at 10 minutes; the request points at the new job,
+so it stays visible and cancellable) and fails after 12 checks. Tests
 (`tests/test_evidence_units.py`, `tests/test_evidence_stages.py`) replay synthetic
 cassettes for every provider (`tests/cassettes/`, `tests/evidence_cassettes.py`)
 through an `httpx` mock transport; no test or CI job calls a real provider. The

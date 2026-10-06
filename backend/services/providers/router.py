@@ -19,7 +19,13 @@ from pydantic import BaseModel, ValidationError
 
 from services.jobs.retries import RateLimited
 from services.providers.budget import TokenBucket
-from services.providers.http import ProviderError, ProviderRejected, retry_after, send
+from services.providers.http import (
+    RATE_LIMIT_ATTEMPTS,
+    ProviderError,
+    ProviderRejected,
+    retry_after,
+    send,
+)
 
 PROVIDER: Final = "scholarxiv_router"
 COMPLETIONS: Final = "/api/v1/router/chat/completions"
@@ -92,18 +98,22 @@ class RouterClient:
         }
         if not route.startswith("auto:"):
             body["models"] = [route]
-        await self.bucket.acquire()
-        response, raw = await send(
-            self.client,
-            PROVIDER,
-            "POST",
-            self._url(COMPLETIONS),
-            headers=self._headers(),
-            json=body,
-        )
-        if response.status_code == 429:
-            await self.bucket.drain()
-            raise RateLimited(retry_after(response))
+        for attempt in range(RATE_LIMIT_ATTEMPTS):
+            await self.bucket.acquire()
+            response, raw = await send(
+                self.client,
+                PROVIDER,
+                "POST",
+                self._url(COMPLETIONS),
+                headers=self._headers(),
+                json=body,
+            )
+            if response.status_code != 429:
+                break
+            # Hold every worker for the provider's Retry-After, then try again.
+            await self.bucket.block(retry_after(response))
+            if attempt == RATE_LIMIT_ATTEMPTS - 1:
+                raise RateLimited(retry_after(response))
         if response.status_code in {401, 403}:
             raise ProviderRejected(f"Router refused the request ({response.status_code})")
         if response.status_code != 200:

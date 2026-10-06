@@ -14,7 +14,7 @@ from services.jobs.handlers import CancellationRequested, JobContext, JobHandler
 from services.jobs.queue import ClaimedJob, JobQueue, Lease, LeaseLost, PublishRejected
 from services.jobs.retries import RetryableError, RetryPolicy, UnknownOutcome
 from services.logging import configure_logging
-from services.pipeline.capture import publish_capture_stage
+from services.pipeline.publish import publish_stage
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ class Worker:
                 return
             await self.faults.checkpoint(Checkpoint.BEFORE_PUBLISH, job)
             try:
-                published = await publish_capture_stage(self.queue, job, result)
+                published = await publish_stage(self.queue, job, result)
                 if published is None:
                     await self.queue.cancel(lease)
                     logger.info("Job %s cancelled during stage %s", job.id, job.key.stage)

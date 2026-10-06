@@ -9,6 +9,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 MAX_BODY_BYTES: Final = 4 * 1024 * 1024
+# A provider 429 holds the shared bucket for its Retry-After and is retried this often.
+RATE_LIMIT_ATTEMPTS: Final = 3
 USER_AGENT: Final = "ovrly-evidence/1.0 (+https://github.com/natnael-solomon/ovrly)"
 
 
