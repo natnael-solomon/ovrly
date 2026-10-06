@@ -67,6 +67,30 @@ POLICY = (
 )
 
 
+ASSUMPTION = re.compile(r"\borg\.junit\.(?:internal\.)?AssumptionViolatedException\b")
+
+
+def is_assumption(problem):
+    """True when a <failure> or <error> only reports a JUnit assumption that did not hold.
+
+    AGP writes a test skipped by `assumeTrue` as a <failure> whose stack trace starts with
+    AssumptionViolatedException; the exception type is matched, never a message mentioning it.
+    """
+    if ASSUMPTION.fullmatch(problem.get("type") or ""):
+        return True
+    lines = [line.strip() for line in (problem.text or "").splitlines() if line.strip()]
+    return bool(lines) and bool(ASSUMPTION.match(lines[0].split(":", 1)[0]))
+
+
+def outcome_of(case):
+    problems = case.findall("failure") + case.findall("error")
+    if any(not is_assumption(problem) for problem in problems):
+        return FAILED
+    if problems or case.find("skipped") is not None:
+        return SKIPPED
+    return PASSED
+
+
 def test_cases(results):
     """Map `class#method` to passed, failed or skipped from every JUnit XML under results."""
     cases = {}
@@ -74,12 +98,7 @@ def test_cases(results):
         root = ET.parse(path).getroot()
         for case in root.iter("testcase"):
             name = f"{case.get('classname')}#{case.get('name')}"
-            if case.find("failure") is not None or case.find("error") is not None:
-                outcome = FAILED
-            elif case.find("skipped") is not None:
-                outcome = SKIPPED
-            else:
-                outcome = PASSED
+            outcome = outcome_of(case)
             # A test reported twice counts as failed if either report failed.
             if cases.get(name) != FAILED:
                 cases[name] = outcome

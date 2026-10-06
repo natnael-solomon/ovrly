@@ -45,6 +45,63 @@ class ResultParsingTest(unittest.TestCase):
             self.assertEqual({"a.A#x": FAILED}, read_cases(temporary))
 
 
+ASSUMPTION_SKIP = (
+    '<testcase name="replay" classname="app.ovrly.capture.ScreenTextReplayTest" time="0.014">'
+    "<failure>org.junit.AssumptionViolatedException: RES-02 replay runs only with -e res02Mode\n"
+    "at org.junit.Assume.assumeTrue(Assume.java:68)\n"
+    "at app.ovrly.capture.ScreenTextReplayTest.replay(ScreenTextReplayTest.kt:57)\n"
+    "</failure></testcase>"
+)
+
+
+class SkipClassificationTest(unittest.TestCase):
+    def cases(self, body):
+        with tempfile.TemporaryDirectory() as temporary:
+            (Path(temporary) / "TEST.xml").write_text(
+                f'<testsuite name="device">{body}</testsuite>', encoding="utf-8")
+            return read_cases(temporary)
+
+    def test_assumption_violation_reported_as_failure_is_skipped(self):
+        # The exact shape AGP wrote for an assumeTrue skip on #112.
+        self.assertEqual({"app.ovrly.capture.ScreenTextReplayTest#replay": SKIPPED},
+                         self.cases(ASSUMPTION_SKIP))
+
+    def test_internal_assumption_class_and_type_attribute_are_skips(self):
+        cases = self.cases(
+            '<testcase classname="a.A" name="x"><failure>'
+            "org.junit.internal.AssumptionViolatedException: got: false\n</failure></testcase>"
+            '<testcase classname="a.A" name="y"><error type="org.junit.AssumptionViolatedException"'
+            ' message="no device feature"/></testcase>')
+        self.assertEqual({"a.A#x": SKIPPED, "a.A#y": SKIPPED}, cases)
+
+    def test_skipped_element_alone_is_skipped(self):
+        self.assertEqual({"a.A#x": SKIPPED},
+                         self.cases('<testcase classname="a.A" name="x"><skipped/></testcase>'))
+
+    def test_real_failures_stay_failures(self):
+        cases = self.cases(
+            '<testcase classname="a.A" name="x"><failure>java.lang.AssertionError: '
+            "expected AssumptionViolatedException to be thrown\n</failure></testcase>"
+            '<testcase classname="a.A" name="y"><failure message="org.junit.'
+            'AssumptionViolatedException in a message">java.lang.IllegalStateException: boom'
+            "</failure></testcase>"
+            '<testcase classname="a.A" name="z"><failure>'
+            "org.junit.AssumptionViolatedException: skipped\n</failure>"
+            "<error>java.lang.RuntimeException: teardown crashed</error></testcase>")
+        self.assertEqual({"a.A#x": FAILED, "a.A#y": FAILED, "a.A#z": FAILED}, cases)
+
+    def test_skip_does_not_fail_or_retry_the_run(self):
+        first = self.cases(ASSUMPTION_SKIP + '<testcase classname="a.A" name="x"/>')
+        expected = set(first)
+        self.assertEqual(([], "All instrumented tests passed on the first attempt."),
+                         plan_retry(0, first))
+        passed, flaky, failed, _ = evaluate(0, first, expected=expected)
+        self.assertTrue(passed)
+        self.assertEqual(([], []), (flaky, failed))
+        text = summary("API 34", first, None, [], [], "ok")
+        self.assertIn("1 passed, 0 failed, 1 skipped", text)
+
+
 class InventoryTest(unittest.TestCase):
     def test_parses_kotlin_and_java_tests_with_extra_annotations(self):
         with tempfile.TemporaryDirectory() as temporary:
