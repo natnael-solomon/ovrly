@@ -4,6 +4,16 @@
 
 ### Added
 
+- Explicit saved reports and the optional account on Android (AN-10, #36). The Report
+  screen saves or removes the shown version only when you tap Save report or Remove from
+  saved, Your space lists Saved reports below the Library (readable offline, opening the
+  check or the saved copy), and the copy states that only saved reports are kept. The
+  backend adds `DELETE /v1/reports/{report_id}/save` (204, owner-scoped, idempotent). The
+  device side of the BC-D07 account link is implemented and tested against a fake token
+  source, but sign-in is not available in this build: Google OAuth web and Android clients
+  are needed (owner action). Per decision 0003, a report saved on one device cannot yet be
+  restored on another device.
+
 - Backend `.env.example` now lists every `OVRLY_` setting with its default (job timing
   and retries, stub reports, evidence stages), and the backend README has a
   single-service deployment note for EthioDeploy (#21).
