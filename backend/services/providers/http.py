@@ -31,23 +31,35 @@ async def send(
     headers: dict[str, str] | None = None,
     json: Any = None,
     params: dict[str, str | int] | None = None,
+    max_bytes: int = MAX_BODY_BYTES,
 ) -> tuple[httpx.Response, bytes]:
     """Send one request with a fresh correlation id and a bounded body read.
 
     Logs the provider code, the correlation id and the status only: no URL, query, body or
-    credential. Transport errors and oversized bodies raise :class:`ProviderError`.
+    credential. Transport errors and bodies over ``max_bytes`` (declared or actual) raise
+    :class:`ProviderError`. Redirects are never followed here; see
+    :func:`services.providers.egress.fetch`.
     """
     request_id = uuid.uuid4()
     request_headers = {"User-Agent": USER_AGENT, "X-Request-Id": str(request_id)}
     request_headers.update(headers or {})
     try:
         async with client.stream(
-            method, url, headers=request_headers, json=json, params=params
+            method,
+            url,
+            headers=request_headers,
+            json=json,
+            params=params,
+            follow_redirects=False,
         ) as response:
+            declared = response.headers.get("content-length", "")
+            if declared.isdigit() and int(declared) > max_bytes:
+                logger.warning("Provider %s request %s body too large", provider, request_id)
+                raise ProviderError(f"{provider} response too large")
             body = bytearray()
             async for chunk in response.aiter_bytes():
                 body.extend(chunk)
-                if len(body) > MAX_BODY_BYTES:
+                if len(body) > max_bytes:
                     logger.warning("Provider %s request %s body too large", provider, request_id)
                     raise ProviderError(f"{provider} response too large")
     except httpx.HTTPError:
