@@ -107,6 +107,14 @@ internal object CaptureApiCodec {
     }
 }
 
+/** The shared error shape (`error.schema.json`) carried by every non-2xx API response. */
+internal object ErrorCodec {
+    /** Unknown `action` values map to [ContractErrorAction.UNKNOWN]; the code keeps its text. */
+    fun parseError(payload: String): ContractError = ContractJson.parse("error") {
+        ContractJson.tolerant.decodeFromString(ContractError.serializer(), payload)
+    }
+}
+
 /** Live capture session and chunk models. */
 internal object CaptureCodec {
     fun parseSession(payload: String): CaptureSession = ContractJson.parse("capture session") {

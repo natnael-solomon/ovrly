@@ -131,14 +131,14 @@ class LaunchSplashResourcesTest {
 
     @Test fun splashIsOnTheExistingActivityNotTheApplicationIcon() {
         val manifest = xml("AndroidManifest.xml")
-        val activity = manifest.elements("activity").single()
+        val (activity, share) = listOf("Main", "ShareIntake").map { manifest.activity(it) }
         assertEquals(".MainActivity", activity.attr("name"))
         assertEquals("@style/Theme.Ovrly.Starting", activity.attr("theme"))
         assertEquals("singleTop", activity.attr("launchMode"))
         val application = manifest.elements("application").single()
         assertEquals("@mipmap/ic_launcher", application.attr("icon"))
         assertEquals("@mipmap/ic_launcher", application.attr("roundIcon"))
-        assertTrue(activity.elements("action").any { it.attr("name") == "android.intent.action.SEND" })
+        assertEquals(listOf(false, true), listOf(activity, share).map { it.handlesSend() })
     }
 
     private fun xml(path: String): Element = DocumentBuilderFactory.newInstance().apply {
@@ -150,4 +150,11 @@ class LaunchSplashResourcesTest {
 
     private fun Element.elements(name: String): List<Element> =
         getElementsByTagName(name).let { nodes -> (0 until nodes.length).map { nodes.item(it) as Element } }
+
+    /** Shares open the intake sheet over the source app, never the splash or Settings. */
+    private fun Element.handlesSend(): Boolean =
+        elements("action").any { it.attr("name") == "android.intent.action.SEND" }
+
+    private fun Element.activity(name: String): Element =
+        elements("activity").single { it.attr("name") == ".${name}Activity" }
 }

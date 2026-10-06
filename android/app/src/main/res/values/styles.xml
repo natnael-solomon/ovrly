@@ -22,4 +22,12 @@
         <item name="android:windowMinWidthMinor">0dp</item>
         <item name="android:windowCloseOnTouchOutside">false</item>
     </style>
+    <!-- Share target: transparent window; the intake bottom sheet draws its own scrim. -->
+    <style name="Theme.Ovrly.ShareSheet" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>
