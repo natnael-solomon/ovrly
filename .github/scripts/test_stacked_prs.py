@@ -79,7 +79,7 @@ class StackedDiffTest(unittest.TestCase):
 
 class StackWorkflowTest(unittest.TestCase):
     def test_checks_accept_any_pr_base_and_retargeting(self):
-        for name in ("android", "device-evidence", "evaluation"):
+        for name in ("android", "android-instrumented", "device-evidence", "evaluation"):
             with self.subTest(workflow=name):
                 source = (ROOT / ".github/workflows" / f"{name}.yml").read_text()
                 section = re.search(r"^  pull_request:\n((?:^    .*\n)+)", source, re.M)

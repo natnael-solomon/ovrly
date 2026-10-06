@@ -4,6 +4,22 @@
 
 ### Added
 
+- Android instrumented tests in CI (REPO-05 part 1, #76): a new **Android
+  instrumented checks** workflow runs AndroidX Test, Espresso and Compose tests
+  on API 29 and API 34 emulators for every PR that touches Android, with the
+  same documentation-only skip as Android checks, AVD snapshots cached only by
+  `main`, one automatic retry with flakes named in the job summary, and reports
+  kept for seven days. The first tests cover share intake against a provider in
+  another app with real `content://` grants (granted, ungranted, revoked and
+  deleted sources, oversize, overlong and mislabelled files), the share sheet's
+  rejections, `CaptureService` start, Stop, the continuation choice, the
+  3-minute limit, denied permissions and a projection stopped mid-capture with
+  every resource released, and overlay create and dismiss without leaked
+  windows, including a refused or revoked overlay permission. JaCoCo unit and
+  instrumented line coverage (off unless `-Povrly.coverage=true`) is summarized
+  in the job with 90% floors for capture, share and contract parsing and at most
+  a one-point drop against `main` (#13).
+
 - Backend report versions, explicit saves, reanalysis, export and voice actions
   (BE-10, #33): immutable, owner-scoped report versions with change summaries
   (`GET /v1/investigations/{id}/reports[/{version}]`), idempotent saves with a
@@ -126,6 +142,10 @@
 - Added public-window background blur on supported Android 12+ devices, with opaque fallbacks.
 
 ### Fixed
+
+- Share intake no longer crashes on a file whose provider calls it a video but
+  whose bytes are not a readable media container; it is rejected as not a
+  readable video.
 
 - Addressed RES-02 benchmark review: withdraw the unreviewable hosted model/chunk preference, label the private OCR procedure explicitly, distinguish existing evidence from remaining plan gates, and guard zero-reference aggregate rates. Opt-in `res02-v2` scoring fixes currency and letter-number tokenization and counts ignored punctuation-only ASR segments without changing v1 baseline scoring or timestamp indexes.
 
