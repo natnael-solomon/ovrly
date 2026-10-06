@@ -216,9 +216,24 @@ def test_application_503_is_not_mistaken_for_waking():
     assert any("readiness HTTP 503 migrations" in line for line in lines)
 
 
-def test_stale_heartbeat_fails():
+def test_old_heartbeat_with_server_ok_passes_and_is_recorded():
+    api = FakeApi()
+    api.heartbeat = 590.0
+    report, _, _ = run(api)
+    assert report.passed
+    assert report.signals["worker_heartbeat_seconds"] == 590.0
+
+
+def test_explicit_heartbeat_bound_is_enforced():
     api = FakeApi()
     api.heartbeat = 121.0
+    report, _, _ = run(api, heartbeat_seconds=120)
+    assert failed(report) == ["health"]
+
+
+def test_missing_heartbeat_age_fails():
+    api = FakeApi()
+    api.heartbeat = None
     report, _, _ = run(api)
     assert failed(report) == ["health"]
 

@@ -129,7 +129,10 @@ Steps, each printed with its time:
 
 1. **wake**: repeats `GET /healthz` through host 502/503/504 answers until the API
    answers; fails after `wake_seconds` (default 180).
-2. **health**: every check `ok`, embedded worker heartbeat at most 120 seconds.
+2. **health**: every check `ok`. `checks.worker` is the server's own heartbeat verdict
+   (two minutes by default, up to twice `OVRLY_JOB_IDLE_POLL_MAX_SECONDS` with an idle
+   cap), so the smoke only records the heartbeat age; `--heartbeat-seconds` adds a
+   stricter local bound when run from `backend/`.
 3. **typed-errors**: `401 AUTHENTICATION_REQUIRED` with the echoed `X-Request-Id`, and
    `404 NOT_FOUND`, both in the shared error shape.
 4. **guest**: mints a guest credential.

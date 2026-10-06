@@ -6,8 +6,10 @@ Run from ``backend/``::
         --report reports/smoke.json
 
 Checks, in order: the first ``/healthz`` wakes a sleeping free-tier host within
-``--wake-seconds``; readiness reports every check ``ok`` and an embedded worker heartbeat
-of at most ``--heartbeat-seconds``; typed errors use the shared error shape; a guest
+``--wake-seconds``; readiness reports every check ``ok``, which includes the server's own
+worker heartbeat limit (two minutes, longer for a long lease or idle backoff), and the
+heartbeat age is recorded (``--heartbeat-seconds`` adds a stricter local bound); typed
+errors use the shared error shape; a guest
 principal uploads a tiny synthetic WAV (one second of silence plus a random canary chunk,
 no consent or rights question), records an investigation with an ``Idempotency-Key``
 and replays it; the intake job reaches a terminal state within ``--poll-seconds``; a
@@ -185,7 +187,7 @@ class Smoke:
         *,
         wake_seconds: float = 180,
         poll_seconds: float = 120,
-        heartbeat_seconds: float = 120,
+        heartbeat_seconds: float | None = None,
         interval: float = 3,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
@@ -293,8 +295,13 @@ class Smoke:
             signals = body.get("signals", {})
             self.report.signals = signals
             heartbeat = signals.get("worker_heartbeat_seconds")
-            if not isinstance(heartbeat, int | float) or heartbeat > self.heartbeat_seconds:
-                raise SmokeFailure(f"worker heartbeat older than {self.heartbeat_seconds:.0f}s")
+            # checks.worker == "ok" is the server's verdict against its configured limit;
+            # the age is only recorded unless a stricter local bound was requested.
+            if not isinstance(heartbeat, int | float):
+                raise SmokeFailure("readiness does not report the worker heartbeat age")
+            limit = self.heartbeat_seconds
+            if limit is not None and heartbeat > limit:
+                raise SmokeFailure(f"worker heartbeat older than {limit:.0f}s")
             detail.append(
                 f"heartbeat {heartbeat}s, queue {signals.get('queue_depth')}, "
                 f"oldest {signals.get('oldest_queued_seconds')}s"
@@ -424,7 +431,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--base-url", required=True, help="Deployed origin, e.g. https://host")
     parser.add_argument("--wake-seconds", type=float, default=180, help="cold-start bound")
     parser.add_argument("--poll-seconds", type=float, default=120, help="terminal-state bound")
-    parser.add_argument("--heartbeat-seconds", type=float, default=120)
+    parser.add_argument(
+        "--heartbeat-seconds",
+        type=float,
+        default=None,
+        help="optional stricter bound on the reported heartbeat age (server limit by default)",
+    )
     parser.add_argument("--report", type=Path, help="write the JSON result here")
     return parser.parse_args(argv)
 
