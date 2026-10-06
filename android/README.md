@@ -124,8 +124,8 @@ BE-06 adds `CaptureApiCodec.parseCreateRequest`, `parseCloseRequest`, `parseMeta
 and `parseStatus`, with matching encoders and strict typed models. The shared
 intake fixtures include the multipart metadata envelope and waiting status with
 a missing tail. `InvestigationSource.Capture` is supported on reads but rejected
-by the ordinary shared-media create request. These are contract additions only:
-AN-07 still needs to package captured modalities, upload chunks and poll progress.
+by the ordinary shared-media create request. AN-04 (#26) packages and uploads
+chunks (see below); showing polled progress is still AN-07.
 Empty capture claims with `not_started` are not a no-claims finding.
 Extraction progress uses `CoverageStatus`: `partial` and `complete` parse today,
 and future values map to `UNKNOWN` without dropping the rest of the status.
@@ -263,6 +263,42 @@ an in-memory `InvestigationDao` with the same semantics as the Room one; KSP
 checks every Room query against the schema at build time. The Android Keystore,
 Room on a device, `ContentResolver` and the sheet are not unit-tested.
 
+## Segmented capture and chunk upload
+
+AN-04 (#26). `CaptureService` records the selected interval as sequenced
+chunks on a capture-relative timeline; no wall-clock or original-video time is
+stored or sent.
+
+| Rule | Behavior |
+| --- | --- |
+| Chunk grid | `CaptureLimits.CHUNK_MS` = 10000. Chunk `seq` covers `[seq * 10000, min((seq + 1) * 10000, 180000))` ms from the start of capture, the grid BE-06 enforces. Only the final chunk may be shorter; the 3-minute stop seals seq 17 at exactly 180000 ms. RES-02 may tune the length within the contract's 1000..30000. |
+| Package | One ZIP per chunk (`application/zip`): `chunk.json` (seq, `start_ms`, `end_ms`, `timebase: capture`, modality, audio format, `frames_uploaded: false`, the capture times of the frames sampled in the interval, an empty `text_observations` list, the sampling policy and `recognizer: null`) and `audio-16000-mono-s16le.pcm`. ZIP entry times are fixed to the ZIP epoch. Only audio is uploaded, so a chunk declares `speech`; a chunk without audio is skipped and recorded as such. |
+| Frames | Fixed sampling: one JPEG (720 px long edge, quality 72) about every 5 s, as before. Frames stay in `capture/frames/` on the device and are never uploaded; no text is recognized on the device. On-device OCR (AN-06) is deferred by user decision. Local frames are deleted first when space is needed. |
+| Local manifest | `no_backup/capture/capture.json` (version 2) lists every chunk with size, SHA-256 and frame times, chunks skipped because they held no audio, gaps, chunks deleted after upload, kept and late-dropped frames, the fixed sampling policy, duration and stop reason. A gap of kind `interrupted` is recorded when playback audio stops arriving for at least 1 s. Screen lock still ends the capture (see [compatibility](../docs/compatibility.md)), so the final chunk ends at the lock. There is no pause control. |
+| Storage | The 32 MiB cap applies to what is on the device. When a write would exceed it, local frames are deleted first, then chunks the server already holds, oldest first. Unsent chunks are never deleted: if they alone fill the budget, capture stops with "N chunks are saved on device, not yet sent". A new capture refuses to replace one whose chunks are still waiting to be sent or whose continuation choice has not been closed on the server; it replaces it only after that upload stopped for good (closed, not continued or permanently failed) and says how many unsent chunks were deleted. A capture interrupted by process death keeps its sealed chunks. A single-file capture left by an app version from before chunking is deleted when the app opens, with a message saying so. |
+| Upload | Each sealed chunk schedules the WorkManager chain `capture-upload-<local session id>` (`APPEND_OR_REPLACE`, network required, exponential backoff from 10 s). A capture that sealed no chunk schedules nothing and never opens a server session. `CaptureUploader` opens the server session with the local session id as `Idempotency-Key`, sends each unsent chunk with `PUT /v1/captures/{id}/chunks/{seq}` and marks it sent only after the server reports it stored, so retries and lost acknowledgements are idempotent by `(session_id, seq)`. Transport and retryable errors retry; any other contract error stops the upload and keeps the chunks. Upload bookkeeping is bound to the local session id, so a worker that outlives its capture cannot mark a newer capture sent, closed or failed. |
+| Status | `CaptureState.upload` reports sending, sent, closed or "Saved on device, not yet sent: N of M chunks". The foreground notification shows elapsed time, upload progress and Stop. |
+| Stop | Notification and companion Stop end recording and release media access as before; the continuation choice stays open (`CaptureState.needsContinuationChoice`). `CaptureControl.stop(context, continueResearch)` records the choice (the first choice wins) and stops recording if needed. The overlay may instead send the `STOP` intent with the Boolean extra `CaptureService.EXTRA_CONTINUE_RESEARCH` (`app.ovrly.extra.CONTINUE_RESEARCH`), which records the choice the same way; without the extra Stop leaves the choice open. With `true` the remaining chunks are sent and the session is closed with `continue_research: true` and the actual duration; with `false` nothing more is sent and the session is closed with `continue_research: false`. Without a choice the server session expires as abandoned after its upload window. |
+
+`CaptureSessionApi` covers the four `/v1/captures` operations with the #94
+contract models. Debug builds use `InMemoryCaptureSessionApi`, an in-process
+server with the BE-06 chunk rules, and label upload messages "to the in-memory
+test server"; nothing leaves the device. Release builds use
+`ServerCaptureSessionApi`, which fails with `CAPTURE_API_NOT_CONFIGURED`, so
+chunks stay "saved on device, not yet sent" until it delegates to the AN-03
+(#18) API client. Settings has "Upload on Wi-Fi only" (`CapturePreferences`);
+when on, the chain requires an unmetered network, the current chain is replaced
+with the new constraint, and pending chunks read "Waiting for Wi-Fi".
+
+Tests: `CaptureModelTest` (grid, 3-minute boundary, upload text, continuation
+prompt), `CaptureFilesTest` (sequencing, contiguous offsets, package contents,
+local-only frames, late frames, gaps, skipped chunks, the 180000 ms stop,
+rolling deletion, local frame eviction, replacement refusal, restore after
+process death), `CaptureUploaderTest` (idempotent re-upload, offline retention,
+retry, close with both choices, no server session without chunks, a pending
+close blocking replacement, a stale worker unable to write into a new capture,
+unconfigured server) and `CaptureStopLogTest` (a normal stop is not logged as
+an interruption).
 ## Gallery and demo
 
 Open `app/src/main/java/app/ovrly/ui/GalleryPreviews.kt` in Studio's Design or Split view. `GlassOverlay.kt` contains the live-control previews. Gallery selection does not change the live overlay.

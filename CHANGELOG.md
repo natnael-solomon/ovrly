@@ -26,6 +26,20 @@
 
 - Android data layer and share intake (AN-03, #18): shared videos and links open an intake sheet over the source app instead of Settings. Files are checked for type, video track, duration (10 minutes) and size before anything is copied, streamed into private no-backup staging, uploaded through `/v1/uploads` and turned into an investigation with an `Idempotency-Key`; links create a URL-source investigation. Resharing offers the existing check, rejections explain private, unsupported, expired, too long and too large inputs with a file alternative, and the sheet polls the investigation status. The OkHttp `ApiClient` adds the bearer credential (a guest identity minted on first need, Keystore-encrypted and excluded from backup), a request id per call, request-id-only logging, cold-start timeouts with one retry and a "waking service" notice, and maps every error response through the shared error shape, with unknown codes kept as failures. The API base URL comes from an ignored `api.local.properties` and defaults to the emulator host. Shares, their local job state (`local_pending` to `uploading` to accepted and the server's queued, running, partial, succeeded, failed or cancelled) and cached report versions with a staleness flag live in a Room database (schema exported, KSP-generated, excluded from backup) behind `InvestigationRepository`; a reconciler on app start and every foreground lets the server win for accepted shares, retries shares an earlier process left pending, and cleans up staging. A `PendingChunk` table is ready for the capture chunk uploader (#26).
 
+- Segmented live capture on Android (AN-04, #26): `CaptureService` now writes 10-second
+  chunks on a capture-relative timeline (seq, start/end ms, modality) with a local manifest of
+  skipped chunks, audio interruptions and dropped frames, and still stops at exactly 3:00.
+  Screen frames are still sampled about every 5 s and stay on the device; on-device OCR is
+  deferred. Chunks upload while recording through a WorkManager chain per session with
+  exponential backoff, idempotent by `(session_id, seq)`, with an optional Wi-Fi-only setting;
+  offline chunks stay "saved on device, not yet sent". The 32 MiB cap deletes only local frames
+  and chunks the server already holds. The notification shows upload progress, and
+  `CaptureControl.stop(context, continueResearch)` closes the session with the user's choice.
+  Debug builds upload to a labelled in-memory test server; release builds keep chunks on the
+  device until the AN-03 API client is wired. A normal stop no longer logs
+  `Playback capture was interrupted`, and a pre-chunk local capture left by an earlier version is
+  deleted on open with a message.
+
 - Incremental backend capture sessions with owner-scoped multipart chunk intake,
   durable duplicate receipts, gap/modality manifests, a 180000ms timeline cap,
   explicit Stop continuation and polling. Each chunk enters the durable queue

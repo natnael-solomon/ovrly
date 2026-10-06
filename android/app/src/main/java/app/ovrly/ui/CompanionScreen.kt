@@ -103,7 +103,7 @@ fun CompanionScreen(
                 ThemeChoice(dark, onDark)
             }
             HorizontalDivider()
-            SectionTitle("Capture", "Up to 3 min / 32 MiB / stored locally")
+            SectionTitle("Capture", "Up to 3 min / 10 s chunks / 32 MiB local")
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = palette.surface,
@@ -135,7 +135,7 @@ fun CompanionScreen(
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
-                    Text(capture.message, style = MaterialTheme.typography.bodyMedium)
+                    Text(capture.displayMessage, style = MaterialTheme.typography.bodyMedium)
                     if (capture.hasLocalCapture || capture.busy) {
                         Text(
                             "${capture.frames} screen samples / ${capture.bytes / 1024} KiB local",
@@ -168,8 +168,9 @@ fun CompanionScreen(
             }
             SettingsDisclosure(
                 "Capture details",
-                "Playback audio and a screen image about every 5 seconds. No microphone fallback, transcription, research or upload. Android consent is required each time."
+                "Playback audio in 10-second chunks; a screen image every 5 s stays on this device."
             )
+            CaptureUploadSettings()
             HorizontalDivider()
             SectionTitle("Overlay", if (overlayVisible) "Visible" else "Off")
             if (!overlayAllowed) {
@@ -291,7 +292,7 @@ fun CompanionScreen(
             SectionTitle("Storage", "Private / temporary")
             SettingsDisclosure(
                 "Retention details",
-                "One capture at a time, up to 32 MiB. A new capture replaces it. Interrupted data and captures older than 24 hours are removed next time the app opens. No upload or account sync."
+                "One capture at a time. Unsent chunks are never deleted silently; captures expire after 24 h."
             )
             OutlinedButton(
                 onClick = onDeleteCapture,
@@ -346,7 +347,7 @@ fun CompanionScreen(
                             "Source apps may block audio or protect pixels."
                     )
                     Text(
-                        "Previous local capture will be replaced. No research or upload starts. " +
+                        "A sent previous capture is replaced; chunks upload while recording. " +
                             "Locking the screen, revoking projection, or stopping capture " +
                             "releases media access."
                     )

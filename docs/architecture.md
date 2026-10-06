@@ -6,7 +6,7 @@
 
 | Package | Responsibility |
 | --- | --- |
-| `capture` | Projection/playback capture, bounded temporary output and lifecycle |
+| `capture` | Projection/playback capture, 10-second chunks on the capture timeline, local-only frame samples, bounded local storage, chunk upload scheduling and lifecycle |
 | `contract` | Typed models and the production parsers for the shared `packages/contracts` schemas: voice actions, uploads, investigations with jobs and report versions, claims, evidence, assessments, capture sessions and chunks |
 | `overlay` | Floating-window lifecycle, movement and controls |
 | `share` | Share intake: on-device checks, private staging, upload and investigation creation, duplicate detection |
@@ -106,7 +106,7 @@ stored bytes before close; they do not yet transcribe or extract claims.
 Session row locks serialize byte commits, Stop and retention, while queue
 fencing prevents cancelled/deleted work from publishing. See the
 [capture API](../backend/README.md#incremental-capture-api) for transport,
-deadlines and replay semantics. Android has matching codecs, not network wiring.
+deadlines and replay semantics. Android packages and schedules chunk uploads through `CaptureSessionApi` (#26); the HTTP adapter waits for the AN-03 client.
 `CaptureApiCodec` handles the create/close bodies, multipart metadata and polling
 envelope; `CaptureCodec` retains the existing session/chunk parsers.
 

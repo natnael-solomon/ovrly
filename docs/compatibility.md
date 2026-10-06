@@ -70,6 +70,8 @@ Silence, blocked and routing are different findings and are recorded differently
 
 Evidence folders stay local (`.local` is Git-ignored). This file records results only.
 
+Since #26 the sampled frames are kept in `capture/frames/` (still about every 5 s, never uploaded); the script reads them from there.
+
 ## Decision
 
 Recorded as [BC-D02](decisions/BC-D02-providers-devices.md): YouTube Shorts, TikTok and Instagram Reels are advertised on Android 12 and later; Facebook is not advertised until tested.

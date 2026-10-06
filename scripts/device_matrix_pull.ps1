@@ -38,12 +38,12 @@ if (-not $json) { throw "No capture.json in $Package private storage. Did the ca
 [IO.File]::WriteAllText((Join-Path $cell 'capture.json'), ($json -join "`n"), (New-Object Text.UTF8Encoding $false))
 $meta = ($json -join "`n") | ConvertFrom-Json
 
-$frames = & $adb -s $serial shell "run-as $Package ls $remote" 2>$null | Where-Object { $_ -match '^frame-\d+ms\.jpg$' } | Sort-Object { [int]($_ -replace '\D', '') }
+$frames = & $adb -s $serial shell "run-as $Package ls $remote/frames" 2>$null | Where-Object { $_ -match '^frame-\d+ms\.jpg$' } | Sort-Object { [int]($_ -replace '\D', '') }
 $frameName = $null
 if ($frames) {
     $frameName = $frames[[math]::Floor($frames.Count / 2)]
     # run-as cannot write to shared storage on this device; stream the frame as base64 instead.
-    $b64 = (& $adb -s $serial exec-out "run-as $Package base64 $remote/$frameName") -join ''
+    $b64 = (& $adb -s $serial exec-out "run-as $Package base64 $remote/frames/$frameName") -join ''
     [IO.File]::WriteAllBytes((Join-Path $cell $frameName), [Convert]::FromBase64String($b64))
 }
 
