@@ -1,0 +1,250 @@
+name: Android instrumented CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-instrumented-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: Detect Android changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      android: ${{ steps.changes.outputs.android }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      ANDROID_CHECK_NAME: Android instrumented checks
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test change detection, flake and coverage policy
+        run: python3 -m unittest discover -s .github/scripts -p 'test_android_*.py' -v
+      - name: Detect Android changes
+        id: changes
+        run: python3 .github/scripts/android_changes.py
+
+  instrumented:
+    name: Instrumented tests (API ${{ matrix.api-level }})
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api-level: 29
+            coverage-gate: false
+          - api-level: 34
+            coverage-gate: true
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      API_LEVEL: ${{ matrix.api-level }}
+      COVERAGE_GATE: ${{ matrix.coverage-gate }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Ensure required Android SDK packages
+        run: |
+          missing=()
+          if [[ ! -f "$ANDROID_HOME/platforms/android-37.0/android.jar" ]]; then
+            missing+=("platforms;android-37.0")
+          fi
+          if [[ ! -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" ]]; then
+            missing+=("build-tools;36.0.0")
+          fi
+          if (( ${#missing[@]} )); then
+            sdkmanager --install "${missing[@]}"
+          else
+            echo "Required SDK packages are already installed."
+          fi
+
+      - name: Set up Gradle and validate wrappers
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: enhanced
+          cache-read-only: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+
+      - name: Build app and test APKs (and unit tests on the coverage job)
+        id: build
+        working-directory: android
+        run: |
+          tasks=(:app:assembleDebug :app:assembleDebugAndroidTest)
+          if [[ "$COVERAGE_GATE" == true ]]; then
+            tasks+=(:app:testDebugUnitTest)
+          fi
+          sh gradlew --no-daemon --console=plain --build-cache --dependency-verification=strict \
+            -Povrly.coverage=true "${tasks[@]}"
+
+      - name: Restore AVD snapshot
+        id: avd
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-api${{ matrix.api-level }}-default-x86_64-v1
+
+      - name: Create AVD snapshot (main only)
+        if: steps.avd.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: default
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -camera-back none
+          disable-animations: false
+          script: echo "Generated AVD snapshot for caching."
+
+      - name: Save AVD snapshot (main only)
+        if: steps.avd.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-api${{ matrix.api-level }}-default-x86_64-v1
+
+      - name: Run instrumented tests (one retry; flakes reported)
+        id: tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: default
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -no-boot-anim -camera-back none
+          disable-animations: true
+          working-directory: android
+          script: python3 ../.github/scripts/android_instrumented.py --label "API $API_LEVEL"
+
+      - name: Restore main coverage baseline
+        if: ${{ !cancelled() && matrix.coverage-gate && steps.build.outcome == 'success' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: android/app/build/coverage-baseline
+          key: android-coverage-main-${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          restore-keys: android-coverage-main-
+
+      - name: Coverage report, floors and comparison with main
+        id: coverage
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: android
+        env:
+          MEASURED_SHA: ${{ github.sha }}
+        run: |
+          sh gradlew --no-daemon --console=plain --build-cache --dependency-verification=strict \
+            -Povrly.coverage=true :app:jacocoDebugReport
+          gate=()
+          if [[ "$COVERAGE_GATE" == true ]]; then
+            gate=(--gate)
+          fi
+          python3 ../.github/scripts/android_coverage.py \
+            --report app/build/reports/jacoco/jacocoDebugReport/jacocoDebugReport.xml \
+            --baseline app/build/coverage-baseline/coverage.json \
+            --output app/build/reports/coverage-summary \
+            --label "API $API_LEVEL" --sha "$MEASURED_SHA" "${gate[@]}"
+
+      - name: Stage main coverage baseline
+        if: matrix.coverage-gate && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.coverage.outcome == 'success'
+        run: |
+          mkdir -p android/app/build/coverage-baseline
+          cp android/app/build/reports/coverage-summary/coverage.json android/app/build/coverage-baseline/
+
+      - name: Save main coverage baseline
+        if: matrix.coverage-gate && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.coverage.outcome == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: android/app/build/coverage-baseline
+          key: android-coverage-main-${{ github.sha }}
+
+      - name: Upload instrumented and coverage reports
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' && steps.build.outcome != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-instrumented-reports-api${{ matrix.api-level }}
+          path: |
+            android/app/build/instrumented/
+            android/app/build/reports/jacoco/jacocoDebugReport/
+            android/app/build/reports/coverage-summary/
+            android/app/build/reports/tests/testDebugUnitTest/
+            android/app/build/test-results/testDebugUnitTest/*.xml
+            android/build/reports/dependency-verification/
+          retention-days: 7
+          if-no-files-found: warn
+
+  reports:
+    name: Merge instrumented reports
+    needs: [changes, instrumented]
+    if: ${{ always() && needs.changes.outputs.android == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Merge per-API reports into android-instrumented-reports
+        uses: actions/upload-artifact/merge@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-instrumented-reports
+          pattern: android-instrumented-reports-api*
+          separate-directories: true
+          retention-days: 7
+          delete-merged: true
+
+  result:
+    name: Android instrumented checks
+    if: ${{ always() }}
+    needs: [changes, instrumented]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      DETECTION: ${{ needs.changes.result }}
+      REQUIRED: ${{ needs.changes.outputs.android }}
+      VALIDATION: ${{ needs.instrumented.result }}
+    steps:
+      - name: Report instrumented result
+        shell: bash
+        run: |
+          if [[ "$DETECTION" != success ]]; then
+            echo "::error::Android change detection did not succeed."
+            exit 1
+          fi
+          if [[ "$REQUIRED" == false && "$VALIDATION" == skipped ]]; then
+            echo "Documentation-only change: instrumented tests skipped." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$REQUIRED" == true && "$VALIDATION" == success ]]; then
+            echo "Instrumented tests and coverage passed on API 29 and 34." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Instrumented tests failed, were cancelled, or did not run."
+            exit 1
+          fi

@@ -106,7 +106,13 @@ investigation/owner. The API reserves a persistent byte key before writing,
 then commits each verified receipt and `media_validation` job together.
 Capture polling reports missing intervals and client-declared speech/text
 coverage, separately from processing. Both worker modes verify each chunk's
-stored bytes before close; they do not yet transcribe or extract claims.
+stored bytes before close and atomically enqueue `asr` and `device_text`;
+publication of both queues one `claim_extraction` job for that chunk.
+The handlers for those stages remain #20/#25, so unimplemented stages stay
+queued. Stage keys preserve per-capture/sequence idempotency, publication shares
+the queue's lease fence, and Stop cancels downstream work under the session lock.
+Capture polling derives per-claim states from the latest report, including
+explicitly labelled development fixtures; validation alone is not analysis.
 Session row locks serialize byte commits, Stop and retention, while queue
 fencing prevents cancelled/deleted work from publishing. See the
 [capture API](../backend/README.md#incremental-capture-api) for transport,

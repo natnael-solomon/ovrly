@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import Row, insert, select
+from sqlalchemy import Row, and_, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -27,6 +27,7 @@ from services.api.schemas import (
     SafeError,
     UploadSource,
 )
+from services.captures import CAPTURE_STAGES
 from services.jobs.models import jobs
 from services.jobs.states import JobState
 from services.models import (
@@ -137,16 +138,30 @@ async def latest_jobs(
         )
     )
     candidates.extend((keys[row.input_hash], row) for row in intake)
-    for link, owner in (
-        (reanalysis_requests.c.job_id, reanalysis_requests.c.investigation_id),
-        (capture_chunks.c.job_id, capture_chunks.c.session_id),
-    ):
+    for link, owner in ((reanalysis_requests.c.job_id, reanalysis_requests.c.investigation_id),):
         linked = await connection.execute(
             select(jobs, owner.label("investigation_id"))
             .join_from(jobs, owner.table, link == jobs.c.id)
             .where(owner.in_(investigation_ids))
         )
         candidates.extend((row.investigation_id, row) for row in linked)
+    validation = jobs.alias("capture_validation")
+    capture = await connection.execute(
+        select(jobs, capture_chunks.c.session_id.label("investigation_id"))
+        .select_from(
+            capture_chunks.join(validation, capture_chunks.c.job_id == validation.c.id).join(
+                jobs,
+                and_(
+                    jobs.c.version == validation.c.version,
+                    jobs.c.input_hash == validation.c.input_hash,
+                    jobs.c.owner_id == validation.c.owner_id,
+                    jobs.c.stage.in_(CAPTURE_STAGES),
+                ),
+            ),
+        )
+        .where(capture_chunks.c.session_id.in_(investigation_ids))
+    )
+    candidates.extend((row.investigation_id, row) for row in capture)
     newest: dict[uuid.UUID, Row[Any]] = {}
     for investigation_id, row in candidates:
         if row.state == JobState.DELETED.value:

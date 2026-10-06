@@ -28,8 +28,9 @@ def main():
     )
     with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
         output.write(f"android={str(required).lower()}\n")
+    title = os.environ.get("ANDROID_CHECK_NAME", "Android checks")
     with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
-        summary.write(f"### Android checks\n\n{reason}\n")
+        summary.write(f"### {title}\n\n{reason}\n")
     print(reason)
 
 

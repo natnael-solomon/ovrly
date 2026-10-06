@@ -1,5 +1,7 @@
 import java.util.Properties
 import org.gradle.api.tasks.util.PatternFilterable
+import org.gradle.testing.jacoco.plugins.JacocoPluginExtension
+import org.gradle.testing.jacoco.tasks.JacocoReport
 
 plugins {
     id("com.android.application")
@@ -64,6 +66,16 @@ fun releaseVersionCode(): Int {
         ?: error("ovrly.versionCode must be an integer in 1..2100000000, got '$requested'")
 }
 
+// JaCoCo coverage for unit and instrumented tests (REPO-04 #13, REPO-05 #76). Off unless
+// -Povrly.coverage=true, so ordinary debug builds and Android checks stay uninstrumented.
+val coverageEnabled: Boolean = findProperty("ovrly.coverage")?.toString().let {
+    require(it == null || it == "true" || it == "false") {
+        "ovrly.coverage must be true or false."
+    }
+    it == "true"
+}
+val jacocoToolVersion = "0.8.14"
+
 android {
     namespace = "app.ovrly"
     compileSdk = 37
@@ -73,6 +85,7 @@ android {
         targetSdk = 37
         versionCode = releaseVersionCode()
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("boolean", "VOXIDE_ENABLED", liveVoice.toString())
         buildConfigField("boolean", "VOXIDE_LIVE", liveVoice.toString())
         buildConfigField(
@@ -93,6 +106,10 @@ android {
         buildConfig = true
     }
     buildTypes {
+        debug {
+            enableUnitTestCoverage = coverageEnabled
+            enableAndroidTestCoverage = coverageEnabled
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -111,7 +128,14 @@ android {
         warningsAsErrors = true
         lintConfig = file("lint.xml")
     }
-    testOptions { unitTests.isReturnDefaultValues = true }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        animationsDisabled = true
+        // Each instrumented test runs in its own process, so a crash fails only that test
+        // instead of silently dropping every later one from the results.
+        execution = "ANDROIDX_TEST_ORCHESTRATOR"
+    }
+    testCoverage { jacocoVersion = jacocoToolVersion }
     sourceSets {
         // Shared contract schemas and fixtures are read in place from the repository root.
         // Unit tests load them as classpath resources; nothing is copied into the module.
@@ -122,6 +146,70 @@ android {
 // Keep only VERSION, schemas/ and fixtures/ from the contracts package on the test classpath.
 tasks.matching { it.name.endsWith("UnitTestJavaRes") }.configureEach {
     (this as PatternFilterable).exclude("README.md", "ruff.toml", "validate.py", "tests/**")
+}
+
+// Reviewed coverage exclusions: generated code, Compose previews and gallery fixtures only.
+// Previews declared inside production files (GlassOverlay.kt, DemoOverlayPanel.kt) share a
+// class with real code and stay counted.
+val coverageExclusions = listOf(
+    "**/R.class",
+    "**/R$*.class",
+    "**/BuildConfig.class",
+    "**/Manifest.class",
+    "**/Manifest$*.class",
+    "**/*_Impl.class",
+    "**/*_Impl$*.class",
+    "**/*\$\$serializer.class",
+    "**/ComposableSingletons$*.class",
+    "app/ovrly/ui/GalleryPreviewsKt*.class",
+    "app/ovrly/ui/AppearancePreviewsKt*.class",
+    "app/ovrly/ui/LiveResultsPreviewsKt*.class",
+    "app/ovrly/ui/GalleryFixturesKt*.class",
+    "app/ovrly/ui/GalleryFixture.class",
+    "app/ovrly/ui/GalleryFixture$*.class"
+)
+
+if (coverageEnabled) {
+    apply(plugin = "jacoco")
+    extensions.configure<JacocoPluginExtension> { toolVersion = jacocoToolVersion }
+
+    // One report from whatever execution data exists: unit tests, connected runs and the
+    // retried attempts that android_instrumented.py moves under build/instrumented/.
+    // It never runs tests itself, so it can follow an emulator run in a separate step.
+    tasks.register<JacocoReport>("jacocoDebugReport") {
+        group = "verification"
+        description = "JaCoCo line coverage of the debug variant from existing execution data."
+        mustRunAfter(
+            tasks.matching {
+                it.name == "testDebugUnitTest" || it.name == "connectedDebugAndroidTest"
+            }
+        )
+        val classTrees = listOf("compileDebugKotlin", "compileDebugJavaWithJavac").map { name ->
+            tasks.named(name).map { task ->
+                task.outputs.files.asFileTree.matching {
+                    include("**/*.class")
+                    exclude(coverageExclusions)
+                }
+            }
+        }
+        classDirectories.setFrom(classTrees)
+        sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
+        executionData.setFrom(
+            fileTree(layout.buildDirectory) {
+                include(
+                    "outputs/unit_test_code_coverage/debugUnitTest/*.exec",
+                    "jacoco/testDebugUnitTest.exec",
+                    "outputs/code_coverage/debugAndroidTest/connected/**/*.ec",
+                    "instrumented/**/*.ec"
+                )
+            }
+        )
+        reports {
+            xml.required.set(true)
+            html.required.set(true)
+            csv.required.set(false)
+        }
+    }
 }
 
 dependencies {
@@ -147,7 +235,17 @@ dependencies {
     ksp("androidx.room:room-compiler:2.8.5")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260814")
     testImplementation("com.squareup.okhttp3:mockwebserver:5.5.0")
+    androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test:core:1.7.0")
+    androidTestImplementation("androidx.test:rules:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestUtil("androidx.test:orchestrator:1.6.1")
+    androidTestUtil("androidx.test.services:test-services:1.6.0")
 }
