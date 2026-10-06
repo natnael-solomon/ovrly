@@ -46,6 +46,13 @@ coordinates and hashes against their publishers, then rerun without those flags.
 Include parent POMs/BOMs and Linux CI artifacts; a warm-cache pass alone does not
 prove complete metadata coverage. CI never regenerates baselines or verification metadata.
 
+`:app:cyclonedxDirectBom` (CycloneDX Gradle plugin 3.4.1) writes a CycloneDX 1.6
+SBOM of the release runtime classpath, the libraries packaged into the release
+APK, to `app/build/reports/sbom/ovrly-android.cdx.json`. It has no serial number
+so rebuilds match, and reads dependency POMs for licenses. Android checks run it
+with the release fixture; the [Release workflow](../docs/release-signing.md#tagged-demo-releases)
+attests and ships it.
+
 Repository pre-commit checks also run these gates and audit dependencies; they
 require JDK 21, the SDK, uv and network access. See [shared checks](../WORKFLOW.md#shared-quality-gates).
 
