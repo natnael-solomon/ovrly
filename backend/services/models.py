@@ -239,6 +239,17 @@ reanalysis_requests = Table(
     Column("job_id", UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True),
     Column("response", JSONB, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # The confirmed full-video investigation of an expansion (same owner); null otherwise.
+    Column(
+        "source_investigation_id",
+        UUID(as_uuid=True),
+        ForeignKey(
+            "investigations.id",
+            ondelete="SET NULL",
+            name="fk_reanalysis_requests_source_investigation_id",
+        ),
+        nullable=True,
+    ),
     UniqueConstraint("owner_id", "idempotency_key", name="uq_reanalysis_requests_owner_key"),
 )
 

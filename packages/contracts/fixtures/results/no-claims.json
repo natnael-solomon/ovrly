@@ -47,7 +47,8 @@
       "supersedes": null,
       "claims": [],
       "evidence": [],
-      "assessments": []
+      "assessments": [],
+      "fixture": false
     }
   }
 }

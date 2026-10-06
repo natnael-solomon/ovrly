@@ -221,6 +221,9 @@ class ReportVersion(BaseModel):
     claims: list[Claim]
     evidence: list[Evidence]
     assessments: list[Assessment]
+    # True only for a development stub built from the contract fixtures (OVRLY_STUB_REPORTS);
+    # such a version is never a check of the media and clients label it as a fixture.
+    fixture: bool = False
 
 
 class JobSummary(BaseModel):
@@ -387,11 +390,17 @@ class CorrectionReanalysis(StrictModel):
 
 
 class ExpansionReanalysis(StrictModel):
-    """Check the full video the captured clip was matched to; the user must confirm the match."""
+    """Check the full video the captured clip was matched to; the user must confirm the match.
+
+    ``source_investigation_id`` names the caller's investigation of that full video. It is
+    optional here only so the contract addition stays non-breaking; the server requires it
+    whenever ``match_confirmed`` is true.
+    """
 
     reason: Literal["expansion"]
     base_version: VersionNumber
     match_confirmed: bool
+    source_investigation_id: uuid.UUID | None = None
 
 
 class DeeperReanalysis(StrictModel):
@@ -416,6 +425,8 @@ class ReanalysisResponse(BaseModel):
     # The version a correction published at once; null for expansion and deeper, whose
     # new version is published by the reanalysis job.
     published_version: int | None
+    # The confirmed full-video investigation of an expansion; null otherwise.
+    source_investigation_id: uuid.UUID | None
     job: JobSummary
     created_at: datetime
 

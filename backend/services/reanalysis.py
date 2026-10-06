@@ -3,8 +3,9 @@
 A correction publishes a new immutable version at once: the corrected claim keeps its
 original wording, records the superseded proposition with user attribution, and loses its
 assessment and evidence until the reanalysis job reruns that claim alone; every other claim
-keeps its assessment. Expansion (which requires ``match_confirmed``) and deeper search change
-no content yet. Every reason enqueues one owner-scoped ``reanalysis`` job whose payload names
+keeps its assessment. Expansion (which requires ``match_confirmed`` and names the caller's
+own investigation of the confirmed full video, ``source_investigation_id``) and deeper search
+change no content yet. Every reason enqueues one owner-scoped ``reanalysis`` job whose payload names
 the version it must supersede. The assessment pipeline (#27) registers the production
 handler; until then the job stays queued and cancellable, or, with the development-only
 ``OVRLY_STUB_REPORTS``, a stub handler publishes a fixture version.
@@ -52,7 +53,11 @@ def reanalysis_stage_key(request_id: uuid.UUID) -> StageKey:
 
 def request_hash(investigation_id: uuid.UUID, body: Reanalysis) -> str:
     canonical = json.dumps(
-        {"investigation_id": str(investigation_id), **body.model_dump(mode="json")},
+        # exclude_none keeps the hash of requests made before optional fields existed.
+        {
+            "investigation_id": str(investigation_id),
+            **body.model_dump(mode="json", exclude_none=True),
+        },
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -122,6 +127,51 @@ def corrected_report(
     )
 
 
+async def confirmed_source(
+    connection: AsyncConnection,
+    principal: Principal,
+    investigation_id: uuid.UUID,
+    body: ExpansionReanalysis,
+) -> uuid.UUID:
+    """The caller's shared full-video investigation an expansion names, validated.
+
+    Another caller's or a missing investigation is the same 404 as every owned route.
+    """
+    # Imported here: the investigation routes import the report helpers this module uses.
+    from services.api.routes.investigations import investigation_response, job_states
+
+    source_id = body.source_investigation_id
+    if source_id is None:
+        raise _error(
+            422,
+            "EXPANSION_SOURCE_REQUIRED",
+            "Expansion must name the investigation of the confirmed full video",
+        )
+    if source_id == investigation_id:
+        raise _error(
+            422,
+            "EXPANSION_SOURCE_SELF",
+            "The full video must be a different investigation from the one being expanded",
+        )
+    source = await load_owned(connection, investigations, source_id, principal)
+    if source.source_kind not in {"url", "upload"}:
+        raise _error(
+            422,
+            "EXPANSION_SOURCE_UNSUPPORTED",
+            "The full video must be a shared video or upload, not a live capture",
+        )
+    state = investigation_response(
+        source, (await job_states(connection, [source_id])).get(source_id)
+    ).state
+    if state in {"failed", "cancelled"}:
+        raise _error(
+            409,
+            "EXPANSION_SOURCE_UNAVAILABLE",
+            "The investigation of the full video failed or was cancelled",
+        )
+    return source_id
+
+
 async def job_summary(connection: AsyncConnection, job_id: uuid.UUID) -> JobSummary:
     return summarize_job((await connection.execute(select(jobs).where(jobs.c.id == job_id))).one())
 
@@ -169,6 +219,11 @@ async def request_reanalysis(
             "MATCH_CONFIRMATION_REQUIRED",
             "Expansion to the full video requires the user to confirm the match",
         )
+    source_id = (
+        await confirmed_source(connection, principal, investigation_id, body)
+        if isinstance(body, ExpansionReanalysis)
+        else None
+    )
     latest = await latest_version(connection, investigation_id)
     if body.base_version != latest.version:
         raise _error(
@@ -200,6 +255,8 @@ async def request_reanalysis(
             "reason": body.reason,
             "supersedes_version": target_version,
             "claim_ids": pending_claims,
+            # An identifier only; the worker loads the source under the same owner.
+            "source_investigation_id": None if source_id is None else str(source_id),
         },
         owner_id=principal.id,
     )
@@ -210,6 +267,7 @@ async def request_reanalysis(
         reason=body.reason,
         base_version=body.base_version,
         published_version=published_version,
+        source_investigation_id=source_id,
         job=await job_summary(connection, enqueued.job_id),
         created_at=now,
     ).model_dump(mode="json")
@@ -227,6 +285,7 @@ async def request_reanalysis(
             job_id=enqueued.job_id,
             response=response,
             created_at=now,
+            source_investigation_id=source_id,
         )
     )
     return response

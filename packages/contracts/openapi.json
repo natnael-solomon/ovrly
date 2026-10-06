@@ -588,7 +588,7 @@
         "tags": ["reports"],
         "operationId": "reanalyzeInvestigation",
         "summary": "Correct a claim, expand to the confirmed full video, or search deeper.",
-        "description": "Requires Idempotency-Key, scoped to the caller: the same key and body replays the original 202 body; the same key with a different body is 409 IDEMPOTENCY_KEY_REUSED. base_version must be the latest published version. correction publishes a new immutable version at once (published_version): the claim keeps its original wording, its correction records the superseded proposition attributed to the user, its evidence and assessment are removed until the job reruns that claim only, and every other claim keeps its assessment; earlier versions are unchanged. expansion requires match_confirmed true and deeper changes nothing yet; for both, published_version is null and the reanalysis job publishes the version that supersedes base_version. Every reason enqueues one owner-scoped reanalysis job, cancellable through POST /v1/jobs/{job_id}/cancel; its job.stage is the contract stage the work starts at (retrieval, or media_validation for expansion). Until the assessment pipeline (#27) registers the production handler the job stays queued; a server running the development-only OVRLY_STUB_REPORTS publishes a placeholder fixture version instead.",
+        "description": "Requires Idempotency-Key, scoped to the caller: the same key and body replays the original 202 body; the same key with a different body is 409 IDEMPOTENCY_KEY_REUSED. base_version must be the latest published version. correction publishes a new immutable version at once (published_version): the claim keeps its original wording, its correction records the superseded proposition attributed to the user, its evidence and assessment are removed until the job reruns that claim only, and every other claim keeps its assessment; earlier versions are unchanged. expansion requires match_confirmed true and source_investigation_id, the caller's own investigation of the confirmed full video (a url or upload source, not this investigation, not a capture, not failed or cancelled; a missing or another caller's source is the same 404 NOT_FOUND), and deeper changes nothing yet; for both, published_version is null and the reanalysis job publishes the version that supersedes base_version. Every reason enqueues one owner-scoped reanalysis job, cancellable through POST /v1/jobs/{job_id}/cancel; its job.stage is the contract stage the work starts at (retrieval, or media_validation for expansion). Until the assessment pipeline (#27) registers the production handler the job stays queued; a server running the development-only OVRLY_STUB_REPORTS publishes a placeholder fixture version instead.",
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": {
           "required": true,
@@ -614,14 +614,14 @@
           "401": { "$ref": "#/components/responses/Unauthenticated" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "409": {
-            "description": "IDEMPOTENCY_KEY_REUSED, REPORT_NOT_AVAILABLE (no published report yet; action retry) or REPORT_VERSION_STALE (base_version is not the latest).",
+            "description": "IDEMPOTENCY_KEY_REUSED, REPORT_NOT_AVAILABLE (no published report yet; action retry), REPORT_VERSION_STALE (base_version is not the latest) or EXPANSION_SOURCE_UNAVAILABLE (the source investigation failed or was cancelled).",
             "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
             }
           },
           "422": {
-            "description": "VALIDATION_FAILED, CLIENT_IDENTITY_REJECTED, MATCH_CONFIRMATION_REQUIRED (expansion without match_confirmed true), CLAIM_NOT_IN_VERSION or CORRECTION_UNCHANGED.",
+            "description": "VALIDATION_FAILED, CLIENT_IDENTITY_REJECTED, MATCH_CONFIRMATION_REQUIRED (expansion without match_confirmed true), EXPANSION_SOURCE_REQUIRED (expansion without source_investigation_id), EXPANSION_SOURCE_SELF (the source is this investigation), EXPANSION_SOURCE_UNSUPPORTED (the source is a live capture, not a shared full video), CLAIM_NOT_IN_VERSION or CORRECTION_UNCHANGED.",
             "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
@@ -945,7 +945,11 @@
             "properties": {
               "reason": { "type": "string", "const": "expansion" },
               "base_version": { "type": "integer" },
-              "match_confirmed": { "type": "boolean" }
+              "match_confirmed": { "type": "boolean" },
+              "source_investigation_id": {
+                "$ref": "schemas/common.schema.json#/$defs/uuid",
+                "description": "The caller's investigation of the full video the user confirmed as the match: a url or upload source, not a capture, not this investigation, and not failed or cancelled. Optional in the schema only so the addition stays non-breaking; the server requires it whenever match_confirmed is true (422 EXPANSION_SOURCE_REQUIRED)."
+              }
             }
           },
           {
@@ -961,15 +965,19 @@
       },
       "ReanalysisResponse": {
         "type": "object",
-        "description": "Mirrors services/api/schemas.py ReanalysisResponse. published_version is the version a correction published at once, null for expansion and deeper. job is the owner-scoped reanalysis job.",
+        "description": "Mirrors services/api/schemas.py ReanalysisResponse. published_version is the version a correction published at once, null for expansion and deeper. source_investigation_id echoes the confirmed full-video investigation of an expansion. job is the owner-scoped reanalysis job.",
         "additionalProperties": false,
-        "required": ["id", "investigation_id", "reason", "base_version", "published_version", "job", "created_at"],
+        "required": ["id", "investigation_id", "reason", "base_version", "published_version", "source_investigation_id", "job", "created_at"],
         "properties": {
           "id": { "$ref": "schemas/common.schema.json#/$defs/uuid" },
           "investigation_id": { "$ref": "schemas/common.schema.json#/$defs/uuid" },
           "reason": { "type": "string", "enum": ["correction", "expansion", "deeper"] },
           "base_version": { "type": "integer" },
           "published_version": { "$ref": "schemas/common.schema.json#/$defs/nullable_integer" },
+          "source_investigation_id": {
+            "description": "The confirmed full-video investigation of an expansion; null for correction and deeper.",
+            "oneOf": [{ "type": "null" }, { "$ref": "schemas/common.schema.json#/$defs/uuid" }]
+          },
           "job": { "$ref": "#/components/schemas/Job" },
           "created_at": { "$ref": "schemas/common.schema.json#/$defs/timestamp" }
         }

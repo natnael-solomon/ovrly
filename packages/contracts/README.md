@@ -55,7 +55,7 @@ round-trip check reports whole-file diffs).
 | `investigation-create-request.schema.json` | `InvestigationCreateRequest`; `UrlSource` or `UploadSource` discriminated on `kind` | `POST /v1/investigations` body. |
 | `investigation.schema.json` | `InvestigationReadModel` (`InvestigationResponse` plus `processing_status`, `job`, `report`) | `POST /v1/investigations` 202, `GET /v1/investigations[/{id}]`; the six result fixtures. |
 | `job.schema.json` | `JobSummary` (client-visible columns of `jobs`) | Nested in an investigation; voice `job` targets. |
-| `report-version.schema.json` | `ReportVersion` | Nested in an investigation; `GET /v1/investigations/{id}/reports/{version}` and the `report` snapshot of the inline `SavedReport` component (BE-10, #33). |
+| `report-version.schema.json` | `ReportVersion` | Nested in an investigation; `GET /v1/investigations/{id}/reports/{version}` and the `report` snapshot of the inline `SavedReport` component (BE-10, #33). The optional `fixture` boolean (absent reads as false; the server always sends it) is true only for development stub versions (`OVRLY_STUB_REPORTS`), which clients label as a fixture, never as live results; the Android `ReportVersion` mirrors it with a default of false. |
 | `claim.schema.json` | `Claim`, `ClaimCorrection` | Items of `report.claims`. |
 | `evidence.schema.json` | `Evidence`, `EvidenceSource` | Items of `report.evidence`. |
 | `assessment.schema.json` | `Assessment`, `EvidenceRelation` | Items of `report.assessments`. |

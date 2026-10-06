@@ -166,7 +166,8 @@
           "provisional": false,
           "summary": "The on-screen claim holds for scheduled service only; reserve diesel stayed."
         }
-      ]
+      ],
+      "fixture": false
     }
   }
 }

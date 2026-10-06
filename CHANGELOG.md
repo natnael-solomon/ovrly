@@ -20,6 +20,22 @@
   in the job with 90% floors for capture, share and contract parsing and at most
   a one-point drop against `main` (#13).
 
+- Report versions carry `fixture` (true only for development stub versions) in every
+  report read, including the `report` of an investigation, so clients can label stub
+  claims as a fixture rather than live results. Additive to `0.2.0-draft`; the
+  Android contract model mirrors it with a default of false.
+- The development-only `OVRLY_STUB_REPORTS` stub covers live captures: fixture
+  versions advance as chunks validate and become final on a close that continues
+  research, and capture polling lists their claims. Off by default; without it
+  capture behaviour is unchanged.
+
+- Full-video expansion names its source: `POST /v1/investigations/{id}/reanalyze`
+  with reason `expansion` takes `source_investigation_id`, the caller's own
+  investigation of the confirmed full video, validated for ownership, kind and
+  state, recorded by migration `0009_reanalysis_source` and echoed in the
+  response. The field is optional in the `0.2.0-draft` contract so the addition
+  is non-breaking; the server requires it whenever `match_confirmed` is true.
+
 - Backend report versions, explicit saves, reanalysis, export and voice actions
   (BE-10, #33): immutable, owner-scoped report versions with change summaries
   (`GET /v1/investigations/{id}/reports[/{version}]`), idempotent saves with a
