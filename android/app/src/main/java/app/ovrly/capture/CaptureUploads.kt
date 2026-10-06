@@ -74,19 +74,30 @@ internal class CaptureUploader(
             api.open(manifest.sessionId, CaptureCreateRequest(CaptureLimits.CHUNK_MS.toInt()))
                 .id.also(ledger::saveRemoteSessionId)
         }
-        remote?.let {
+        val stopped = remote?.let {
             onSession(it)
             send(manifest, it, onProgress)
+        } == true
+        when {
+            // "Research will not continue" was chosen while sending: close without the rest.
+            stopped -> if (manifest.finished) close(manifest, continueResearch = false)
+
+            manifest.finished && choice == true -> close(manifest, continueResearch = true)
         }
-        if (manifest.finished && choice == true) close(manifest, continueResearch = true)
     }
 
+    /**
+     * Sends every unsent chunk in order. Returns true when the user chose "research will not
+     * continue" meanwhile: the choice file is read again before each chunk, so no chunk is
+     * sent after that choice.
+     */
     private suspend fun send(
         manifest: LocalManifest,
         remote: String,
         onProgress: (UploadProgress) -> Unit
-    ) {
+    ): Boolean {
         for (chunk in manifest.chunks.filterNot { ledger.isSent(it.seq) }) {
+            if (ledger.choice == false) return true
             onProgress(progress(manifest, sending = true))
             val file = File(root, chunk.fileName)
             if (!file.exists()) {
@@ -103,6 +114,7 @@ internal class CaptureUploader(
             }
             ledger.markSent(chunk.seq)
         }
+        return ledger.choice == false
     }
 
     private suspend fun close(manifest: LocalManifest, continueResearch: Boolean) {
