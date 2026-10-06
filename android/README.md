@@ -429,6 +429,17 @@ requires every `@Test` declared in `src/androidTest` to appear in the first
 attempt's results; missing or undeclared tests fail the job without a retry, so
 an aborted run cannot pass on a retry of the one test it reported.
 
+Before the first test, `.github/scripts/android_emulator.py` waits until the
+emulator reports `sys.boot_completed` and publishes the input, package, activity,
+window and settings services (at most 3 minutes), and the emulator is always
+stopped afterwards: `emu kill`, then a forced kill after 60 seconds. Each test
+has a 5-minute timeout (`timeout_msec`), and all Gradle runs share a 14-minute
+budget. A run that exceeds it is killed, logcat, processes and activities are
+saved under `app/build/instrumented/.../diagnostics/`, and the test that was
+running is reported; nothing is retried after a timeout. API 29 cold-boots
+without a snapshot: resumed from a snapshot, its emulator reported boot before
+the input service existed and hung in its own shutdown.
+
 Flake policy: `.github/scripts/android_instrumented.py` retries each failed test
 once, in its own run, in the same job and names flakes in the job summary and as warnings. A
 test that flakes twice in 48 hours, or twice on one PR, is quarantined with
