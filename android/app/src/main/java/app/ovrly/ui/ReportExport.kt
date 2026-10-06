@@ -33,7 +33,7 @@ internal fun reportExport(
         report.retrievedAt?.let {
             appendLine("Retrieved by this device: ${date(Instant.ofEpochMilli(it), zone)}")
         }
-        status(view).forEach(::appendLine)
+        status(view).forEach { appendLine(it) }
         appendLine()
         claims(view)
         appendLine()
@@ -72,7 +72,7 @@ private fun status(view: ReportView): List<String> = buildList {
         add("May be out of date: this version could not be confirmed with ovrly recently.")
     }
     add("Check: " + listOfNotNull(view.work.status, view.work.stage).joinToString(" / "))
-    view.work.message?.let(::add)
+    view.work.message?.let { add(it) }
     coverage?.let {
         add("Coverage: " + listOfNotNull(it.coverage.text, it.amount).joinToString(", "))
     }
@@ -81,7 +81,7 @@ private fun status(view: ReportView): List<String> = buildList {
 
 private fun StringBuilder.claims(view: ReportView) {
     appendLine("Claims (${view.claims.size})")
-    view.empty?.let(::appendLine)
+    view.empty?.let { appendLine(it) }
     view.claims.forEachIndexed { index, claim ->
         appendLine()
         appendLine("${index + 1}. ${claim.proposition}")
