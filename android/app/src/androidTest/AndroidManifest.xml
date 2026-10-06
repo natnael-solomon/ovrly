@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <queries>
+        <package android:name="app.ovrly" />
+    </queries>
+    <application>
+        <!-- Runs in the test package, a different app and uid from app.ovrly, so the app under
+             test can read these files only through a real URI grant. DUMP is held by the shell,
+             which drives grants (ShareFixtures), and never by app.ovrly. The process loads no
+             Kotlin or AndroidX classes, so the provider is framework-only Java. -->
+        <provider
+            android:name="app.ovrly.fixtures.ShareFixtureProvider"
+            android:authorities="app.ovrly.test.share-fixtures"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.DUMP" />
+        <!-- Library startup code lives in the app APK, not the test APK; never start it in the
+             fixture provider's process. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            tools:node="remove" />
+    </application>
+</manifest>
