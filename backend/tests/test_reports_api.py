@@ -251,6 +251,47 @@ async def test_save_is_explicit_idempotent_and_listed(client, app):
     assert count == 2
 
 
+async def test_unsave_removes_only_the_callers_save_and_is_idempotent(client, app):
+    owner = await guest(client)
+    other = await guest(client)
+    investigation_id = await create_investigation(client, owner)
+    report = await publish(app, investigation_id)
+    path = f"/v1/reports/{report.id}/save"
+    assert (await client.post(path, headers=owner)).status_code == 200
+
+    # Another principal's unsave answers like a missing save and changes nothing.
+    foreign = await client.delete(path, headers=other)
+    assert foreign.status_code == 204 and foreign.content == b""
+    assert len((await client.get("/v1/reports/saved", headers=owner)).json()["items"]) == 1
+    assert_error(await client.delete(path), 401, "AUTHENTICATION_REQUIRED")
+    for report_id in (report.id.upper(), "rpt_synthetic_0001_v2", "x" * 128):
+        assert_error(
+            await client.delete(f"/v1/reports/{report_id}/save", headers=owner), 404, "NOT_FOUND"
+        )
+    assert_error(
+        await client.request("DELETE", path, json={"user_id": "x"}, headers=owner),
+        422,
+        "VALIDATION_FAILED",
+    )
+
+    removed = await client.delete(path, headers=owner)
+    assert removed.status_code == 204 and removed.content == b""
+    assert (await client.get("/v1/reports/saved", headers=owner)).json() == {"items": []}
+    again = await client.delete(path, headers=owner)
+    assert again.status_code == 204
+    # The immutable version is untouched and can be saved again.
+    read = await client.get(f"/v1/investigations/{investigation_id}/reports/1", headers=owner)
+    assert read.status_code == 200 and read.json() == report.model_dump(mode="json")
+    assert (await client.post(path, headers=owner)).status_code == 200
+    async with app.state.database.engine.connect() as connection:
+        count = await connection.scalar(
+            select(func.count())
+            .select_from(saved_reports)
+            .where(saved_reports.c.report_id == uuid.UUID(report.id))
+        )
+    assert count == 1
+
+
 def test_report_ids_are_canonical_uuids():
     value = uuid.uuid4()
     assert parse_canonical_uuid(str(value)) == value

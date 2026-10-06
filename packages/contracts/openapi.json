@@ -654,6 +654,24 @@
           "500": { "$ref": "#/components/responses/InternalError" },
           "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
         }
+      },
+      "delete": {
+        "tags": ["reports"],
+        "operationId": "unsaveReport",
+        "summary": "Remove the caller's explicit save of one report; idempotent.",
+        "description": "No request body; a body is rejected with VALIDATION_FAILED. Deletes only the caller's own save; the immutable report version is never changed. Removing a save that does not exist, including another owner's report, answers the same 204, so existence is not revealed. A malformed id is 404. A guest merged into an account by a second-device link (BC-D07) is refused with 401 INVALID_CREDENTIAL.",
+        "responses": {
+          "204": {
+            "description": "The caller has no save of this report.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } }
+          },
+          "400": { "$ref": "#/components/responses/ClientIdentityRejected" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
       }
     },
     "/v1/reports/saved": {

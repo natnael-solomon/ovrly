@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Row, func, select
+from sqlalchemy import Row, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -235,3 +235,22 @@ async def save_owned_report(
         )
     ).one()
     return saved_report(stored)
+
+
+async def unsave_owned_report(
+    connection: AsyncConnection, principal: Principal, report_id: uuid.UUID
+) -> None:
+    """Remove the caller's own save of one report; nothing else changes.
+
+    Idempotent: removing a save that does not exist, or that belongs to another principal,
+    changes nothing and answers the same, so the route does not reveal whether a report
+    exists. The report version itself is immutable and is never touched. Like a save, a
+    caller merged into an account by a concurrent link is refused with 401.
+    """
+    await lock_active_principal(connection, principal)
+    await connection.execute(
+        delete(saved_reports).where(
+            saved_reports.c.owner_id == principal.id,
+            saved_reports.c.report_id == report_id,
+        )
+    )
