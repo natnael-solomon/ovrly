@@ -47,10 +47,7 @@ internal class VoiceConversation(
 
     fun start(output: VoiceAudio) {
         timers.inputWindow(::beginFinishing)
-        host.state = listeningState(
-            configuration,
-            "Microphone active. Only switching between Your space and Explore is supported."
-        )
+        host.state = listeningState(configuration, LISTENING)
         presentation.emit(VoiceOrbEvent.Snap)
         audio = output
         output.start(
@@ -71,16 +68,23 @@ internal class VoiceConversation(
                 timers.cancelSilence()
                 timers.cancelThinking()
                 thinking()
-                val response = actions.respond(event, finishing)
-                if (response == null) {
+                val accepted = actions.respond(event, finishing) { response ->
+                    // Backend answers arrive later; a stale or finished session drops them.
+                    if (host.current) {
+                        host.send(response)
+                        if (host.current) presentation.emit(VoiceOrbEvent.Snap)
+                    }
+                }
+                if (!accepted) {
                     host.finish(
                         "Action limit reached",
                         "Voice stopped after the per-session action limit."
                     )
-                } else if (host.current) {
-                    host.send(response)
-                    if (host.current) presentation.emit(VoiceOrbEvent.Snap)
                 }
+            }
+
+            is VoiceEvent.Text -> if (event.user) {
+                actions.activity.userText(event.text, event.turnComplete)
             }
 
             VoiceEvent.Interrupted -> {
@@ -93,6 +97,7 @@ internal class VoiceConversation(
             }
 
             VoiceEvent.TurnComplete -> {
+                actions.activity.turnComplete()
                 awaitingReply = false
                 presentation.emit(VoiceOrbEvent.Snap)
                 if (!speaking) listening(LISTENING)
@@ -217,7 +222,9 @@ internal class VoiceConversation(
     }
 
     private companion object {
-        const val LISTENING = "Microphone active. Ask to open Your space or Explore."
+        const val LISTENING =
+            "Microphone active. Ask to open a check, save a report, or cancel, retry or " +
+                "continue a check."
     }
 }
 

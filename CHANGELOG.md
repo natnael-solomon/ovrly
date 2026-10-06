@@ -4,6 +4,18 @@
 
 ### Added
 
+- Android voice actions wired to the API (AN-09, #35): the Voxide manifest
+  advertises `open_check`, `save_report`, `queue_cancel`, `queue_retry` and
+  `queue_continue` beside `open_tab`, each sent through `data/VoiceApi.kt` to
+  `POST /v1/voice/actions` with one `request_id` per command (replayed on
+  client retries and repeated tool calls). Tool results carry a `checks` state
+  of the five most recent checks (ids, status and source; no URLs), and the
+  device resolves the `latest` alias. Cancellation needs an on-screen
+  confirmation bound to its target that times out after 30 seconds and is
+  discarded when voice stops. A voice panel shows the recognized speech, each
+  accepted, denied or failed result and the opened check, and offers a typed
+  command alternative that works without a microphone or connection to Voxide.
+  Recognized text is never logged or stored.
 - Report versions carry `fixture` (true only for development stub versions) in every
   report read, including the `report` of an investigation, so clients can label stub
   claims as a fixture rather than live results. Additive to `0.2.0-draft`; the

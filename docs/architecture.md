@@ -12,7 +12,7 @@
 | `share` | Share intake: on-device checks, private staging, upload and investigation creation, duplicate detection |
 | `data` | API client on OkHttp (guest credential, request ids, cold start, typed errors), the Room store of shares, local job states and cached report versions, the investigation repository and start/foreground reconciliation |
 | `ui` | Companion screens, production controls and isolated sample/gallery content |
-| `voice` | Experimental, explicitly configured Voxide companion navigation |
+| `voice` | Experimental, explicitly configured Voxide companion: tab navigation and the BC-D04 voice actions through `data/VoiceApi.kt` |
 
 Android owns permissions and media access. Hiding controls does not stop capture. Stopping capture releases media access; research cancellation is a separate, future action.
 
@@ -118,7 +118,7 @@ Before connecting Android, agree a versioned API contract with validated schemas
 
 `packages/contracts` is the single source for that contract. The Android `contract` package parses every schema in it with production parsers (`VoiceActionCodec`, `InvestigationCodec`, `UploadCodec`, `CaptureCodec`), one Kotlin enum per contract enum with an `UNKNOWN` fallback that is never a success state, and constructors that enforce the schema rules, including the investigation `oneOf` branches so a failure is never read as a finding; its unit tests read the committed fixtures and schemas directly through Gradle test resources and cross-check the enums and model members against them, see the [Android README](../android/README.md#contract-models-and-fixtures). This is the #62 deliverable of #15. The data package (AN-03 part 1, #18) calls the intake endpoints through these codecs, and keeps shares, local job states and report versions in Room with reconciliation on start and foreground, see [Data layer and share intake](../android/README.md#data-layer-and-share-intake).
 
-Hosted model weights stay with the provider. Credentials stay on the server; prompts and adapters belong in the backend. Evaluation fixtures live in root `evaluation/`, independently of backend implementation. Voxide remains a separate companion-navigation path. The capture transport is implemented on the backend; Android capture-to-network wiring remains separate work.
+Hosted model weights stay with the provider. Credentials stay on the server; prompts and adapters belong in the backend. Evaluation fixtures live in root `evaluation/`, independently of backend implementation. Voxide is a separate companion path; its voice actions go through the backend's `POST /v1/voice/actions`, which owns validation and ownership. The capture transport is implemented on the backend; Android capture-to-network wiring remains separate work.
 
 ## Evaluation-data boundary
 
