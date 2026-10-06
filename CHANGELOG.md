@@ -40,6 +40,19 @@
   `Playback capture was interrupted`, and a pre-chunk local capture left by an earlier version is
   deleted on open with a message.
 
+- Live overlay results panel for AN-07 (#31): the compact overlay can show the
+  capture session's claims in spoken order as waiting, checking evidence, provisional,
+  updated or assessed, with a "Captured segment analyzed" label, a non-blocking
+  "Assessment updated" notice that opens an explanation of the change, and a hide control
+  that keeps capture running. Unknown states stay neutral and are never shown as assessed.
+  Stop now asks "Continue research in queue" or "Keep only available results" and passes
+  the answer to capture, which closes the session with that choice; unfinished claims stay
+  marked incomplete. A polling adapter reads the capture status and investigation with
+  backoff and keeps the last results visible while reconnecting. It is not started yet
+  because the production capture session API is still unconfigured, so no results appear
+  outside previews and a labelled debug-only fixture.
+  The overlay demo is unchanged and never receives live data.
+
 - Incremental backend capture sessions with owner-scoped multipart chunk intake,
   durable duplicate receipts, gap/modality manifests, a 180000ms timeline cap,
   explicit Stop continuation and polling. Each chunk enters the durable queue

@@ -8,6 +8,10 @@ Liquid Chrome is the fresh-install default; saved Light/Dark choices are indepen
 
 Lexend is the default for interface text, including dialog and demo-overlay claim headings. Instrument Serif is reserved for featured, Explore and report-detail titles, gallery headings and the text-based wordmark. This distinction does not change type sizes. Both fonts' SIL Open Font licenses ship in APK assets.
 
+## Live results panel
+
+The compact overlay's live results panel, Stop choice and "Show live results" button (`ui/LiveCompactOverlay.kt`, `ui/LiveResultsPanel.kt`, copy in `ui/LiveResultsCopy.kt`, previews in `ui/LiveResultsPreviews.kt`) use the same overlay glass, palette and Lexend type as the recording pill, in both Light and Dark. Every control has a 48 dp target and a TalkBack label; claim rows announce time, wording, assessment and state, and the phase line and update notice are polite live regions. Claim state is always written out ("Waiting", "Checking evidence", "Provisional", "Updated", "Assessed", "Incomplete: ...", "Unknown state"), never shown by color alone. Previews cover Light, Dark and 200% text with the labelled fixture. Behavior is in the [Android README](../android/README.md#live-overlay-results).
+
 ## App icon
 
 The adaptive launcher icon is `mipmap-anydpi/ic_launcher.xml`:
