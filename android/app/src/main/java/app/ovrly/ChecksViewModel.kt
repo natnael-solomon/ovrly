@@ -38,7 +38,13 @@ internal class ChecksViewModel(application: Application) : AndroidViewModel(appl
     private val services = ApiServices.get(application)
     private val checks = services?.let { ChecksService(it) }
     private val loader = services?.let { api ->
-        checks?.let { ReportLoader(it, ReportLoader.staleFrom(api.jobs)) }
+        checks?.let {
+            ReportLoader(
+                it,
+                retrieved = ReportLoader.retrievedFrom(api.jobs),
+                stale = ReportLoader.staleFrom(api.jobs)
+            )
+        }
     }
     private val mutableState = MutableStateFlow(ChecksUiState(available = services != null))
     private val session = OpenReportSession { investigation, version, candidates ->

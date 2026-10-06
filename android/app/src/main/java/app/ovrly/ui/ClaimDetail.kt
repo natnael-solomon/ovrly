@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
@@ -32,8 +33,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -62,7 +65,11 @@ internal fun ClaimCard(
                 role = Role.Button,
                 onClickLabel = if (expanded) "Hide claim detail" else "Show claim detail",
                 onClick = onToggle
-            ),
+            ).semantics {
+                // Claim first, then its assessment and time in words; the merged text stays.
+                contentDescription = claimDescription(claim)
+                stateDescription = if (expanded) "Detail shown" else "Detail hidden"
+            },
             verticalArrangement = Arrangement.spacedBy(GAP)
         ) {
             Muted(listOf(claim.interval, claim.modality).joinToString(" / "))
@@ -90,6 +97,15 @@ private fun sources(claim: ClaimView): String {
     return "$count $noun$against"
 }
 
+/** What TalkBack reads for a claim card: the claim, its assessment, then where and when. */
+internal fun claimDescription(claim: ClaimView): String = listOfNotNull(
+    "Claim: ${claim.proposition}",
+    claim.assessment.text,
+    claim.correction,
+    "${claim.modality}, ${claim.spokenInterval}",
+    sources(claim)
+).joinToString(". ")
+
 @Composable
 private fun ClaimBody(
     claim: ClaimView,
@@ -101,7 +117,7 @@ private fun ClaimBody(
         Field("Original wording", "\"${claim.originalText}\"", italic = true)
         Field("Normalized meaning", claim.proposition)
         claim.supersededProposition?.let { Field("Meaning before the correction", it) }
-        Field("When", claim.interval)
+        Field("When", claim.interval, spoken = claim.spokenInterval)
         Field("Where it appeared", claim.modality)
         claim.summary?.let { Field("Assessment", it) }
         if (detail.comparedWith != null) {
@@ -128,9 +144,15 @@ private fun Field(
     label: String,
     value: String,
     modifier: Modifier = Modifier,
-    italic: Boolean = false
+    italic: Boolean = false,
+    spoken: String? = null
 ) {
-    Column(modifier) {
+    // Label and value are one TalkBack stop; [spoken] replaces a value that reads badly.
+    Column(
+        modifier.semantics(mergeDescendants = true) {
+            if (spoken != null) contentDescription = "$label: $spoken"
+        }
+    ) {
         Muted(label)
         Text(
             value,
@@ -146,21 +168,33 @@ internal fun EvidenceCard(evidence: EvidenceView, modifier: Modifier = Modifier)
     val p = LocalOvrlyPalette.current
     val uri = LocalUriHandler.current
     Panel(evidence.relation.tone, modifier) {
-        Text(evidence.relation.text, style = MaterialTheme.typography.labelLarge)
-        evidence.rationale?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-        evidence.retraction?.let {
-            Text(
-                it.text,
-                style = MaterialTheme.typography.labelLarge,
-                color = if (it.tone == Tone.WARNING) p.error else p.ink
+        // The card reads as one TalkBack stop; "Open source" stays a separate, named button.
+        Column(
+            Modifier.semantics(mergeDescendants = true) {},
+            verticalArrangement = Arrangement.spacedBy(GAP)
+        ) {
+            Text(evidence.relation.text, style = MaterialTheme.typography.labelLarge)
+            evidence.rationale?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            evidence.retraction?.let {
+                Text(
+                    it.text,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (it.tone == Tone.WARNING) p.error else p.ink
+                )
+            }
+            Text(evidence.title, style = MaterialTheme.typography.titleSmall)
+            Muted(evidence.publisher)
+            Muted(
+                listOf(evidence.sourceType, evidence.access, evidence.relevance)
+                    .joinToString(" / ")
             )
         }
-        Text(evidence.title, style = MaterialTheme.typography.titleSmall)
-        Muted(evidence.publisher)
-        Muted(listOf(evidence.sourceType, evidence.access, evidence.relevance).joinToString(" / "))
         evidence.passage?.let { Field("Passage read", "\"$it\"", italic = true) }
         evidence.url?.let { url ->
-            TextButton({ uri.openUri(url) }) { Text("Open source") }
+            TextButton(
+                { uri.openUri(url) },
+                Modifier.semantics { contentDescription = "Open source: ${evidence.title}" }
+            ) { Text("Open source") }
         }
     }
 }
@@ -235,7 +269,7 @@ internal fun FullVideoSheet(
                 }
             }
             Row(
-                Modifier.fillMaxWidth().toggleable(
+                Modifier.fillMaxWidth().heightIn(min = MIN_TARGET).toggleable(
                     value = confirmed,
                     role = Role.Checkbox,
                     onValueChange = { confirmed = it }
@@ -264,7 +298,8 @@ private fun Choice(
     modifier: Modifier = Modifier
 ) {
     Row(
-        modifier.fillMaxWidth().selectable(selected, role = Role.RadioButton, onClick = onSelect),
+        modifier.fillMaxWidth().heightIn(min = MIN_TARGET)
+            .selectable(selected, role = Role.RadioButton, onClick = onSelect),
         verticalAlignment = Alignment.CenterVertically
     ) {
         RadioButton(selected = selected, onClick = null)
@@ -287,3 +322,6 @@ private fun SheetColumn(modifier: Modifier = Modifier, content: @Composable () -
 private val GAP = 8.dp
 private val SHEET_PADDING = 24.dp
 private val SHEET_GAP = 12.dp
+
+/** Minimum touch target height for rows that are not Material buttons. */
+private val MIN_TARGET = 48.dp

@@ -176,6 +176,30 @@ internal fun Interval.label(): String {
     }
 }
 
+/** A millisecond offset in words for TalkBack, such as "1 minute 5 seconds". */
+internal fun spokenClock(ms: Long): String {
+    val seconds = ms / MILLIS_PER_SECOND
+    val minutes = seconds / SECONDS_PER_MINUTE
+    val rest = seconds % SECONDS_PER_MINUTE
+    val secondsText = if (rest == 1L) "1 second" else "$rest seconds"
+    val minutesText = if (minutes == 1L) "1 minute" else "$minutes minutes"
+    return when {
+        minutes == 0L -> secondsText
+        rest == 0L -> minutesText
+        else -> "$minutesText $secondsText"
+    }
+}
+
+/** [label] in words, so TalkBack does not read "0:12" as a time of day. */
+internal fun Interval.spokenLabel(): String {
+    val range = "from ${spokenClock(startMs)} to ${spokenClock(endMs)}"
+    return when (timebase) {
+        Timebase.MEDIA -> "$range in the video"
+        Timebase.CAPTURE -> "$range after capture started, not a time in the original video"
+        Timebase.UNKNOWN -> "$range, timeline $NOT_RECOGNISED"
+    }
+}
+
 internal fun Coverage.label(): Label = when (status) {
     CoverageStatus.COMPLETE -> Label("All of the media was checked")
     CoverageStatus.PARTIAL -> Label("Part of the media has been checked so far", Tone.WARNING)
@@ -222,7 +246,9 @@ internal data class ClaimView(
     val summary: String?,
     val correction: String?,
     val supersededProposition: String?,
-    val evidence: List<EvidenceView>
+    val evidence: List<EvidenceView>,
+    /** [interval] in words for TalkBack. */
+    val spokenInterval: String = interval
 ) {
     val contradicting: Int get() = evidence.count { it.relation.tone == Tone.CHALLENGE }
 }
@@ -263,7 +289,8 @@ internal fun claimView(claim: Claim, assessment: Assessment?, evidence: List<Evi
         summary = assessment?.summary,
         correction = claim.correction?.attributedTo?.label,
         supersededProposition = claim.correction?.supersededProposition,
-        evidence = items
+        evidence = items,
+        spokenInterval = claim.interval.spokenLabel()
     )
 }
 

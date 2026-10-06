@@ -4,6 +4,15 @@
 
 ### Added
 
+- Report export and accessibility (AN-11, #39): the Report screen's "Share report" action
+  sends the shown version to the Android share sheet as plain text with the claim summary,
+  source links, limitations, provisional label, version, publication date and the date
+  this device retrieved it. It is built on the device and never includes media, the
+  transcript or a claim's original wording. Claim cards read the claim first with times in
+  words for TalkBack, detail and evidence cards are single TalkBack stops, every Report
+  control has a 48 dp target, report and evidence cards grow with 200% text, and the
+  Settings recording timer has a spoken description.
+
 - Backend `.env.example` now lists every `OVRLY_` setting with its default (job timing
   and retries, stub reports, evidence stages), and the backend README has a
   single-service deployment note for EthioDeploy (#21).

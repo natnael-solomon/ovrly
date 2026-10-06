@@ -33,7 +33,9 @@ internal data class OpenReport(
     /** Later shared checks that may be this captured clip's full video. */
     val candidates: List<InboxItem> = emptyList(),
     val busy: Boolean = false,
-    val notice: String? = null
+    val notice: String? = null,
+    /** When this device last read the shown version from ovrly (epoch millis), if known. */
+    val retrievedAt: Long? = null
 )
 
 /** What Your space needs from the checks store; null in previews without a service. */

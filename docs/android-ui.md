@@ -12,6 +12,10 @@ Lexend is the default for interface text, including dialog and demo-overlay clai
 
 The compact overlay's live results panel, Stop choice and "Show live results" button (`ui/LiveCompactOverlay.kt`, `ui/LiveResultsPanel.kt`, copy in `ui/LiveResultsCopy.kt`, previews in `ui/LiveResultsPreviews.kt`) use the same overlay glass, palette and Lexend type as the recording pill, in both Light and Dark. Every control has a 48 dp target and a TalkBack label; claim rows announce time, wording, assessment and state, and the phase line and update notice are polite live regions. Claim state is always written out ("Waiting", "Checking evidence", "Provisional", "Updated", "Assessed", "Incomplete: ...", "Unknown state"), never shown by color alone. Previews cover Light, Dark and 200% text with the labelled fixture. Behavior is in the [Android README](../android/README.md#live-overlay-results).
 
+## Report export and accessibility
+
+The Report screen's share action and its TalkBack, touch-target and text-size rules (#39) are in the [Android README](../android/README.md#export-and-accessibility-an-11-39). Spoken forms of compact text (claim times, the recording timer) live in `ui/ReportLabels.kt` and `ui/Accessibility.kt`; use them instead of a `contentDescription` on a child of a merged node, which would replace the merged text for TalkBack.
+
 ## App icon
 
 The adaptive launcher icon is `mipmap-anydpi/ic_launcher.xml`:

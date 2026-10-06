@@ -416,7 +416,7 @@ sh gradlew --no-daemon --console=plain :app:assembleDebugAndroidTest
 | `CaptureServiceTest` | `CaptureService` with a real MediaProjection: start and Stop, Stop with a continuation choice (the first choice wins), the 3-minute limit, playback-audio permission denied, consent not granted, and the projection stopped by the system mid-capture. After every stop the playback recorder, notification and service are gone, the platform lists no projection for the app (`dumpsys media_projection`, checked positive while recording) and every capture display, in any state, is removed, which only the app's `VirtualDisplay.release()` can do. One accommodation: on Android 10 (API 29) the platform keeps the display of a projection it stopped until the app's process dies, and `release()` can no longer remove it, so for that one path the display check runs only from API 30 and the test asserts the stop reported no cleanup issue; counts are taken against the value before start, so the kept display does not affect later tests. |
 | `CaptureUploadsTest` | The Wi-Fi-only preference is saved and reschedules the upload chain on unmetered networks, and `CaptureUploadWorker` under WorkManager sends every chunk to the in-memory server and closes it with either choice. |
 | `OverlayServiceTest` | `OverlayService` show, hide, repeated show and demo/fixture/reset modes leave exactly one window, then none; a refused or mid-display revoked overlay permission leaves none; `OverlayWindow` shows and closes one window. Windows are counted from `dumpsys window`. |
-| `InboxScreenTest`, `ReportScreenTest`, `AppShellTest` | The #34 screens on the device, built from the shared result fixtures (debug assets): the empty, loading, offline, waking and update-needed Inbox; rows with stage and age and their Try again, Open the new check and Cancel (confirmed, or kept) actions; a busy row; the Report's work and coverage cards, version picker, notice, claim detail, evidence cards, stale, fixture and earlier-version notes, failed and no-claims states and flagged sources; the correction sheet (validation, save, cancel) and the full-video sheet (no expansion until a check is picked and the match confirmed); Your space with Inbox, Library and labeled samples, a real report closing when the tab changes, Explore topics and search, a sample report's save and back, the capture bar and Back. `AppShellTest` runs on API 29 only: on API 31+ the CI emulators' software GPU loses colour buffers drawing the chrome wordmark and sample artwork, and the emulator goes offline. |
+| `InboxScreenTest`, `ReportScreenTest`, `AppShellTest` | The #34 screens on the device, built from the shared result fixtures (debug assets): the empty, loading, offline, waking and update-needed Inbox; rows with stage and age and their Try again, Open the new check and Cancel (confirmed, or kept) actions; a busy row; the Report's work and coverage cards, version picker, notice, claim detail, evidence cards, stale, fixture and earlier-version notes, failed and no-claims states and flagged sources; the correction sheet (validation, save, cancel) and the full-video sheet (no expansion until a check is picked and the match confirmed); the #39 share action (the export handed to the share sheet as plain text only, absent without a version), the claim cards' TalkBack description and state, merged detail and evidence stops, 48 dp touch targets on the report and the full-video sheet, and no clipped text at 200% font scale; Your space with Inbox, Library and labeled samples, a real report closing when the tab changes, Explore topics and search, a sample report's save and back, the capture bar and Back. `AppShellTest` runs on API 29 only: on API 31+ the CI emulators' software GPU loses colour buffers drawing the chrome wordmark and sample artwork, and the emulator goes offline. |
 
 The fixture provider (`ShareFixtureProvider`) is declared in the androidTest
 manifest, so it runs in the test package's own process and uid; it is plain Java
@@ -500,14 +500,53 @@ The server (#102) requires `source_investigation_id` whenever `match_confirmed`
 is true and checks that the named investigation is the caller's own. The
 reanalysis handler from #27 (BE-09) publishes the new version of a correction
 rerun, a deeper search or a confirmed full video; until it does, the Inbox
-shows the job in progress. Report saves and export are #36 and #39.
+shows the job in progress. Report saves are #36; export is below.
+
+### Export and accessibility (AN-11, #39)
+
+Per [decision 0003](../docs/decisions/0003-scope-review-cp2.md), the Report's share action
+(top right, "Share report") exports the shown version through the Android share sheet as
+plain text (`ACTION_SEND`, `text/plain`, no attachment or stream). `ui/ReportExport.kt`
+builds it on the device from the report already loaded, so no server export endpoint is
+used and no new data leaves the device unless the user shares it. The export holds:
+
+- the source title (such as "Link from video.example"), never the checked link itself;
+- the version, "of" the latest version, whether it is an earlier one, and its publication
+  time; the time this device retrieved it (the stored read of the latest version, or the
+  first read of an earlier one);
+- the provisional, development-fixture and out-of-date labels, the work state and coverage;
+- each claim's normalized meaning, assessment (with "(provisional)"), assessment summary,
+  correction, time on its own timeline and where it appeared, and each source's relation,
+  title, publisher, type, access level, retraction warning and link;
+- limitations: no verdict on the whole video, no media or transcript in the export, partial
+  or running checks, the capture timeline, partly read sources and that sources can change.
+
+It never holds media, screen images, the transcript, a claim's original wording (quoted from
+the transcript) or source passages. A check without a published version has no share action.
+
+Accessibility on the Report and Settings screens:
+
+| Concern | Behaviour |
+| --- | --- |
+| Claims | Each claim card is one TalkBack stop that reads the claim first, then its assessment, correction, where it appeared, its time in words ("from 12 seconds to 18 seconds in the video", or "after capture started, not a time in the original video") and its source count, with "Detail shown" or "Detail hidden". The visible text is unchanged. |
+| Detail | Each label and value ("When", "Original wording", ...) is one stop; "When" reads the time in words. Each evidence card is one stop, and its link button reads "Open source: <title>". |
+| Targets | Every control is at least 48 by 48 dp, including the full-video sheet's video and confirmation rows. |
+| Text size | Report cards and evidence cards have no fixed heights; at 200% text they grow and the list scrolls. |
+| Motion | The Report screen has no animation of its own; sheets and the voice dock follow the system animator scale, so "Remove animations" makes them immediate. |
+| Capture | Settings' recording timer reads "Recording, 12 seconds of 3 minutes" instead of "REC 0:12 / 3:00". |
+
+The overlay's capture, stop and evidence controls are owned by the live overlay work (#31,
+PR #115); their accessibility is described in [Live overlay results](#live-overlay-results)
+and [android-ui](../docs/android-ui.md#live-results-panel).
 
 | Test | What it proves |
 | --- | --- |
 | `ChecksViewStateTest` | The Inbox row and Report view of each of the six result fixtures (corrected version 2 with original wording and evidence, provisional capture-timebase partial with an unassessed claim and contradicting evidence, failed with its code and no findings, cancelled, retracted and shallow sources, no claims without a verdict), retry and continue rules, a requested cancel, unknown values rendered neutrally, claim changes between versions, correction validation, ages, full-video candidates, a retried check offering the new one, failed, cancelled and unknown-source checks never offered as a full video, and a fixture version labelled from its own flag. |
 | `ReportApiTest` | Correction, expansion (with the confirmed full video and its echo in the receipt) and deeper bodies and keys, a typed reanalysis refusal, cancel without a body, the list stored for the Inbox and failing as a whole on one unreadable item, version listing and caching, a retry creating a new check of the same link, and a retry reusing its stored key after a failed answer, then pointing at the new check and never retrying again, and a list read while a share waits importing nothing new. |
 | `OpenReportSessionTest` | A close, another open or a version change during a slow load keeps the newer state; a report not stored yet shows nothing; reanalysis keys stay the same per request and change with the chosen video, the base version or after an answer. |
-| `ReportLoaderTest` | The shown version against the one it superseded, the version list labels, an earlier version read once and shown read-only with its fixture flag, re-reading the list after an invalidation, offline and failed-version notes, no request for a check without a report, and staleness from the cached latest version. |
+| `ReportLoaderTest` | The shown version against the one it superseded, the version list labels, an earlier version read once and shown read-only with its fixture flag, re-reading the list after an invalidation, offline and failed-version notes, no request for a check without a report, staleness from the cached latest version, and the retrieval time (the stored read of the latest version, the first read of an earlier one, none without a version). |
+| `ReportExportTest` | The export of the complete, partial, no-claims and insufficient-evidence fixtures: subject, version and publication and retrieval dates, claims, assessments, source links, provisional, fixture, stale and earlier-version labels, capture-timeline and partial-reading limitations; no original wording, passage, checked link or transcript; nothing to export without a version. |
+| `SpokenLabelsTest` | Times in words, intervals keeping their timeline, the claim card's TalkBack order and the recording timer's description. |
 | `ReportApiModelsTest`, `ReportLabelsTest` | The BE-10 inline bodies built in code enforce their rules (ids, versions, timestamps, the confirmed full video, request limits) and malformed bodies fail to parse; every contract value on these screens has distinct words, unknown values read as not recognised and never as a verdict, only retracted, withdrawn and corrected sources warn, and coverage, intervals, source titles, failures and commands read as specified. |
 
 Compose previews of the six fixtures and the Inbox are in
