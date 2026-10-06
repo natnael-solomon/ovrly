@@ -16,7 +16,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import Any, Final
 
 from sqlalchemy import Row, cast, select, update
 from sqlalchemy.dialects.postgresql import JSONB
@@ -212,7 +212,6 @@ async def stub_reanalysis(job: ClaimedJob, context: JobContext) -> dict[str, Any
 # and a close with continue_research publishes the final version once every received chunk
 # is validated. Content that would not change publishes nothing.
 
-CaptureClaimStatus = Literal["checking", "partial", "complete", "cancelled"]
 STUB_VALIDATED: Final = "stub_validated"
 
 
@@ -404,23 +403,3 @@ def capture_with_stub_report(handler: JobHandler) -> JobHandler:
         return result
 
     return run
-
-
-async def stub_claim_progress(
-    connection: AsyncConnection, capture_id: uuid.UUID, continue_research: bool | None
-) -> tuple[list[tuple[str, CaptureClaimStatus]], Literal["partial", "complete"]] | None:
-    """Per-claim progress of a live capture's fixture report, for the capture status poll."""
-    latest = await _latest(connection, capture_id)
-    if latest is None or not latest.fixture:
-        return None
-    report = ReportVersion.model_validate(latest.payload)
-    if not report.provisional:
-        return [(claim.id, "complete") for claim in report.claims], "complete"
-    assessed = {item.claim_id for item in report.assessments}
-    progress: list[tuple[str, CaptureClaimStatus]] = []
-    for claim in report.claims:
-        if claim.id in assessed:
-            progress.append((claim.id, "partial"))
-        else:
-            progress.append((claim.id, "cancelled" if continue_research is False else "checking"))
-    return progress, "partial"
