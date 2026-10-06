@@ -18,6 +18,19 @@
   reuses one stored key per check so a lost answer cannot create a duplicate
   check (Room schema version 2). Unknown contract values read neutrally.
 
+- RES-02b device benchmarks (#103):
+  - The Galaxy A21s measurements cover phone ASR replay (Vosk small-en, whisper.cpp
+    tiny.en/base.en) against the existing Groq baselines, ML Kit against Tesseract
+    on identical image bytes, a replay of the shipped screen-text sampler, and real
+    AN-04 chunk verification.
+  - Decision 0004 accepts RFC-D27: Groq turbo on 10 s chunks, falling back to
+    large-v3, with explicit `ASR_UNAVAILABLE` semantics for #20 and no on-device
+    ASR in the submission. It also records on-device ML Kit and the change trigger.
+  - New tooling: native replay drivers in `evaluation/device-harness/`,
+    `evaluation/device_benchmark.py`, the `evaluation/asr_policy.py` reference
+    policy with local test doubles, and the debug-only `ScreenTextReplayTest`.
+  - The 20-frames-per-minute cap dropping a brief card is tracked in #110.
+
 - On-device screen text for live capture (AN-06, #100): frames are probed once a second and
   kept on a visible change or a 5-second heartbeat, at most 20 per minute; likely text regions
   are cropped and read on the phone by bundled ML Kit Text Recognition Latin 16.0.1. Chunks now
