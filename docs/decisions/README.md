@@ -17,6 +17,7 @@ evidence, and what would reverse it.
 | [BC-D06: demo retention](BC-D06-retention.md) | Proposed | Opt-in workspace lifetime and deletion receipts; no approval or quota decision inferred. |
 | [BC-D07: account link flow](BC-D07-account-link.md) | Accepted | Google sign-in only; guest upgraded in place; second device merges saved reports and continues as the account. |
 | [BC-D09: hackathon dates](BC-D09-deadline-evidence.md) | Conditional | 25 September submission, 9 October final deadline, 11 October winners announcement. Timezone assumed. |
+| [RFC-D22: companion navigation](RFC-D22-companion-navigation.md) | Accepted | Keep Your space / Explore / Settings; Your space holds the Inbox above the Library, Explore stays the labeled sample gallery and the voice `open_tab` targets are unchanged. |
 
 ## Milestones
 
@@ -43,7 +44,8 @@ by title and section.
 ## Writing a record
 
 Copy the template. Name files `NNNN-short-title.md` for team decisions and
-`BC-Dnn-short-title.md` when the record resolves a build-contract decision.
+`BC-Dnn-short-title.md` when the record resolves a build-contract decision, or
+`RFC-Dnn-short-title.md` when it resolves a research RFC decision.
 Record who actually agreed and when. Do not infer consent from silence or mark
 a decision Accepted because code exists. Issue ownership does not grant
 authority over cross-cutting scope; those decisions need the product owner.

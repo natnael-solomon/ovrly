@@ -77,6 +77,15 @@ internal class OvrlyApi(private val client: ApiClient, private val credentials: 
         ApiCall("investigations.get", "GET", "v1/investigations/$id", token = it)
     }.let { call -> call(InvestigationCodec::parseInvestigation) }
 
+    /**
+     * Sends a sibling API's call (VoiceApi, CaptureApi) with the stored credential and the
+     * one-time re-mint rule.
+     */
+    internal suspend fun <T> sendAuthenticated(
+        build: (String) -> ApiCall,
+        parse: (String) -> T
+    ): ApiResult<T> = authenticated(build)(parse)
+
     /** Builds an authenticated call; invoking the result sends it with the re-mint rule. */
     private fun authenticated(build: (String) -> ApiCall) = AuthenticatedCall(build)
 

@@ -43,7 +43,9 @@ internal data class CachedReport(val report: ReportVersion, val fetchedAt: Long,
 internal class LocalJobs(
     val dao: InvestigationDao,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val staleness: StalenessPolicy = StalenessPolicy()
+    private val staleness: StalenessPolicy = StalenessPolicy(),
+    /** Runs its block in one database transaction; Room's `withTransaction` on a device. */
+    private val transaction: suspend (suspend () -> Unit) -> Unit = { it() }
 ) {
     /** Records a share that passed the device checks, before anything is sent. */
     suspend fun startShare(record: InvestigationRecord) {
@@ -75,14 +77,32 @@ internal class LocalJobs(
         }
     }
 
-    /** `POST /v1/investigations` answered for the local share [localId]. */
+    /**
+     * `POST /v1/investigations` answered for the local share [localId]. If a server list read
+     * the same investigation first (the answer was slow or lost), its imported row is replaced
+     * by the share's own row in one transaction: one row per server id, the share's kept.
+     */
     suspend fun accepted(localId: String, investigation: Investigation): InvestigationRecord? {
-        val event = JobEvent.Accepted(investigation.processingStatus)
-        val stored = apply(localId, event) {
-            it.withServer(investigation, clock()).copy(stagedPath = null, declaredUpload = null)
-        }
+        val record = dao.get(localId)
+        val next = record?.jobState?.next(JobEvent.Accepted(investigation.processingStatus))
         // A share abandoned meanwhile has no row; do not leave an orphan report behind.
-        if (stored != null) cacheReport(investigation)
+        if (record == null || next == null) return null
+        val stored = record.withServer(investigation, clock()).copy(
+            stagedPath = null,
+            declaredUpload = null,
+            state = next.wireName,
+            updatedAt = clock()
+        )
+        val imported = dao.byServerId(investigation.id)?.takeIf { it.localId != localId }
+        if (imported == null) {
+            dao.upsert(stored)
+        } else {
+            transaction {
+                dao.delete(imported.localId)
+                dao.upsert(stored)
+            }
+        }
+        cacheReport(investigation)
         return stored
     }
 
@@ -149,6 +169,18 @@ internal class LocalJobs(
         const val GONE = "NOT_FOUND"
         const val UNKNOWN_KIND = "unknown"
     }
+}
+
+/** True while a share on this device waits for its create answer (or its retry). */
+internal suspend fun LocalJobs.hasUnacceptedShares(): Boolean =
+    dao.all().any { !it.jobState.accepted }
+
+/**
+ * Stores a read of an investigation listed by the server. An id this device does not know is
+ * imported only when [import] is true; see [ChecksService.sync].
+ */
+internal suspend fun LocalJobs.recordListed(investigation: Investigation, import: Boolean) {
+    if (import || dao.byServerId(investigation.id) != null) recordRead(investigation)
 }
 
 /** The last stored read of [serverId], or null if none was stored or it no longer parses. */

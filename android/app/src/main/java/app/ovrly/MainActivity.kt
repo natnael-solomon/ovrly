@@ -43,6 +43,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import app.ovrly.capture.CapturePhase
 import app.ovrly.capture.CaptureService
 import app.ovrly.capture.CaptureState
@@ -56,9 +57,11 @@ import app.ovrly.overlay.demoEntry
 import app.ovrly.ui.AppDestination
 import app.ovrly.ui.AppShell
 import app.ovrly.ui.AppearanceStore
+import app.ovrly.ui.ChecksShell
 import app.ovrly.ui.CompanionScreen
 import app.ovrly.ui.GalleryScreen
 import app.ovrly.ui.OvrlyTheme
+import app.ovrly.ui.ShellContent
 import app.ovrly.ui.voice.VoiceOrbAdapter
 import app.ovrly.ui.voice.VoiceOrbDockState
 import app.ovrly.voice.VoiceController
@@ -70,6 +73,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 class MainActivity : ComponentActivity() {
     private val model: CompanionViewModel by viewModels()
+    private val checks: ChecksViewModel by viewModels()
     private lateinit var voice: VoiceController
     private lateinit var orbDock: VoiceOrbDockState
     private var gallery by mutableStateOf(false)
@@ -203,6 +207,9 @@ class MainActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
         handleIntent(intent, initial = savedInstanceState == null)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) { checks.pollWhileVisible() }
+        }
         setContent {
             val capture by model.capture.collectAsStateWithLifecycle()
             val share by model.sharedInput.collectAsStateWithLifecycle()
@@ -213,6 +220,8 @@ class MainActivity : ComponentActivity() {
             val dark by AppearanceStore.dark.collectAsStateWithLifecycle()
             val demo by OverlayStore.demo.collectAsStateWithLifecycle()
             val blur by OverlayStore.blur.collectAsStateWithLifecycle()
+            val checkList by checks.state.collectAsStateWithLifecycle()
+            val openCheck by checks.report.collectAsStateWithLifecycle()
             SideEffect {
                 WindowCompat.getInsetsController(window, window.decorView).apply {
                     isAppearanceLightStatusBars = !dark
@@ -245,7 +254,10 @@ class MainActivity : ComponentActivity() {
                         AppShell(
                             destination = destination,
                             onDestination = { destination = it },
-                            voiceDock = orbDock,
+                            shell = ShellContent(
+                                ChecksShell(checkList, openCheck, checks::on),
+                                orbDock
+                            ),
                             // Voice shows its state on the header orb; only capture needs this bar.
                             activeSession = if (capture.busy) "Capture active" else null
                         ) {

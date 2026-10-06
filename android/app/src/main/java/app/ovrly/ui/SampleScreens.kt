@@ -75,7 +75,8 @@ internal fun YourSpaceScreen(
     reports: List<SampleReport>,
     onOpen: (SampleReport) -> Unit,
     onExplore: () -> Unit,
-    voiceDock: VoiceOrbDockState? = null
+    voiceDock: VoiceOrbDockState? = null,
+    inbox: @Composable () -> Unit = {}
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var searching by rememberSaveable { mutableStateOf(false) }
@@ -93,7 +94,18 @@ internal fun YourSpaceScreen(
             voiceDock,
             scrollState
         )
+        if (!searching) inbox()
         if (searching) SampleSearch(query, { query = it })
+        Text(
+            "Saved samples",
+            Modifier.semantics { heading() },
+            style = MaterialTheme.typography.titleMedium
+        )
+        Text(
+            "Illustrative reports, not checks of real videos.",
+            style = MaterialTheme.typography.bodySmall,
+            color = LocalOvrlyPalette.current.muted
+        )
         if (visible.isEmpty()) {
             EmptySamples(
                 title = if (query.isBlank()) "No samples saved" else "No matches",

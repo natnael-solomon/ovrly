@@ -140,6 +140,10 @@ android {
         // Shared contract schemas and fixtures are read in place from the repository root.
         // Unit tests load them as classpath resources; nothing is copied into the module.
         getByName("test").resources.directories.add(rootProject.file("../packages/contracts").path)
+        // Debug-only Compose previews of the six result fixtures (#34) read them as assets.
+        getByName("debug").assets.directories.add(
+            rootProject.file("../packages/contracts/fixtures/results").path
+        )
     }
 }
 
@@ -164,6 +168,7 @@ val coverageExclusions = listOf(
     "app/ovrly/ui/GalleryPreviewsKt*.class",
     "app/ovrly/ui/AppearancePreviewsKt*.class",
     "app/ovrly/ui/LiveResultsPreviewsKt*.class",
+    "app/ovrly/ui/ReportFixturePreviewsKt*.class",
     "app/ovrly/ui/GalleryFixturesKt*.class",
     "app/ovrly/ui/GalleryFixture.class",
     "app/ovrly/ui/GalleryFixture$*.class"
