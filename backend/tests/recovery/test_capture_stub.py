@@ -5,12 +5,15 @@ import uuid
 
 import httpx
 import pytest
+from sqlalchemy import select, update
 from test_intake_api import CONTRACT_VALIDATOR, guest
 
 from services.api.main import create_app
 from services.captures import CAPTURE_STAGE
 from services.jobs.handlers import JobContext, default_handlers
+from services.jobs.models import jobs
 from services.jobs.queue import JobQueue
+from services.models import capture_chunks
 from services.pipeline.stub_reports import (
     capture_with_stub_report,
     enable_stub_reports,
@@ -51,8 +54,12 @@ async def client(stub_app):
         yield client
 
 
-async def process_next(app):
-    """Run one queued capture chunk job through the stage table the worker would use."""
+async def run_next(app, *, publish=True):
+    """Run one queued capture chunk job through the stage table the worker would use.
+
+    With ``publish=False`` the handler (and so the stub wrapper) has finished but the worker
+    has not published yet: the window the close race happens in.
+    """
     handlers = dict(default_handlers(app.state.upload_store))
     if app.state.settings.stub_reports:
         enable_stub_reports(handlers)
@@ -61,7 +68,13 @@ async def process_next(app):
     assert claim is not None
     await queue.start(claim.lease)
     result = await handlers[CAPTURE_STAGE](claim, JobContext(queue, claim.lease, 30))
-    await queue.publish(claim.lease, result)
+    if publish:
+        await queue.publish(claim.lease, result)
+    return queue, claim, result
+
+
+async def process_next(app):
+    await run_next(app)
 
 
 async def reports(client, headers, session):
@@ -195,3 +208,118 @@ def test_the_wrapper_is_installed_only_with_the_opt_in():
         == capture_with_stub_report(plain[CAPTURE_STAGE]).__qualname__
     )
     assert dict(default_handlers(object()))[CAPTURE_STAGE].__qualname__ == "CaptureProcessor.run"
+
+
+@pytest.fixture
+async def stub_on(database_url, tmp_path):
+    app = app_with(database_url, tmp_path, True)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://test",
+        ) as client:
+            yield app, client
+
+
+async def validated(job, context):
+    """A media_validation handler that has passed its last heartbeat and verified bytes."""
+    return {"seq": 0, "media_processing": "not_started"}
+
+
+async def test_close_between_the_stub_sync_and_publish_still_goes_final(stub_on):
+    app, client = stub_on
+    headers = await guest(client)
+    session = await create(client, headers, duration=1000)
+    for seq in range(2):
+        assert (await put(client, headers, session, seq)).status_code == 200
+    await process_next(app)
+    # The second chunk's handler and stub sync commit, then the user closes before the
+    # worker publishes the job.
+    queue, claim, result = await run_next(app, publish=False)
+    assert (await read(client, headers, session))["report"]["version"] == 2
+    assert (await close(client, headers, session, True)).status_code == 200
+    final = (await read(client, headers, session))["report"]
+    assert final["version"] == 3 and final["provisional"] is False
+    assert len(final["claims"]) == len(final["assessments"]) == 2
+    await queue.publish(claim.lease, result)
+    assert len(await reports(client, headers, session)) == 3
+
+
+async def test_versions_never_regress(stub_on):
+    app, client = stub_on
+    headers = await guest(client)
+    session = await create(client, headers, duration=1000)
+    for seq in range(3):
+        assert (await put(client, headers, session, seq)).status_code == 200
+    for _ in range(3):
+        await process_next(app)
+    before = await reports(client, headers, session)
+    assert before[-1]["version"] == 3
+    # Pretend two chunk jobs are back in flight without the stub marker (a lost lease
+    # re-run): fewer chunks count as validated, so a sync would mean fewer assessments.
+    capture_id = uuid.UUID(session["id"])
+    async with app.state.database.engine.begin() as connection:
+        await connection.execute(
+            update(jobs)
+            .where(
+                jobs.c.id.in_(
+                    select(capture_chunks.c.job_id).where(
+                        capture_chunks.c.session_id == capture_id, capture_chunks.c.seq >= 1
+                    )
+                )
+            )
+            .values(state="running", payload=jobs.c.payload.op("-")("stub_validated"))
+        )
+        assert await sync_capture_stub(connection, capture_id) is None
+    assert await reports(client, headers, session) == before
+    # A close then cannot publish a final version while those chunks are unvalidated.
+    assert (await close(client, headers, session, True)).status_code == 200
+    assert await reports(client, headers, session) == before
+
+
+async def test_stopped_or_cancelled_chunks_publish_nothing(stub_on):
+    app, client = stub_on
+    headers = await guest(client)
+    session = await create(client, headers, duration=1000)
+    for seq in range(2):
+        assert (await put(client, headers, session, seq)).status_code == 200
+    await process_next(app)
+    queue = JobQueue(app.state.database)
+    claim = await queue.claim("capture-stub-test", [CAPTURE_STAGE], 30)
+    await queue.start(claim.lease)
+    # Stop without continuing after the second chunk's handler passed its last heartbeat.
+    assert (await close(client, headers, session, False)).status_code == 200
+    before = await reports(client, headers, session)
+    await capture_with_stub_report(validated)(claim, JobContext(queue, claim.lease, 30))
+    assert await reports(client, headers, session) == before
+    async with app.state.database.engine.begin() as connection:
+        assert await sync_capture_stub(connection, uuid.UUID(session["id"])) is None
+    assert (await read(client, headers, session))["report"]["version"] == 1
+
+
+async def test_cancel_request_or_stale_lease_stops_the_sync(stub_on):
+    app, client = stub_on
+    headers = await guest(client)
+    session = await create(client, headers, duration=1000)
+    assert (await put(client, headers, session, 0)).status_code == 200
+    wrapped = capture_with_stub_report(validated)
+    queue = JobQueue(app.state.database)
+    claim = await queue.claim("capture-stub-test", [CAPTURE_STAGE], 30)
+    await queue.start(claim.lease)
+    async with app.state.database.engine.begin() as connection:
+        await connection.execute(
+            update(jobs).where(jobs.c.id == claim.id).values(cancel_requested=True)
+        )
+    await wrapped(claim, JobContext(queue, claim.lease, 30))
+    assert await reports(client, headers, session) == []
+    async with app.state.database.engine.begin() as connection:
+        await connection.execute(
+            update(jobs)
+            .where(jobs.c.id == claim.id)
+            .values(cancel_requested=False, generation=jobs.c.generation + 1)
+        )
+    await wrapped(claim, JobContext(queue, claim.lease, 30))
+    assert await reports(client, headers, session) == []
+    async with app.state.database.engine.connect() as connection:
+        payload = await connection.scalar(select(jobs.c.payload).where(jobs.c.id == claim.id))
+    assert "stub_validated" not in payload

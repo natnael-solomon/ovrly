@@ -18,7 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from sqlalchemy import Row, select, update
+from sqlalchemy import Row, cast, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from services.api.schemas import Assessment, Interval, ReportVersion
@@ -212,6 +213,7 @@ async def stub_reanalysis(job: ClaimedJob, context: JobContext) -> dict[str, Any
 # is validated. Content that would not change publishes nothing.
 
 CaptureClaimStatus = Literal["checking", "partial", "complete", "cancelled"]
+STUB_VALIDATED: Final = "stub_validated"
 
 
 @dataclass(frozen=True)
@@ -281,22 +283,33 @@ async def sync_capture_stub(
     *,
     validated_job: uuid.UUID | None = None,
 ) -> ReportVersion | None:
-    """Publish the next fixture version of a live capture when its content would change.
+    """Publish the next fixture version of a live capture when its content would advance.
 
-    ``validated_job`` is the chunk job whose handler is running and so counts as validated
-    before the worker publishes it. A real (non-fixture) report is never superseded.
+    A chunk counts as validated when its job is published, or when its handler already ran
+    the stub (``stub_validated`` in the job payload, set by the wrapper in the same
+    transaction as its sync) and the job is still leased or running without a cancel
+    request. That covers a close that lands between the wrapper's commit and the worker's
+    publish. ``validated_job`` is the job whose wrapper is calling. Versions only advance:
+    nothing with fewer claims or assessments, or a provisional version after the final one,
+    is ever published. A capture stopped without continuing, a cancelled calling job and a
+    real (non-fixture) report all publish nothing.
     """
     session = (
         await connection.execute(
             select(capture_sessions).where(capture_sessions.c.id == capture_id).with_for_update()
         )
     ).first()
-    if session is None:
+    if session is None or (session.state == "closed" and session.continue_research is False):
         return None
     rows = (
         await connection.execute(
             select(
-                capture_chunks.c.seq, capture_chunks.c.end_ms, capture_chunks.c.job_id, jobs.c.state
+                capture_chunks.c.seq,
+                capture_chunks.c.end_ms,
+                capture_chunks.c.job_id,
+                jobs.c.state,
+                jobs.c.cancel_requested,
+                jobs.c.payload,
             )
             .select_from(capture_chunks.outerjoin(jobs, jobs.c.id == capture_chunks.c.job_id))
             .where(
@@ -306,11 +319,11 @@ async def sync_capture_stub(
             .order_by(capture_chunks.c.seq)
         )
     ).all()
-    validated = [
-        row
-        for row in rows
-        if row.state == "published" or (row.job_id is not None and row.job_id == validated_job)
-    ]
+    if validated_job is not None:
+        calling = next((row for row in rows if row.job_id == validated_job), None)
+        if calling is None or calling.cancel_requested or calling.state not in _IN_FLIGHT:
+            return None
+    validated = [row for row in rows if _validated(row, validated_job)]
     if not validated:
         return None
     claim_ids = _fixture_claim_ids()
@@ -328,17 +341,32 @@ async def sync_capture_stub(
     if latest is not None:
         if not latest.fixture:
             return None
-        current = ReportVersion.model_validate(latest.payload)
-        expected = (
-            tuple(claim_ids[: len(hosts)]),
-            tuple(claim_ids[:assessed]),
-            final,
-        )
-        if _signature(current) == expected:
+        claims, assessments, was_final = _signature(ReportVersion.model_validate(latest.payload))
+        target = (len(hosts), assessed, final)
+        current = (len(claims), len(assessments), was_final)
+        if not _advances(current, target):
             return None
     return await publish_report_version(
         connection, capture_id, lambda identity: capture_report(stage, identity), fixture=True
     )
+
+
+_IN_FLIGHT = frozenset({"leased", "running"})
+
+
+def _validated(row: Row[Any], validated_job: uuid.UUID | None) -> bool:
+    if row.state == "published":
+        return True
+    if row.job_id is None or row.cancel_requested or row.state not in _IN_FLIGHT:
+        return False
+    return row.job_id == validated_job or bool((row.payload or {}).get(STUB_VALIDATED))
+
+
+def _advances(current: tuple[int, int, bool], target: tuple[int, int, bool]) -> bool:
+    """True when ``target`` loses nothing relative to ``current`` and adds something."""
+    if any(after < before for before, after in zip(current, target, strict=True)):
+        return False
+    return target != current
 
 
 def _fixture_claim_ids() -> list[str]:
@@ -355,7 +383,23 @@ def capture_with_stub_report(handler: JobHandler) -> JobHandler:
             capture_id = await connection.scalar(
                 select(capture_chunks.c.session_id).where(capture_chunks.c.job_id == job.id)
             )
-            if capture_id is not None:
+            if capture_id is None:
+                return result
+            # Mark this attempt validated, fenced on its lease, so a close before the worker
+            # publishes still counts the chunk. The handler's heartbeat already stops on a
+            # cancel or a lost lease; this also covers one that lands after its last
+            # heartbeat: a stale or cancelled job marks nothing and syncs nothing.
+            marked = await connection.execute(
+                update(jobs)
+                .where(
+                    jobs.c.id == job.id,
+                    jobs.c.fencing_token == job.lease.fencing_token,
+                    jobs.c.generation == job.lease.generation,
+                    jobs.c.cancel_requested.is_(False),
+                )
+                .values(payload=jobs.c.payload.op("||")(cast({STUB_VALIDATED: True}, JSONB)))
+            )
+            if marked.rowcount:
                 await sync_capture_stub(connection, capture_id, validated_job=job.id)
         return result
 
