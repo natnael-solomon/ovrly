@@ -408,4 +408,66 @@ class ChecksViewStateTest {
             fullVideoCandidates(captured, listOf(failed, cancelled, unknownSource, usable))
         )
     }
+
+    @Test
+    fun localSharesInEveryLocalStateReadAsTheirOwnState() {
+        val base = InvestigationRecord(
+            localId = "local-2",
+            state = LocalJobState.UPLOADING.wireName,
+            sourceKind = "upload",
+            idempotencyKey = "synthetic-key",
+            createdAt = now,
+            updatedAt = now
+        )
+        val uploading = inboxItem(base, null, now)
+        assertEquals("Uploading", uploading.status)
+        assertEquals("Shared video file", uploading.title)
+        assertEquals(listOf(InboxAction.RETRY), uploading.actions)
+        val accepted = inboxItem(base.copy(state = LocalJobState.ACCEPTED.wireName), null, now)
+        assertEquals("Accepted by ovrly", accepted.status)
+        assertNull(accepted.detail)
+        assertTrue(accepted.actions.isEmpty())
+        val failed = base.copy(state = LocalJobState.FAILED.wireName, errorCode = "UPLOAD_EXPIRED")
+        assertEquals("Reason: UPLOAD_EXPIRED. Share it again.", inboxItem(failed, null, now).detail)
+        val captured = inboxItem(base.copy(sourceKind = "capture"), null, now)
+        assertTrue(captured.captured)
+    }
+
+    @Test
+    fun aWaitingCheckHasAStageNoDetailAndNoFindings() {
+        val waiting = InvestigationCodec.parseInvestigation(
+            ContractFixtures.load(ContractFixtures.INTAKE)
+                .single { it.name == "investigation-create-url" }
+                .responsePayload()
+        )
+        val row = item(waiting)
+        assertEquals("Waiting to start", row.status)
+        assertEquals("Receiving the video", row.stage)
+        assertNull(row.detail)
+        assertEquals(listOf(InboxAction.OPEN), row.actions)
+        assertFalse(row.library)
+        val view = reportView(waiting)
+        assertNull(view.coverage)
+        assertEquals("No results yet. Claims appear here as they are checked.", view.empty)
+        assertFalse(view.canCorrect)
+    }
+
+    @Test
+    fun claimChangesCountSourcesThatCameOrWent() {
+        val current = fixture("complete").report!!
+        val fewer = current.copy(
+            evidence = current.evidence.filterNot { it.id == "evd_synthetic_0002" },
+            assessments = current.assessments.map { assessment ->
+                assessment.copy(
+                    relations = assessment.relations.filterNot {
+                        it.evidenceId == "evd_synthetic_0002"
+                    }
+                )
+            }
+        )
+        assertEquals(
+            listOf("Sources: 1 in version 2, 2 in version 2"),
+            claimChanges("clm_synthetic_0001", fewer, current)
+        )
+    }
 }
