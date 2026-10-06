@@ -334,7 +334,8 @@ internal fun IdleBubble(
             CountBadge(
                 claims,
                 pulse = unseen && frame.animate,
-                Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 2.dp)
+                // Inside the window's 28 dp rounded corner, which would otherwise clip it.
+                Modifier.align(Alignment.TopEnd).padding(top = 7.dp, end = 6.dp)
             )
         }
     }
