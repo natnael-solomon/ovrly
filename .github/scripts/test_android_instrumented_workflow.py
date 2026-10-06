@@ -68,6 +68,33 @@ class InstrumentedWorkflowTest(unittest.TestCase):
         self.assertIn("name: android-instrumented-reports\n", merge)
         self.assertEqual(2, SOURCE.count("retention-days: 7"))
 
+    def test_api_29_cold_boots_and_emulator_steps_are_bounded(self):
+        matrix = job("instrumented", "reports")
+        indent = "\n" + " " * 12
+        self.assertIn(f"- api-level: 29{indent}coverage-gate: false{indent}snapshot: false"
+                      f"{indent}emulator-options: -no-snapshot ", matrix)
+        self.assertIn(f"- api-level: 34{indent}coverage-gate: true{indent}snapshot: true"
+                      f"{indent}emulator-options: -no-snapshot-save ", matrix)
+        for step in ("Restore AVD snapshot", "Create AVD snapshot (main only)",
+                     "Save AVD snapshot (main only)"):
+            header = SOURCE.split(f"- name: {step}\n", 1)[1].split("uses:", 1)[0]
+            self.assertIn("matrix.snapshot", header, step)
+        tests = SOURCE.split("- name: Run instrumented tests", 1)[1].split("- name: ", 1)[0]
+        self.assertIn("timeout-minutes: 25", tests)
+        self.assertIn("emulator-boot-timeout: 300", tests)
+        self.assertIn("emulator-options: ${{ matrix.emulator-options }}", tests)
+        create = SOURCE.split("- name: Create AVD snapshot (main only)", 1)[1]
+        create = create.split("- name: ", 1)[0]
+        self.assertIn("timeout-minutes: 15", create)
+        self.assertIn("android_emulator.py snapshot", create)
+        self.assertIn("-no-snapshot-save", create)
+
+    def test_coverage_is_measured_only_after_a_complete_test_run(self):
+        coverage = SOURCE.split("- name: Coverage report, floors and comparison with main", 1)[1]
+        self.assertIn("if: ${{ !cancelled() && steps.tests.outcome == 'success' }}",
+                      coverage.split("run: |", 1)[0])
+        self.assertIn("--gate", coverage)
+
     def test_final_check_refuses_failed_cancelled_and_missing_jobs(self):
         self.assertIn("name: Android instrumented checks\n    if: ${{ always() }}", SOURCE)
         self.assertIn("needs: [changes, instrumented]", SOURCE.split("  result:\n", 1)[1])
