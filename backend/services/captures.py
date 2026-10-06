@@ -6,27 +6,69 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Row, select
+from sqlalchemy import ColumnElement, Row, and_, select
 
 from services.api.capture_schemas import (
+    CaptureClaimState,
     CaptureInterval,
     CaptureManifest,
     CaptureSession,
     ModalityCoverage,
     SeqRange,
 )
+from services.api.schemas import CoverageStatus, ProcessingStatus, ReportVersion
 from services.jobs.handlers import JobContext
+from services.jobs.models import jobs
 from services.jobs.queue import ClaimedJob, StageKey
 from services.jobs.retries import NonRetriableInput
 from services.models import capture_chunks, capture_sessions
 from services.storage import UploadStore
 
 CAPTURE_STAGE = "media_validation"
+CAPTURE_STAGES = (CAPTURE_STAGE, "asr", "device_text", "claim_extraction")
 
 
-def stage_key(session_id: UUID, seq: int) -> StageKey:
+def stage_key(session_id: UUID, seq: int, stage: str = CAPTURE_STAGE) -> StageKey:
     digest = hashlib.sha256(f"capture:{session_id}:{seq}".encode()).hexdigest()
-    return StageKey(1, CAPTURE_STAGE, digest)
+    return StageKey(1, stage, digest)
+
+
+def capture_reference(job: ClaimedJob) -> tuple[UUID, int]:
+    """Read new payloads and the session_id spelling used by already queued validations."""
+    try:
+        identifier = UUID(str(job.payload.get("capture_id", job.payload.get("session_id"))))
+        seq = job.payload["seq"]
+        if type(seq) is not int or seq < 0:
+            raise ValueError
+    except (KeyError, ValueError):
+        raise NonRetriableInput("Capture job has no valid capture or sequence") from None
+    return identifier, seq
+
+
+def chunk_jobs(capture_id: UUID, sequences: Sequence[int]) -> ColumnElement[bool]:
+    return and_(
+        jobs.c.version == 1,
+        jobs.c.stage.in_(CAPTURE_STAGES),
+        jobs.c.input_hash.in_([stage_key(capture_id, seq).input_hash for seq in sequences]),
+    )
+
+
+def claim_progress(
+    report: ReportVersion | None, continue_research: bool | None
+) -> tuple[list[CaptureClaimState], CoverageStatus]:
+    if report is None:
+        return [], "not_started"
+    assessments = {item.claim_id: item for item in report.assessments}
+    claims = []
+    for claim in report.claims:
+        assessment = assessments.get(claim.id)
+        state: ProcessingStatus
+        if assessment is not None:
+            state = "partial" if assessment.provisional else "complete"
+        else:
+            state = "cancelled" if continue_research is False else "checking"
+        claims.append(CaptureClaimState(claim_id=claim.id, processing_status=state, error=None))
+    return claims, "partial" if report.provisional else "complete"
 
 
 def interval(start: int, end: int) -> CaptureInterval:
@@ -99,20 +141,23 @@ class CaptureProcessor:
 
     async def run(self, job: ClaimedJob, context: JobContext) -> dict[str, Any]:
         """Verify durable bytes before the later ASR/OCR pipeline consumes them."""
-        try:
-            owner = UUID(str(job.payload["owner_id"]))
-        except (KeyError, ValueError):
-            raise NonRetriableInput("Capture job has no valid owner") from None
+        capture_id, seq = capture_reference(job)
         await context.heartbeat()
         async with context.queue.database.engine.begin() as connection:
             row = (
                 await connection.execute(
                     select(capture_chunks)
-                    .select_from(capture_chunks.join(capture_sessions))
+                    .select_from(
+                        capture_chunks.join(capture_sessions).join(
+                            jobs, jobs.c.id == capture_chunks.c.job_id
+                        )
+                    )
                     .where(
                         capture_chunks.c.job_id == job.id,
+                        capture_chunks.c.session_id == capture_id,
+                        capture_chunks.c.seq == seq,
                         capture_chunks.c.received_at.is_not(None),
-                        capture_sessions.c.owner_id == owner,
+                        capture_sessions.c.owner_id == jobs.c.owner_id,
                     )
                     .with_for_update(of=capture_sessions)
                 )
