@@ -118,15 +118,15 @@ class PapersClient:
 
     async def _post(self, path: str, body: dict[str, Any]) -> tuple[int, Any]:
         for attempt in range(RATE_LIMIT_ATTEMPTS):
-            await self.bucket.acquire()
-            response, raw = await send(
-                self.client,
-                PROVIDER,
-                "POST",
-                f"{self.base_url.rstrip('/')}{path}",
-                headers=self._headers(),
-                json=body,
-            )
+            async with self.bucket.request():
+                response, raw = await send(
+                    self.client,
+                    PROVIDER,
+                    "POST",
+                    f"{self.base_url.rstrip('/')}{path}",
+                    headers=self._headers(),
+                    json=body,
+                )
             if response.status_code != 429:
                 break
             # Hold every worker for the provider's Retry-After, then try again.

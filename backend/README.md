@@ -137,8 +137,27 @@ sessions and chunk reservations/receipts. `0008_reports` adds immutable
 `reanalysis_requests` and the `voice_actions` audit table.
 `0009_reanalysis_source` adds the nullable `source_investigation_id` to
 `reanalysis_requests`, and `0010_provider_buckets` adds the shared provider rate-limit
-buckets. Future schema changes require a reviewed migration
+buckets, and `0011_quotas` adds daily admission counters and expiring provider
+request slots. Future schema changes require a reviewed migration
 and upgrade/downgrade coverage, not `create_all()` during API startup.
+
+### Single-service deployment (EthioDeploy)
+
+On a host with one web service and no separate worker, such as EthioDeploy Free
+([BC-D03](../docs/decisions/BC-D03-provider-hosting.md)), run from `backend/` after
+`uv sync --frozen`. The start command derives the Psycopg URL from the hosted
+Postgres `DATABASE_URL`, migrates, then listens on the host's port:
+
+```sh
+export OVRLY_DATABASE_URL="postgresql+psycopg://${DATABASE_URL#*://}"
+uv run --frozen alembic upgrade head
+exec uv run --frozen uvicorn services.api.main:create_app --factory --host 0.0.0.0 --port "$PORT"
+```
+
+Set `OVRLY_EMBED_WORKER=1`, use `/healthz` as the health check and store
+`OVRLY_SCHOLARXIV_API_KEY` as a host secret. Do not set `OVRLY_API_PORT`; it only
+configures the development helper. Never set `OVRLY_STUB_REPORTS` on a public deploy.
+This deployment has not been verified.
 
 ### Durable jobs and recovery
 
@@ -739,6 +758,82 @@ cassettes for every provider (`tests/cassettes/`, `tests/evidence_cassettes.py`)
 through an `httpx` mock transport; no test or CI job calls a real provider. The
 cassettes are shaped from the providers' public documentation and are not recordings;
 real redacted recordings need an authorized key and rights review first.
+
+## Opt-in admission quotas (#22)
+
+The quota portion of [BC-D06](../docs/decisions/BC-D06-retention.md) is **proposed,
+not accepted**. Nothing is enabled by this implementation; retention has its own
+independent opt-in. All API and worker processes must have the same configuration.
+
+| Setting | Proposed default / meaning |
+| --- | --- |
+| `OVRLY_QUOTAS_ENABLED` | `0`; opt in only after reviewing the proposed policy |
+| `OVRLY_QUOTA_ACTIVE_CHECKS` | 2 per principal; distinct checks with active queued/leased/running jobs, plus unexpired open captures |
+| `OVRLY_QUOTA_DAILY_CHECKS` | 6 new investigations, captures or reanalyses per principal per UTC day |
+| `OVRLY_QUOTA_DAILY_UPLOAD_BYTES` | 268435456 (256 MiB); shared daily reservation budget for uploads and capture chunks |
+| `OVRLY_QUOTA_CLAIMS_PER_RUN` | 5; further caps `OVRLY_EVIDENCE_MAX_CLAIMS` for retrieval, including deeper searches; remaining claims stay unassessed |
+| `OVRLY_QUOTA_PROVIDER_CONCURRENCY` | 2 simultaneous Scholarxiv requests across workers, including Papers, Router, retries and feedback |
+| `OVRLY_QUOTA_PROVIDER_RESERVE` | 50 local tokens; must be less than `OVRLY_SCHOLARXIV_REQUESTS_PER_HOUR` when enabled |
+
+Admission is serialized on the principal before locking owned records. The
+admission lock is `FOR NO KEY UPDATE`: it serializes admissions and conflicts
+with saves and account links, but not with the `FOR KEY SHARE` lock a worker
+takes when it inserts a principal-owned job. The global lock order is principal,
+then owned objects (investigation, capture session), then the reanalysis
+request, then jobs, so a chunk upload cannot deadlock with a capture stage that
+holds the session and enqueues its successors. Daily
+counters, the accepted record and queued work commit or roll back together.
+Idempotent investigation/capture/reanalysis replays do not charge again, even
+while intake is paused. Chunk retries reuse their reservation. New upload
+declarations reserve their full declared size, including abandoned declarations;
+failed admissions are not charged. Deleting content does not refund counters.
+The one counter row per principal resets on its next admission after UTC midnight.
+
+A local budget refusal is HTTP 429 `QUOTA_EXCEEDED`. A configured Scholarxiv
+bucket below the reserve gives HTTP 429 `PROVIDER_QUOTA_EXHAUSTED`. Both use the
+existing error shape, `retryable: true`, `action: retry` and a numeric
+`Retry-After` header. For active-check limits, 30 seconds is a suggested polling
+delay, not a predicted completion time. The provider delay estimates refill
+to the reserve and can increase while accepted research continues.
+
+The provider stop covers new checks, captures, upload targets and reanalyses;
+existing capture uploads, reads, saves and Stop/cancel remain usable. On the
+worker, opt-in Scholarxiv calls take a token and then a DB-backed request slot.
+Normal contention waits instead of failing the stage: the token refills with
+jittered sleeps and a busy slot is polled with capped exponential backoff and
+jitter. Only a total wait longer than `max_wait_seconds` (300 seconds) raises
+`RateLimited`, and a token taken for a request that got no slot is refunded.
+Calls exceeding the
+configured evidence-provider timeout fail with a typed provider error; slots
+release on success, failure and cancellation, and expired crash leases can be
+reclaimed without a sweeper. No database connection is held while waiting or
+during the call.
+Without the opt-in, the existing waiting token-bucket behavior is unchanged.
+
+Operator summary, from `backend/` with the usual database configuration:
+
+```sh
+uv run --frozen python -m services.quota_summary
+```
+
+This read-only command prints JSON with the proposed policy, enforcement flag,
+intake pause and retry estimate, local Scholarxiv refill balance and active
+request slots. It never calls a provider or prints credentials, principal ids,
+media or claims; database failures exit nonzero without connection details.
+An unobserved bucket has a null displayed balance. Upstream balances are always
+unknown, and Groq and Voxide explicitly say they are not integrated. No new
+public administration endpoint is exposed.
+
+This does **not** complete #22: approved limits, Groq audio/retry and fallback
+integration (#20/#25), Voxide session accounting and measured account-wide
+budgets remain pending. Guest creation can obtain another principal allowance;
+these are not per-person abuse controls. The weighted `TokenBucket.acquire(amount)`
+primitive is available for future adapters, not proof that those adapters use it.
+The existing per-input size/duration caps and #77 retention policy are unchanged.
+Tests in `tests/test_quotas.py` cover atomic admission, replay, daily reset, shared
+byte reservations, provider pause, multi-process capacity, waiting for a busy
+request slot, the admission lock against a concurrent capture-stage publish
+and failure cleanup using synthetic data and local PostgreSQL.
 
 ## Local checks
 

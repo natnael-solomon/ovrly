@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from services.api.auth import CurrentPrincipal, load_owned, owned_rows
 from services.api.auth.dependency import Principal
 from services.api.auth.ownership import not_found
-from services.api.routes.common import engine
+from services.api.routes.common import engine, settings
 from services.api.routes.investigations import IDEMPOTENCY_HEADER, _idempotency_key
 from services.api.routes.jobs import require_empty_body
 from services.api.schemas import (
@@ -128,7 +128,7 @@ async def reanalyze(
     try:
         async with database.begin() as connection:
             response = await request_reanalysis(
-                connection, queue, principal, investigation_id, body, key
+                connection, queue, principal, investigation_id, body, key, settings(request)
             )
     except IntegrityError:
         # The same key was used concurrently for another investigation of this caller.

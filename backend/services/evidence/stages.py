@@ -296,7 +296,13 @@ class EvidenceStages:
         if key is None:
             raise NonRetriableInput("evidence stages need OVRLY_SCHOLARXIV_API_KEY")
         bucket = TokenBucket(
-            self.database, SCHOLARXIV_BUCKET, self.settings.scholarxiv_requests_per_hour
+            self.database,
+            SCHOLARXIV_BUCKET,
+            self.settings.scholarxiv_requests_per_hour,
+            concurrency=self.settings.quota_provider_concurrency
+            if self.settings.quotas_enabled
+            else 0,
+            request_timeout_seconds=self.settings.evidence_provider_timeout_seconds,
         )
         base = self.settings.scholarxiv_base_url
         return (
@@ -349,7 +355,10 @@ class EvidenceStages:
             )
             for index, claim in enumerate(scope):
                 await context.heartbeat()
-                if index >= self.settings.evidence_max_claims:
+                claim_limit = self.settings.evidence_max_claims
+                if self.settings.quotas_enabled:
+                    claim_limit = min(claim_limit, self.settings.quota_claims_per_run)
+                if index >= claim_limit:
                     results.append(
                         ClaimRetrieval(
                             claim_id=claim.id, status="unassessed", reason="claim_budget"

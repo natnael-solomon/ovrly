@@ -52,8 +52,8 @@ Proposed host log retention is seven days and must be configured by the operator
 settings and storage mounts, and the operational transfer
 checklist. #81 (owner-scoped job actions) and #80 (account linking) are on
 `main`; the sweep reuses `JobQueue.delete` and honours `principals.kind`.
-No quotas, token buckets or global intake stop are decided here.
-Those remain #22 and the separate BC-D06 budget discussion.
+No quotas, token buckets or global intake stop are approved here.
+The opt-in proposal below remains subject to owner acceptance under #22.
 
 **Rejected alternatives and why:** Indefinite retention is unsuitable for a
 privacy-oriented demo. Per-object rolling windows require product decisions
@@ -67,3 +67,49 @@ measured demo needs, or provider deletion/backup constraints.
 11; `backend/tests/recovery/test_privacy.py`;
 [data map](../operations/data-map.md);
 [PDP checklist](../operations/pdp-checklist.md).
+
+## Proposed admission and provider budgets (#22)
+
+**Status: Proposed, not accepted.** The implementation is opt-in with
+`OVRLY_QUOTAS_ENABLED=1`; it does not change a deployment or enable retention.
+The existing #77 privacy implementation is retained. Product-owner acceptance,
+actual account entitlements and the missing provider-stage integrations remain
+requirements for closing #22.
+
+| Proposed limit | Rationale and boundary |
+| --- | --- |
+| 2 active checks per principal | Counts distinct investigations with queued/leased/running work, plus unexpired open captures. Chunk fan-out remains one check. Two checks allow a comparison without an unbounded queue on the small host. It is an admission limit, not a worker-job or account-wide concurrency guarantee. |
+| 6 new checks/reanalyses per UTC day per principal | At the existing 10-minute shared-input cap, six inputs represent at most 60 declared audio-minutes before retries, below the issue's reported 120 audio-minutes/hour. This is not ASR enforcement: missing durations, retries, other principals and the unverified Groq entitlement prevent that claim. |
+| 256 MiB of upload reservations per UTC day per principal | Reuses the existing per-input byte budget as a daily aggregate instead of multiplying local storage by an unlimited number of uploads. Ordinary upload declarations and new capture-chunk reservations share it. Failed/abandoned accepted reservations are not refunded; retransmitting the same capture reservation costs no additional bytes. |
+| 5 claims researched per run | With the current standard evidence budget, up to 4 router calls, 3 searches and up to 4 feedback calls per claim gives a planning envelope of 330 requests for six five-claim runs, before provider retries, claim extraction and expansions. Deeper searches increase this; actual outbound attempts still pass through the shared bucket. Unreached claims remain visible and unassessed. |
+| 2 concurrent Scholarxiv requests | Bounds simultaneous Papers, Router and feedback requests across workers without holding database connections during network calls. Each request has the configured hard evidence-provider timeout and a slot lease lasting five seconds longer; the slot is fenced by a unique lease id. A further request waits for a free slot with jittered backoff and is rescheduled only after the bucket's maximum wait. |
+| Pause new intake below 50 local Scholarxiv tokens | A 5% reserve under the existing 1000/hour application budget leaves room for already accepted work. `Retry-After` estimates recovery to the reserve, not a guaranteed start time: accepted work can consume tokens meanwhile. |
+
+Counters are charged in the same transaction as admission, after idempotent
+replay checks. Cancel, delete and failed processing do not refund daily checks.
+Failed admission transactions do not spend budget. A new reanalysis counts
+as a check, including a correction, but it does not count as a second active
+investigation when that investigation already has active work. The counters
+start when enforcement is enabled; historical usage is not backfilled.
+
+The shared global stop covers new investigations, captures, upload targets and
+reanalyses when Scholarxiv is configured. Already accepted capture chunks and
+uploads can finish, and reads, Stop/cancel and saves remain available. A closed
+capture can still consume an active slot while its queued research is unfinished.
+Expired open captures without active jobs no longer count. Payloads not yet
+recognized by the quota code count conservatively as separate active jobs.
+
+All API and worker processes must use the same quota flag and limits; mixed
+enabled/disabled workers or different concurrency limits cannot enforce a shared
+policy. Deploy only after owner review. Per-principal limits are not per-human
+anti-abuse protection: creating another guest principal can obtain another
+allowance. No provider entitlement, account-wide cost ceiling or paid overage
+protection is inferred from these local counters.
+
+**Still pending:** Groq ASR duration/retry reservations in #20; claim-extraction
+and fallback/router-specific limits in #25; Voxide client-side session accounting;
+observed upstream remaining balances; approved per-provider rates, concurrency
+and account-wide budgets. The generic weighted bucket can meter other units,
+but its existence is not integration. The operator summary reports these
+providers as unintegrated with unknown balances. It is a local refill estimate,
+not a rolling-hour provider dashboard or a measured daily allowance.

@@ -12,6 +12,7 @@ from services.api.errors import ApiError
 from services.api.routes.common import engine, settings, upload_store
 from services.api.schemas import UploadCreateRequest, UploadResponse
 from services.models import uploads
+from services.quotas import charge, lock_owner, provider_gate
 from services.storage import UploadTooLarge
 
 router = APIRouter(tags=["uploads"])
@@ -76,6 +77,9 @@ async def create_upload(
         "completed_at": None,
     }
     async with engine(request).begin() as connection:
+        await lock_owner(connection, principal, config)
+        await provider_gate(connection, config)
+        await charge(connection, principal, config, upload_bytes=body.size_bytes)
         row = (await connection.execute(insert(uploads).values(values).returning(uploads))).one()
     return upload_response(row)
 
