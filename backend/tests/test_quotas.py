@@ -171,18 +171,21 @@ async def test_chunk_put_and_capture_publish_for_one_owner_do_not_deadlock(app, 
                     await asyncio.sleep(0.01)
             return await super().enqueue(connection, *args, **kwargs)
 
-    queue = Barrier(app.state.database)
-    claim = await queue.claim("deadlock-test", ["media_validation"], 30)
-    assert claim is not None and claim.id == root
-    assert await queue.start(claim.lease)
+    queue = Barrier(Database(app.state.settings))
+    try:
+        claim = await queue.claim("deadlock-test", ["media_validation"], 30)
+        assert claim is not None and claim.id == root
+        assert await queue.start(claim.lease)
 
-    async def upload():
-        await locked.wait()
-        return await put(client, headers, session, 1)
+        async def upload():
+            await locked.wait()
+            return await put(client, headers, session, 1)
 
-    published, response = await asyncio.wait_for(
-        asyncio.gather(publish_capture_stage(queue, claim, {}), upload()), 30
-    )
+        published, response = await asyncio.wait_for(
+            asyncio.gather(publish_capture_stage(queue, claim, {}), upload()), 30
+        )
+    finally:
+        await queue.database.close()
     assert published is not None
     assert response.status_code == 200, response.text
     assert (await usage(app, owner_id)).upload_bytes == 2 * len(DATA)
