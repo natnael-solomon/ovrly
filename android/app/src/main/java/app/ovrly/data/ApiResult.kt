@@ -76,6 +76,13 @@ internal enum class ApiErrorCode {
     CAPTURE_EXPIRED,
     CAPTURE_FINAL_CHUNK,
     CAPTURE_TOO_LARGE,
+
+    // BE-10 (#33) reanalysis.
+    REPORT_VERSION_STALE,
+    REPORT_NOT_AVAILABLE,
+    CLAIM_NOT_IN_VERSION,
+    CORRECTION_UNCHANGED,
+    MATCH_CONFIRMATION_REQUIRED,
     UNKNOWN;
 
     companion object {

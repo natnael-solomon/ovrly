@@ -11,9 +11,11 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /*
- * Room store for AN-03 (#18). Schema version 1 is exported to `app/schemas`; any change to
+ * Room store for AN-03 (#18). Each schema version is exported to `app/schemas`; any change to
  * these entities bumps the version and adds a migration tested against that export. The
  * database lives in app-private storage, which the data-extraction rules exclude from
  * backup and device transfer.
@@ -68,7 +70,16 @@ internal data class InvestigationRecord(
     @ColumnInfo(name = "updated_at")
     val updatedAt: Long,
     @ColumnInfo(name = "synced_at")
-    val syncedAt: Long? = null
+    val syncedAt: Long? = null,
+    /**
+     * `Idempotency-Key` of "Try again" on this failed or cancelled check (#34), stored before
+     * the request so a retry after a lost answer replays the same new check.
+     */
+    @ColumnInfo(name = "retry_key")
+    val retryKey: String? = null,
+    /** Server id of the new check "Try again" created; the old check offers it instead. */
+    @ColumnInfo(name = "retried_as")
+    val retriedAs: String? = null
 )
 
 /** The stored state; a value this version does not know reads as [LocalJobState.FAILED]. */
@@ -183,7 +194,7 @@ internal interface PendingChunkDao {
 
 @Database(
     entities = [InvestigationRecord::class, ReportCacheEntry::class, PendingChunk::class],
-    version = 1,
+    version = 2,
     exportSchema = true
 )
 internal abstract class OvrlyDatabase : RoomDatabase() {
@@ -194,6 +205,20 @@ internal abstract class OvrlyDatabase : RoomDatabase() {
     companion object {
         /** No destructive fallback: a missing migration fails loudly instead of losing data. */
         fun open(context: Context): OvrlyDatabase =
-            Room.databaseBuilder(context, OvrlyDatabase::class.java, "ovrly.db").build()
+            Room.databaseBuilder(context, OvrlyDatabase::class.java, "ovrly.db")
+                .addMigrations(MIGRATION_1_2)
+                .build()
+
+        /** Version 2 (#34): the retry key and the check a retry created. */
+        val MIGRATION_1_2_SQL = listOf(
+            "ALTER TABLE investigations ADD COLUMN retry_key TEXT",
+            "ALTER TABLE investigations ADD COLUMN retried_as TEXT"
+        )
+
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                MIGRATION_1_2_SQL.forEach(db::execSQL)
+            }
+        }
     }
 }

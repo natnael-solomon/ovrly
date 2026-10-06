@@ -30,8 +30,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -43,18 +45,26 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.ovrly.ui.voice.VoiceOrbDockState
 
+/** What the Your space and Explore tabs show besides samples; empty in previews. */
+internal data class ShellContent(
+    val checks: ChecksShell? = null,
+    val voiceDock: VoiceOrbDockState? = null
+)
+
 enum class AppDestination(val label: String) {
     SPACE("Your space"), EXPLORE("Explore"), SETTINGS("Settings"),
 }
 
 @Composable
-fun AppShell(
+internal fun AppShell(
     destination: AppDestination,
     onDestination: (AppDestination) -> Unit,
     activeSession: String?,
-    voiceDock: VoiceOrbDockState? = null,
+    shell: ShellContent = ShellContent(),
     settings: @Composable () -> Unit,
 ) {
+    val checks = shell.checks
+    val voiceDock = shell.voiceDock
     val p = LocalOvrlyPalette.current
     val pages = rememberSaveableStateHolder()
     var selectedReport by rememberSaveable { mutableStateOf<String?>(null) }
@@ -67,12 +77,25 @@ fun AppShell(
     var savedIds by rememberSaveable { mutableStateOf(SampleReports.take(3).map { it.id }) }
     val report = SampleReports.firstOrNull { it.id == selectedReport }
     val showingReport = destination != AppDestination.SETTINGS && report != null
+    val onCheck: (CheckCommand) -> Unit = checks?.onCommand ?: {}
+    // A real report belongs to Your space; leaving the tab (also by voice) closes it.
+    val check = checks?.report.takeIf { destination == AppDestination.SPACE }
+    val closeCheck by rememberUpdatedState { onCheck(CheckCommand.Close) }
+    LaunchedEffect(destination) {
+        if (destination != AppDestination.SPACE) closeCheck()
+    }
     val navigate: (AppDestination) -> Unit = {
         selectedReport = null
+        onCheck(CheckCommand.Close)
         onDestination(it)
     }
-    BackHandler(enabled = showingReport || destination != AppDestination.SPACE) {
-        if (showingReport) selectedReport = null else navigate(AppDestination.SPACE)
+    val canGoBack = check != null || showingReport || destination != AppDestination.SPACE
+    BackHandler(enabled = canGoBack) {
+        when {
+            check != null -> onCheck(CheckCommand.Close)
+            showingReport -> selectedReport = null
+            else -> navigate(AppDestination.SPACE)
+        }
     }
     Scaffold(
         containerColor = p.paper,
@@ -123,8 +146,15 @@ fun AppShell(
         },
     ) { insets ->
         Box(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets)) {
-            pages.SaveableStateProvider(if (showingReport) "report-${report?.id}" else destination.name) {
-                if (showingReport) {
+            val page = when {
+                check != null -> "check-${check.view.investigationId}"
+                showingReport -> "report-${report.id}"
+                else -> destination.name
+            }
+            pages.SaveableStateProvider(page) {
+                if (check != null) {
+                    CheckReportScreen(check, onCheck)
+                } else if (showingReport) {
                     SampleReportScreen(
                         report, saved = report.id in savedIds,
                         onBack = { selectedReport = null },
@@ -138,7 +168,9 @@ fun AppShell(
                         onOpen = { selectedReport = it.id },
                         onExplore = { navigate(AppDestination.EXPLORE) },
                         voiceDock = voiceDock
-                    )
+                    ) {
+                        checks?.let { ChecksSections(it.state, it.onCommand) }
+                    }
 
                     AppDestination.EXPLORE -> ExploreScreen(
                         onOpen = { selectedReport = it.id },

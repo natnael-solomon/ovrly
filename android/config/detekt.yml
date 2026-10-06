@@ -6,6 +6,11 @@ naming:
   FunctionNaming:
     ignoreAnnotated: ['Composable']
 
+# Compose previews are called by the IDE only.
+style:
+  UnusedPrivateMember:
+    ignoreAnnotated: ['Preview']
+
 Compose:
   ComposableAnnotationNaming:
     active: true

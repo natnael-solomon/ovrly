@@ -1,6 +1,7 @@
 package app.ovrly.data
 
 import android.content.Context
+import androidx.room.withTransaction
 import app.ovrly.BuildConfig
 import app.ovrly.share.ShareStaging
 import java.io.File
@@ -55,6 +56,9 @@ internal class ApiServices(
     /** For store writes that must outlive a screen, such as forgetting an abandoned share. */
     val background: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) {
+    /** BE-10 report routes for the Inbox and Report screens (#34), on the same [api]. */
+    val reports: ReportApi by lazy { ReportApi(api) }
+
     companion object {
         @Volatile
         private var shared: ApiServices? = null
@@ -70,7 +74,11 @@ internal class ApiServices(
         private fun create(context: Context): ApiServices? {
             val url = baseUrl(BuildConfig.OVRLY_API_BASE_URL) ?: return null
             val api = OvrlyApi(ApiClient(url), KeystoreCredentialStore(context))
-            val jobs = LocalJobs(OvrlyDatabase.open(context).investigations())
+            val database = OvrlyDatabase.open(context)
+            val jobs = LocalJobs(
+                database.investigations(),
+                transaction = { block -> database.withTransaction { block() } }
+            )
             val investigations = InvestigationRepository(api, jobs)
             val live = LiveShares()
             val reconciler = Reconciler(
