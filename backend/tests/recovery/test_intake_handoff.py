@@ -150,7 +150,7 @@ async def test_worker_crash_before_publish_re_leases_and_publishes_intake_once(
 
     app = create_app(
         harness.settings(embed_worker=True, storage_dir=tmp_path),
-        handlers=default_handlers(),
+        handlers=default_handlers(settings=harness.settings(storage_dir=tmp_path)),
         faults=faults,
         dispatcher=RecordingDispatcher(harness.queue),
     )
@@ -175,7 +175,10 @@ async def test_worker_crash_before_publish_re_leases_and_publishes_intake_once(
     assert "Worker failed" in caplog.text
 
     recovering = harness.worker(
-        None, stages=default_handlers(), worker_id="intake-recovering", storage_dir=tmp_path
+        None,
+        stages=default_handlers(settings=harness.settings(storage_dir=tmp_path)),
+        worker_id="intake-recovering",
+        storage_dir=tmp_path,
     )
     await recovering.start()
     record = await harness.wait_for_state_by_key(key, JobState.PUBLISHED)
@@ -204,7 +207,9 @@ async def test_intake_stage_rejects_a_missing_or_foreign_investigation(harness):
     from services.jobs.queue import StageKey
     from services.pipeline.intake import intake_payload
 
-    worker = harness.worker(None, stages=default_handlers(), worker_id="intake-guard")
+    worker = harness.worker(
+        None, stages=default_handlers(settings=harness.settings()), worker_id="intake-guard"
+    )
     await worker.start()
     missing = uuid.uuid4()
     async with harness.control.engine.begin() as connection:

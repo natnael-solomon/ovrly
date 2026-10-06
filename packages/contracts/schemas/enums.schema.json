@@ -4,6 +4,26 @@
   "title": "Enums",
   "description": "Definitions only; this file is not a payload schema. Read-model fields (investigation, job, report version, claim, evidence, assessment, capture session) tolerate values outside these lists by mapping them to UNKNOWN, never to a success or finding state. Request fields are validated strictly by the server.",
   "$defs": {
+    "analysis_status": {
+      "type": "string",
+      "description": "Media extraction only. pending awaits observations; partial has usable observations plus gaps; no_usable has no usable observations and no pending modalities; complete has processed the supplied available input. Never a research report or continuous OCR claim.",
+      "enum": ["pending", "partial", "no_usable", "complete"]
+    },
+    "speech_status": {
+      "type": "string",
+      "description": "Speech-stage progress, separate from preparation and research. Source: backend SpeechStatus.",
+      "enum": ["pending", "running", "completed", "unavailable"]
+    },
+    "speech_reason": {
+      "type": "string",
+      "description": "Why speech is unavailable. An unknown outcome is never automatically resubmitted. Source: backend SpeechReason.",
+      "enum": ["disabled", "no_audio_track", "quota_exhausted", "unknown_outcome", "provider_unavailable", "cancelled"]
+    },
+    "asr_provider": {
+      "type": "string",
+      "description": "Hosted transcription provider. Source: backend ASRProvider; no fallback.",
+      "enum": ["groq"]
+    },
     "job_state": {
       "type": "string",
       "description": "Persisted job state. Source: backend/services/jobs/states.py JobState. Terminal states only move to deleted; a requested cancellation is the separate cancel_requested flag.",
@@ -27,7 +47,7 @@
     },
     "stage": {
       "type": "string",
-      "description": "Pipeline stage an investigation or job is at. Source: build contract section 4 and RFC section 13. Only intake exists in backend code today (routes/investigations.py INITIAL_STAGE); the other eight are introduced by this contract for the pipeline tasks.",
+      "description": "Pipeline stage an investigation or job is at. Source: build contract section 4 and RFC section 13. Intake, upload-backed media_validation and opt-in asr are implemented; later stages remain reserved for the pipeline tasks.",
       "enum": [
         "intake",
         "media_validation",
@@ -49,6 +69,21 @@
       "type": "string",
       "description": "How much of the eligible media has been checked. Source: routes/investigations.py COVERAGE_PLACEHOLDER (not_started) plus the two values the pipeline will report.",
       "enum": ["not_started", "partial", "complete"]
+    },
+    "media_speech_status": {
+      "type": "string",
+      "description": "Speech eligibility after media preparation, not a transcription result. Source: backend MediaSpeechStatus.",
+      "enum": ["pending", "unavailable"]
+    },
+    "media_text_status": {
+      "type": "string",
+      "description": "Text remains pending after media preparation; this does not claim any frame was examined. Source: backend MediaTextStatus.",
+      "enum": ["pending"]
+    },
+    "speech_unavailable_reason": {
+      "type": "string",
+      "description": "Why prepared media cannot provide speech. Silence within an existing audio track is not an absent track. Source: backend SpeechUnavailableReason.",
+      "enum": ["no_audio_track"]
     },
     "upload_state": {
       "type": "string",

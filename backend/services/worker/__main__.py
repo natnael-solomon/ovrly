@@ -20,7 +20,7 @@ async def serve() -> None:
     database = Database(settings)
     store = LocalFilesystemStore(settings.storage_dir)
     retention = Retention(database, settings, store)
-    handlers = worker_handlers(database, settings, default_handlers(store))
+    handlers = worker_handlers(database, settings, default_handlers(store, settings=settings))
     if settings.retention_enabled:
         handlers[RETENTION_STAGE] = retention.run
     else:

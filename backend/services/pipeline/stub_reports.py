@@ -112,6 +112,8 @@ def enable_stub_reports(handlers: dict[str, JobHandler]) -> None:
 async def intake_with_stub_report(job: ClaimedJob, context: JobContext) -> dict[str, Any]:
     """The ``intake`` stage followed by the stub publication; registered only when opted in."""
     result = await intake_stage(job, context)
+    # A labelled development fixture replaces upload processing, never triggering hosted ASR.
+    context.successors.clear()
     async with context.queue.database.engine.begin() as connection:
         await publish_stub_report(connection, uuid.UUID(result["investigation_id"]), enabled=True)
     return result

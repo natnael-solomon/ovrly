@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend SpeechResult.",
+  "title": "Timed speech",
+  "description": "Owner-scoped hosted speech observations on the original timebase. Empty completed segments mean no speech was recognized, not absent audio or no claims. No provider request IDs, quota account identifiers or artifact paths are exposed. Source/audio/settings digests scope reuse within one investigation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "reason", "provider", "model", "processing_version", "source_sha256", "audio_sha256", "settings_sha256", "segments"],
+  "properties": {
+    "status": { "$ref": "enums.schema.json#/$defs/speech_status" },
+    "reason": {
+      "oneOf": [{ "type": "null" }, { "$ref": "enums.schema.json#/$defs/speech_reason" }]
+    },
+    "provider": {
+      "oneOf": [{ "type": "null" }, { "$ref": "enums.schema.json#/$defs/asr_provider" }]
+    },
+    "model": { "$ref": "common.schema.json#/$defs/nullable_string" },
+    "processing_version": { "$ref": "common.schema.json#/$defs/nullable_integer" },
+    "source_sha256": {
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/sha256" }]
+    },
+    "audio_sha256": {
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/sha256" }]
+    },
+    "settings_sha256": {
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/sha256" }]
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "interval"],
+        "properties": {
+          "text": { "type": "string", "minLength": 1 },
+          "interval": { "$ref": "common.schema.json#/$defs/interval" }
+        }
+      }
+    }
+  }
+}

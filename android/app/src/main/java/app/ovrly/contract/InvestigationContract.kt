@@ -35,7 +35,8 @@ internal data class Coverage(
     @SerialName("covered_ms")
     val coveredMs: Long? = null,
     @SerialName("total_ms")
-    val totalMs: Long? = null
+    val totalMs: Long? = null,
+    val media: MediaCoverage? = null
 )
 
 /** `investigation.schema.json#/$defs/safe_error`: the stored subset of the shared error shape. */
@@ -238,7 +239,9 @@ internal data class Investigation(
     @SerialName("processing_status")
     val processingStatus: ProcessingStatus,
     val job: Job?,
-    val report: ReportVersion?
+    val report: ReportVersion?,
+    val speech: SpeechResult? = null,
+    val analysis: MediaAnalysis? = null
 ) {
     /** True only for `complete`; [ProcessingStatus.UNKNOWN] is never complete. */
     val isComplete: Boolean

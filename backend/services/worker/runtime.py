@@ -118,7 +118,9 @@ class Worker:
                 return
             await self.faults.checkpoint(Checkpoint.BEFORE_PUBLISH, job)
             try:
-                published = await publish_stage(self.queue, job, result)
+                published = await publish_stage(
+                    self.queue, job, result, successors=context.successors
+                )
                 if published is None:
                     await self.queue.cancel(lease)
                     logger.info("Job %s cancelled during stage %s", job.id, job.key.stage)

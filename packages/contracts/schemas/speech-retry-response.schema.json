@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend SpeechRetryResponse.",
+  "title": "Speech retry response",
+  "description": "The outcome recorded once per Idempotency-Key. No queue, provider or quota-account identifiers are exposed; read the investigation for speech and analysis progress.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version", "investigation_id", "outcome"],
+  "properties": {
+    "protocol_version": { "const": 1 },
+    "investigation_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "outcome": {
+      "description": "accepted: missing speech is queued after a fresh quota reservation. quota_exhausted: quota is still exhausted; partial results stay unchanged and no provider call is made. already_complete: speech already succeeded. in_progress: speech is already queued or running. not_eligible: nothing quota-blocked can be retried (no audio, another failure, an uncertain provider outcome, changed provider settings, a missing or changed source or prepared audio, or cancelled or deleted work).",
+      "type": "string",
+      "enum": ["accepted", "quota_exhausted", "not_eligible", "already_complete", "in_progress"]
+    }
+  }
+}

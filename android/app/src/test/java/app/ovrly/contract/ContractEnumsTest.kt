@@ -35,6 +35,18 @@ class ContractEnumsTest {
     }
 
     private val enums: List<Registered<*>> = listOf(
+        Registered("analysis_status", AnalysisStatus.entries, { it.wireName }) {
+            AnalysisStatus.fromWire(it)
+        },
+        Registered("speech_status", SpeechStatus.entries, { it.wireName }) {
+            SpeechStatus.fromWire(it)
+        },
+        Registered("speech_reason", SpeechReason.entries, { it.wireName }) {
+            SpeechReason.fromWire(it)
+        },
+        Registered("asr_provider", ASRProvider.entries, { it.wireName }) {
+            ASRProvider.fromWire(it)
+        },
         Registered("job_state", JobState.entries, { it.wireName }) { JobState.fromWire(it) },
         Registered("retry_class", RetryClass.entries, { it.wireName }) { RetryClass.fromWire(it) },
         Registered("investigation_state", InvestigationState.entries, { it.wireName }) {
@@ -46,6 +58,15 @@ class ContractEnumsTest {
         },
         Registered("coverage_status", CoverageStatus.entries, { it.wireName }) {
             CoverageStatus.fromWire(it)
+        },
+        Registered("media_speech_status", MediaSpeechStatus.entries, { it.wireName }) {
+            MediaSpeechStatus.fromWire(it)
+        },
+        Registered("media_text_status", MediaTextStatus.entries, { it.wireName }) {
+            MediaTextStatus.fromWire(it)
+        },
+        Registered("speech_unavailable_reason", SpeechUnavailableReason.entries, { it.wireName }) {
+            SpeechUnavailableReason.fromWire(it)
         },
         Registered("upload_state", UploadState.entries, { it.wireName }) {
             UploadState.fromWire(it)
@@ -89,6 +110,10 @@ class ContractEnumsTest {
     private val mirrors = listOf(
         Mirror(Investigation.serializer().descriptor, INVESTIGATION),
         Mirror(Coverage.serializer().descriptor, INVESTIGATION, "coverage"),
+        Mirror(MediaCoverage.serializer().descriptor, INVESTIGATION, "media_coverage"),
+        Mirror(SpeechResult.serializer().descriptor, "speech.schema.json"),
+        Mirror(MediaAnalysis.serializer().descriptor, "analysis.schema.json"),
+        Mirror(AnalysisGap.serializer().descriptor, "analysis.schema.json", "gap"),
         Mirror(InvestigationError.serializer().descriptor, INVESTIGATION, "safe_error"),
         Mirror(InvestigationSource.Url.serializer().descriptor, INVESTIGATION, "url_source", KIND),
         Mirror(
@@ -380,6 +405,8 @@ class ContractEnumsTest {
         /**
          * Schemas with no model of their own: definitions, `$ref` wrappers, the voice slice and
          * the BE-04 part 3 job action receipts (#75), whose Android models are a #62 follow-up.
+         * Upload-text v1 is an approved backend-only handoff; its Android sender is separate.
+         * Speech retry is a backend action; its Android caller is separate (BE-07 #20).
          */
         val UNMIRRORED_SCHEMAS = setOf(
             "enums.schema.json",
@@ -389,7 +416,10 @@ class ContractEnumsTest {
             "voice-action-response.schema.json",
             "job-action-request.schema.json",
             "job-cancel-response.schema.json",
-            "job-delete-response.schema.json"
+            "job-delete-response.schema.json",
+            "device-text.schema.json",
+            "speech-retry-request.schema.json",
+            "speech-retry-response.schema.json"
         )
     }
 }

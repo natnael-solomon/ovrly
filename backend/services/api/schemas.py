@@ -93,6 +93,8 @@ class InvestigationResponse(BaseModel):
     source: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    speech: "SpeechResult | None" = None
+    analysis: "AnalysisRead | None" = None
 
 
 # Read models for the BE-03 (#15) contract: report versions, claims, evidence, assessments
@@ -114,6 +116,19 @@ Stage = Literal[
     "publication",
 ]
 CoverageStatus = Literal["not_started", "partial", "complete"]
+MediaSpeechStatus = Literal["pending", "unavailable"]
+MediaTextStatus = Literal["pending"]
+SpeechUnavailableReason = Literal["no_audio_track"]
+SpeechStatus = Literal["pending", "running", "completed", "unavailable"]
+SpeechReason = Literal[
+    "disabled",
+    "no_audio_track",
+    "quota_exhausted",
+    "unknown_outcome",
+    "provider_unavailable",
+    "cancelled",
+]
+ASRProvider = Literal["groq"]
 Timebase = Literal["capture", "media"]
 Modality = Literal["speech", "text", "both"]
 Relation = Literal["support", "challenge", "qualify", "mixed", "insufficient"]
@@ -136,12 +151,21 @@ RetractionStatus = Literal["none", "corrected", "retracted", "withdrawn", "unkno
 CorrectionAttribution = Literal["user", "pipeline"]
 
 
+class MediaCoverage(BaseModel):
+    has_audio: bool
+    has_video: bool
+    speech_status: MediaSpeechStatus
+    text_status: MediaTextStatus
+    speech_unavailable_reason: SpeechUnavailableReason | None
+
+
 class Coverage(BaseModel):
     """What share of the eligible media has been checked; never a truth verdict."""
 
     status: CoverageStatus
     covered_ms: int | None = None
     total_ms: int | None = None
+    media: MediaCoverage | None = None
 
 
 class Interval(BaseModel):
@@ -150,6 +174,73 @@ class Interval(BaseModel):
     start_ms: int = Field(ge=0)
     end_ms: int = Field(gt=0)
     timebase: Timebase
+
+
+class SpeechSegment(BaseModel):
+    text: str
+    interval: Interval
+
+
+class SpeechResult(BaseModel):
+    status: SpeechStatus
+    reason: SpeechReason | None = None
+    provider: ASRProvider | None = None
+    model: str | None = None
+    processing_version: int | None = None
+    source_sha256: str | None = None
+    audio_sha256: str | None = None
+    settings_sha256: str | None = None
+    segments: list[SpeechSegment] = Field(default_factory=list)
+
+
+AnalysisStatus = Literal["pending", "partial", "no_usable", "complete"]
+AnalysisModality = Literal["speech", "text"]
+
+
+class AnalysisGap(BaseModel):
+    modality: AnalysisModality
+    reason: Literal[
+        "NO_AUDIO_TRACK",
+        "ASR_QUOTA_EXHAUSTED",
+        "ASR_OUTCOME_UNKNOWN",
+        "ASR_DISABLED",
+        "ASR_UNAVAILABLE",
+        "DEVICE_TEXT_MISSING",
+        "DEVICE_TEXT_INCOMPLETE",
+        "DEVICE_TEXT_FRAME_FAILED",
+        "CAPTURE_CHUNK_MISSING",
+        "CAPTURE_CHUNK_INVALID",
+    ]
+    interval: Interval | None
+
+
+class AnalysisRead(BaseModel):
+    """Extraction only. Sampled frames never assert coverage between those frames."""
+
+    status: AnalysisStatus
+    text_deadline: datetime | None
+    text_expired: bool
+    analyzed_modalities: list[AnalysisModality]
+    pending_modalities: list[AnalysisModality]
+    unavailable_modalities: list[AnalysisModality]
+    gaps: list[AnalysisGap]
+    text: dict[str, Any] | None
+    captions: list[SpeechSegment]
+
+
+class SpeechRetryRequest(StrictModel):
+    protocol_version: Literal[1]
+
+
+SpeechRetryOutcome = Literal[
+    "accepted", "quota_exhausted", "not_eligible", "already_complete", "in_progress"
+]
+
+
+class SpeechRetryResponse(BaseModel):
+    protocol_version: Literal[1] = 1
+    investigation_id: uuid.UUID
+    outcome: SpeechRetryOutcome
 
 
 class ClaimCorrection(BaseModel):

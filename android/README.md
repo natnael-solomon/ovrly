@@ -51,6 +51,11 @@ require JDK 21, the SDK, uv and network access. See [shared checks](../WORKFLOW.
 
 ## Contract models and fixtures
 
+Uploaded-media read models also preserve optional `coverage.media` preparation
+facts and separate timed `speech`, including source/audio/settings provenance.
+Unknown media/speech enum values map to `UNKNOWN`; malformed known fields are
+rejected. This is read-side compatibility, not completed-upload OCR or submission.
+
 `app.ovrly.contract` holds the typed models and the production parsers for the
 shared schemas in [`packages/contracts`](../packages/contracts/README.md): the
 voice-actions slice (`POST /v1/voice/actions`, BE-13 / #67) and, from the #15

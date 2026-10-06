@@ -165,4 +165,19 @@ def safe_error(error_code: str | None) -> dict[str, Any] | None:
     """Translate a stored error code into the client-safe error object, or ``None``."""
     if error_code is None:
         return None
+    media_errors = {
+        "ASR_QUOTA_EXHAUSTED": (
+            "Speech quota is exhausted; automatic attempts have stopped",
+            False,
+        ),
+        "ASR_UNAVAILABLE": ("Speech transcription is unavailable", False),
+        "INVALID_MEDIA": ("The uploaded media could not be processed", False),
+        "MEDIA_SIZE_LIMIT_EXCEEDED": ("The media exceeds the permitted size", False),
+        "DURATION_LIMIT_EXCEEDED": ("The media exceeds the permitted duration", False),
+        "MEDIA_PROCESSING_TIMEOUT": ("Media processing exceeded its time limit", True),
+        "MEDIA_PROCESSING_UNAVAILABLE": ("Media processing is temporarily unavailable", True),
+    }
+    if error_code in media_errors:
+        message, retryable = media_errors[error_code]
+        return {"code": error_code, "message": message, "retryable": retryable}
     return {"code": error_code, "message": "Processing failed", "retryable": False}

@@ -1,0 +1,55 @@
+{
+  "synthetic": true,
+  "description": "Invented completed-upload handoff; not device-origin or end-to-end evidence.",
+  "batch": {
+    "protocol_version": 1,
+    "upload_id": "00000000-0000-4000-8000-000000000701",
+    "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "timebase": "media",
+    "rotation_degrees": 0,
+    "box_space": "normalized_10000",
+    "recognizer": {"name": "mlkit-text-recognition-latin-bundled", "version": "16.0.1"},
+    "sampling": {
+      "policy": "change_triggered",
+      "probe_interval_ms": 1000,
+      "thumbnail_edge": 64,
+      "change_threshold": 12,
+      "heartbeat_ms": 5000,
+      "max_frames_per_minute": 20,
+      "frame_long_edge": 720
+    },
+    "frames": [
+      {
+        "frame_pts": 250,
+        "status": "recognized",
+        "regions": 1,
+        "recognition_ms": 12,
+        "failed_regions": 0,
+        "text_observations": [
+          {
+            "id": "00000000-0000-4000-8000-000000000702",
+            "text": "Invented screen text",
+            "box": [100, 200, 9000, 8000],
+            "frame_pts": 250
+          }
+        ]
+      },
+      {
+        "frame_pts": 500,
+        "status": "recognized",
+        "regions": 1,
+        "recognition_ms": 12,
+        "failed_regions": 0,
+        "text_observations": []
+      },
+      {
+        "frame_pts": 750,
+        "status": "failed",
+        "regions": 1,
+        "recognition_ms": 5000,
+        "failed_regions": 1,
+        "text_observations": []
+      }
+    ]
+  }
+}

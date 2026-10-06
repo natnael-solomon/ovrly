@@ -1,4 +1,5 @@
 import logging
+from datetime import date
 from pathlib import Path
 from typing import Self
 
@@ -26,6 +27,28 @@ class Settings(BaseSettings):
     upload_target_seconds: int = Field(default=900, gt=0, le=86400)
     max_shared_duration_seconds: int = Field(default=600, gt=0)
     storage_dir: Path = Path(".data/uploads")
+    artifacts_dir: Path = Path(".data/artifacts")
+    ffprobe_path: str = Field(default="ffprobe", min_length=1)
+    ffmpeg_path: str = Field(default="ffmpeg", min_length=1)
+    media_probe_timeout_seconds: float = Field(default=10, gt=0, le=60)
+    media_extract_timeout_seconds: float = Field(default=120, gt=0, le=600)
+    media_cpu_seconds: int = Field(default=60, gt=0, le=300)
+    media_output_max_bytes: int = Field(default=65536, gt=0, le=1048576)
+    # Provisional decimal-byte cap, not evidence of a provider account's entitlement.
+    asr_audio_max_bytes: int = Field(default=25000000, gt=44)
+    asr_enabled: bool = False
+    text_grace_seconds: int = Field(default=60, ge=0, le=3600)
+    groq_api_key: SecretStr = SecretStr("")
+    groq_model: str = Field(default="", max_length=128)
+    groq_account_id: str = Field(default="", max_length=128)
+    asr_limits_verified_on: date | None = None
+    asr_requests_per_minute: int | None = Field(default=None, gt=0)
+    asr_requests_per_day: int | None = Field(default=None, gt=0)
+    asr_audio_seconds_per_hour: int | None = Field(default=None, gt=0)
+    asr_audio_seconds_per_day: int | None = Field(default=None, gt=0)
+    asr_minimum_billable_seconds: int | None = Field(default=None, gt=0)
+    asr_response_max_bytes: int = Field(default=1048576, gt=0, le=4194304)
+    asr_timeout_seconds: float = Field(default=120, gt=0, le=600)
     job_retry_transient_attempts: int = Field(default=5, ge=0, le=20)
     job_retry_rate_limited_attempts: int = Field(default=5, ge=0, le=20)
     job_retry_schema_repair_attempts: int = Field(default=2, ge=0, le=10)
@@ -80,6 +103,23 @@ class Settings(BaseSettings):
             raise ValueError("job_retry_max_backoff_seconds must be at least the base backoff")
         if self.quotas_enabled and self.quota_provider_reserve >= self.scholarxiv_requests_per_hour:
             raise ValueError("quota_provider_reserve must be below scholarxiv_requests_per_hour")
+        return self
+
+    @model_validator(mode="after")
+    def hosted_speech_configuration(self) -> Self:
+        if self.asr_enabled and (
+            not self.groq_api_key.get_secret_value().strip()
+            or not self.groq_model.strip()
+            or not self.groq_account_id.strip()
+            or self.asr_limits_verified_on is None
+            or self.asr_requests_per_minute is None
+            or self.asr_requests_per_day is None
+            or self.asr_audio_seconds_per_hour is None
+            or self.asr_audio_seconds_per_day is None
+            or self.asr_minimum_billable_seconds is None
+            or "asr_audio_max_bytes" not in self.model_fields_set
+        ):
+            raise ValueError("Hosted speech requires explicit verified account/model limits")
         return self
 
     @field_validator("database_url")

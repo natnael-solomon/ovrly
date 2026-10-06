@@ -23,6 +23,9 @@ class UploadStore(Protocol):
 
     async def delete(self, key: str) -> None: ...
 
+    async def local_path(self, key: str) -> Path:
+        """Resolve local input; future object stores must materialize an owned copy."""
+
 
 def _check_key(key: str) -> str:
     if not _KEY.fullmatch(key):
@@ -62,6 +65,9 @@ class LocalFilesystemStore:
 
     async def delete(self, key: str) -> None:
         await asyncio.to_thread(self._path(key).unlink, missing_ok=True)
+
+    async def local_path(self, key: str) -> Path:
+        return self._path(key).resolve()
 
 
 def _digest_file(path: Path) -> tuple[int, str] | None:

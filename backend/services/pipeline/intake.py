@@ -1,17 +1,16 @@
 """The ``intake`` stage: the first job every recorded investigation is handed to.
 
 The stage key is derived from the investigation id, so one investigation can have at most
-one intake job however often the creating request is replayed. The handler does no media
-processing yet (BE-07, #20): it checks that the investigation still exists and belongs to
-the owner recorded in the payload, confirms the ``queued`` state at stage ``intake`` with the
-coverage placeholder, and publishes a result row under the stage key.
+one intake job however often the creating request is replayed. The handler checks the
+owned investigation and defers upload-backed media validation until fenced publication.
+It never resets progress on the investigation; URL references remain intake-only.
 """
 
 import hashlib
 import uuid
 from typing import Any, Final
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select
 
 from services.jobs.handlers import JobContext
 from services.jobs.queue import ClaimedJob, StageKey
@@ -46,7 +45,7 @@ async def intake_stage(job: ClaimedJob, context: JobContext) -> dict[str, Any]:
     async with context.queue.database.engine.begin() as connection:
         owned = (
             await connection.execute(
-                select(investigations.c.id)
+                select(investigations.c.id, investigations.c.source_kind)
                 .where(
                     investigations.c.id == investigation_id,
                     investigations.c.owner_id == owner_id,
@@ -56,11 +55,12 @@ async def intake_stage(job: ClaimedJob, context: JobContext) -> dict[str, Any]:
         ).first()
         if owned is None:
             raise NonRetriableInput("investigation is missing or not owned by the job owner")
-        await connection.execute(
-            update(investigations)
-            .where(investigations.c.id == investigation_id)
-            .values(state=INITIAL_STATE, stage=INTAKE_STAGE, updated_at=func.now())
-        )
+        if owned.source_kind == "upload":
+            from services.pipeline.media_validation import media_stage_key
+
+            context.enqueue_after_publish(
+                media_stage_key(investigation_id), intake_payload(investigation_id, owner_id)
+            )
     return {
         "investigation_id": str(investigation_id),
         "stage": INTAKE_STAGE,

@@ -1,5 +1,14 @@
 # Contracts
 
+Investigation `analysis` is optional extraction progress, separate from report
+`processing_status`: `pending`, `partial`, `no_usable`, or `complete`. See
+`analysis.schema.json`. Partial analysis can contain usable device text even when
+speech quota is exhausted. `text_deadline` is a persisted, configurable grace
+deadline (default 60 seconds); `text_expired` records resolution without completion.
+Late text may enrich eligible input without redoing speech. Empty OCR, missing
+delivery and frame failures remain distinct; sampled text never proves continuous
+coverage. No analysis state implies claim reconciliation, research or a report.
+
 **Version `0.2.0-draft` (pre-1.0).** Shared JSON Schema definitions and synthetic
 fixtures that the Android client and the backend build from. This package was
 started by BE-13 ([#67](https://github.com/natnael-solomon/ovrly/issues/67)) with
@@ -54,6 +63,9 @@ round-trip check reports whole-file diffs).
 | `upload-complete-request.schema.json` | No body (empty object) | `POST /v1/uploads/{id}/complete`. |
 | `investigation-create-request.schema.json` | `InvestigationCreateRequest`; `UrlSource` or `UploadSource` discriminated on `kind` | `POST /v1/investigations` body. |
 | `investigation.schema.json` | `InvestigationReadModel` (`InvestigationResponse` plus `processing_status`, `job`, `report`) | `POST /v1/investigations` 202, `GET /v1/investigations[/{id}]`; the six result fixtures. |
+| `speech.schema.json` | `SpeechResult`, `SpeechSegment` | Optional `investigation.speech`, independently readable from media coverage. |
+| `analysis.schema.json` | `AnalysisRead` | Optional `investigation.analysis` extraction progress, gaps and deadlines. |
+| `speech-retry-request.schema.json`, `speech-retry-response.schema.json` | `SpeechRetryRequest`, `SpeechRetryResponse` | `POST /v1/investigations/{id}/speech/retry`; the outcome is recorded once per Idempotency-Key. |
 | `job.schema.json` | `JobSummary` (client-visible columns of `jobs`) | Nested in an investigation; voice `job` targets. |
 | `report-version.schema.json` | `ReportVersion` | Nested in an investigation; `GET /v1/investigations/{id}/reports/{version}` and the `report` snapshot of the inline `SavedReport` component (BE-10, #33). The optional `fixture` boolean (absent reads as false; the server always sends it) is true only for development stub versions (`OVRLY_STUB_REPORTS`), which clients label as a fixture, never as live results; the Android `ReportVersion` mirrors it with a default of false. |
 | `claim.schema.json` | `Claim`, `ClaimCorrection` | Items of `report.claims`. |
@@ -67,14 +79,80 @@ round-trip check reports whole-file diffs).
 | `job-delete-response.schema.json` | `DeleteResponse` in `services/api/routes/jobs.py` | `DELETE /v1/jobs/{job_id}` 200. |
 
 "Mirrors" names the Pydantic class in `backend/services/api/schemas.py`. The
-request models and `InvestigationResponse`, `UploadResponse` existed before this
-revision and are unchanged; `Coverage`, `Interval`, `Claim`, `ClaimCorrection`,
+request models, `InvestigationResponse` and `UploadResponse` predate the core
+read-model contract; `InvestigationResponse` now adds optional timed `speech`.
+`Coverage`, `Interval`, `Claim`, `ClaimCorrection`,
 `EvidenceSource`, `Evidence`, `EvidenceRelation`, `Assessment`, `ReportVersion`,
 `JobSummary` and `InvestigationReadModel` are read models. Since BE-10 (#33)
 `POST /v1/investigations` (202), `GET /v1/investigations/{id}` and the list items
 return `InvestigationReadModel`, so `processing_status`, `job` and `report` are
 always present, as the schema requires; `backend/tests/test_investigation_read_model.py`
 validates the live responses in each status against `investigation.schema.json`.
+
+### Completed-upload device text (backend-only v1)
+
+This upload-specific handoff reuses
+Android `CaptureText.kt`'s frame fields and normalized boxes, **not** its
+capture chunk transport. Android completed-upload sending and physical-device
+end-to-end verification are separate follow-up work. The committed
+`fixtures/device-text/synthetic.json` is invented backend test input, not
+device-origin evidence.
+
+`device-text.schema.json` defines `TextBatch`, `TextCompletion` and
+`DeviceTextRead`; `python device_text.py` checks generated-schema drift.
+Authenticated routes for a validated, owned **video** upload:
+
+- `PUT /v1/investigations/{id}/device-text/batches/{batch_id}` stores a batch.
+- `POST /v1/investigations/{id}/device-text/complete` seals delivery.
+- `GET /v1/investigations/{id}/device-text` reads the separate text model.
+
+Every request identifies `protocol_version: 1`, `upload_id`, `source_sha256`,
+`timebase: media`, `rotation_degrees: 0`, `box_space: normalized_10000`.
+The sender must apply media rotation before normalizing full-frame boxes
+`[left, top, right, bottom]` to integers 0..10000. Crops are translated back
+to that full upright frame. No image is sent. `frame_pts` is an integer
+original-media timestamp in milliseconds, `0 <= frame_pts < validated duration`;
+an observation's timestamp must equal its containing frame.
+
+Frames retain `regions`, `recognition_ms`, `failed_regions` and
+`text_observations` (`id`, original `text`, `box`, `frame_pts`):
+`recognized` requires at least one successful region and may contain zero text;
+that is checked-empty, not missing work. Partial region failures remain explicit.
+`failed` means every region failed and has no observations.
+`no_text_regions` means the producer's heuristic found zero regions, **not**
+successful full-frame OCR. Optional recognizer name/version and the existing
+`change_triggered` sampling facts are retained and must agree across submissions.
+
+Batch IDs are 0..63 and may arrive out of order. Frame timestamps and observation
+UUIDs are unique within an investigation; reuse in another batch conflicts.
+Identical parsed-content replay returns the current snapshot without duplication;
+changed content under an identity is 409. JSON ordering/whitespace and omitted
+optional null metadata do not change identity; observation text is never trimmed.
+Duplicate JSON keys, coerced scalars and unknown fields are rejected.
+
+Completion names `batch_count` and requires exactly batches `0..batch_count-1`.
+Zero batches is valid. It retains explicit `dropped_frames`, `capped_frames`
+and `unfinished_frames`; counters are bounded nonnegative integers, reported
+facts rather than independently measured telemetry. Completion is immutable;
+existing batch replays remain safe, new batches conflict. A completed delivery
+does not establish successful OCR, continuous coverage, or completed research.
+Missing completion remains `receiving`; no submission is `not_started`.
+
+Limits: 262144 request bytes (also enforced on chunked bodies), 100 frames/batch,
+100 observations/frame, 4096 characters/text; per source 64 batches, 1200 frames,
+5000 observations and 2097152 canonical JSON batch bytes. Source-level limits and
+identity changes are atomic. Source/identity/lifecycle conflicts return safe 409,
+payload budgets 413, media type 415, and malformed fields/timestamps 422.
+
+The read model's `job_id` is an owner-scoped cancellation/deletion fence
+(`upload_device_text`), deliberately unclaimed until later aggregation work.
+Completion does not publish a research-stage result. Cancellation preserves prior
+readable text but blocks all subsequent submissions. Deleting the text job,
+intake, validated-media or uploaded-speech prerequisite clears text content and
+leaves an investigation-scoped fence, even before the first submission. Purging
+the prerequisite's job tombstone cannot reopen ingestion or completion. Guest retention
+cascades it with the investigation. Text stays separate from speech/captions;
+no server OCR, provider call, 60-second timer or aggregation is added here.
 
 ### Investigation read model
 
@@ -98,6 +176,48 @@ report-level verdict anywhere in the contract (decision record 0001): an
 `overall_assessment` belongs to one claim, `insufficient_evidence` describes the
 evidence, and an empty `claims` array means no assessable factual claim was
 found, not that the video is accurate.
+
+After upload-backed media validation, optional `coverage.media` records
+`has_audio`, `has_video`, `speech_status`, `text_status`, and nullable
+`speech_unavailable_reason`. Its enum definitions are centralized alongside the
+other vocabularies. Video without audio reports speech `unavailable` with
+`no_audio_track`; text remains `pending`. Audio-bearing media reports speech
+`pending`, including silent audio tracks. Preparation keeps coverage
+`not_started`; measured `total_ms` is not assessed coverage. Absent or null
+`media` preserves compatibility with pre-validation payloads. Android's
+investigation parser is still pending #62 part 2; the server tests do not
+establish client integration.
+
+Optional `speech` is null before speech eligibility is known, or contains
+`status`, nullable `reason`, `provider`, `model`, `processing_version`,
+source/audio/settings SHA-256 digests, and `segments` (`text` plus a half-open
+millisecond `interval`). It does not replace preparation coverage, supplied
+captions or device text. Completed empty segments mean no recognized speech;
+they do not mean absent audio or no claims. No-audio and disabled processing
+report `unavailable` with separate reasons. Provider request/account identifiers,
+request markers and storage paths are never exposed.
+
+The server currently implements Groq-only uploaded speech, disabled by default.
+`ASR_QUOTA_EXHAUSTED` stops automatic attempts; `ASR_UNAVAILABLE` includes an
+explicit `unknown_outcome` reason for interrupted calls that cannot be
+reconciled. Neither a quota reset nor polling retries old speech. Successful
+speech leaves investigation state queued for later analysis; media coverage
+remains the original preparation facts. Partial analysis is described at the
+top of this file and owner retry in the schema index; Android speech parsing is
+later work.
+See [hosted speech configuration](../../backend/README.md#hosted-uploaded-speech-disabled-by-default).
+
+For a capture-source investigation, `speech` concatenates the published
+chunks' segments on the `capture` timebase (aggregate source/audio digests are
+null because several chunks contribute), and `analysis.text` uses the
+`capture_text` shape: `{"timebase": "capture", "chunks": [...]}`, where each
+chunk carries `seq`, its `interval`, the package `source_sha256`, `sampling`,
+`recognizer` and `frames` from the device-text definitions. Capture text is
+complete on delivery, so `text_deadline` is null. Gaps are per chunk; the
+additional reasons `CAPTURE_CHUNK_MISSING` (an interval the manifest never
+received) and `CAPTURE_CHUNK_INVALID` (a delivered chunk whose package failed
+validation) apply only to captures. The speech retry endpoint also accepts
+capture investigations and re-queues only quota-blocked chunks.
 
 `error` is the stored subset of the shared shape: `code`, `message` and
 `retryable`, by `$ref` into `error.schema.json`. `request_id` is absent because a
@@ -125,7 +245,13 @@ in `backend/services/api/schemas.py`.
 | `job_state` | `queued`, `leased`, `running`, `published`, `cancelled`, `deleted`, `failed` | `services/jobs/states.py JobState` |
 | `retry_class` | `transient`, `rate_limited`, `non_retriable_input`, `invalid_model_schema`, `unknown_outcome` | `services/jobs/retries.py RetryClass` |
 | `investigation_state` | `queued`, `running`, `completed`, `failed`, `cancelled` | `schemas.py InvestigationState` (pre-existing) |
-| `stage` | `intake`, `media_validation`, `asr`, `device_text`, `claim_extraction`, `retrieval`, `assessment`, `reconciliation`, `publication` | Build contract section 4; `intake` confirms shared-media intake and capture `media_validation` verifies stored bytes; codec/media analysis and the remaining stages are future work |
+| `stage` | `intake`, `media_validation`, `asr`, `device_text`, `claim_extraction`, `retrieval`, `assessment`, `reconciliation`, `publication` | Build contract section 4; intake, upload preparation, opt-in speech, bounded upload-text admission, capture byte validation, and configured evidence stages are implemented; claim extraction and text aggregation remain separate work |
+| `media_speech_status` | `pending`, `unavailable` | `MediaSpeechStatus`; preparation eligibility, not a speech result |
+| `media_text_status` | `pending` | `MediaTextStatus`; no frame-processing outcome claimed |
+| `speech_unavailable_reason` | `no_audio_track` | `SpeechUnavailableReason`; not silence within a track |
+| `speech_status` | `pending`, `running`, `completed`, `unavailable` | `SpeechStatus`; separate from preparation/research progress |
+| `speech_reason` | `disabled`, `no_audio_track`, `quota_exhausted`, `unknown_outcome`, `provider_unavailable`, `cancelled` | `SpeechReason`; unavailable speech is not an empty transcript |
+| `asr_provider` | `groq` | `ASRProvider`; no fallback |
 | `processing_status` | `waiting`, `checking`, `partial`, `complete`, `failed`, `cancelled` | Build contract section 3 |
 | `coverage_status` | `not_started`, `partial`, `complete` | `routes/investigations.py COVERAGE_PLACEHOLDER` plus the two pipeline values |
 | `upload_state` | `pending`, `completed` | `schemas.py UploadState` (pre-existing) |
@@ -578,8 +704,8 @@ retroactive product-owner decisions. The new shared intake fixtures cover the
 metadata wrapper and waiting status with a missing tail. Android mirrors the
 schemas and parses those fixtures without networking. A validation-stage result
 is not a research result: `claims: []` plus `claim_extraction_status: not_started`
-does not mean no claims were found. Per-claim pipeline population and actual
-ASR/OCR remain separate work.
+does not mean no claims were found. Per-claim pipeline population, live-provider
+verification and Android completed-upload text sending remain separate work.
 
 `claim_extraction_status` uses the shared `coverage_status` enum. The backend
 currently emits `not_started`; Android accepts `partial`/`complete` and maps

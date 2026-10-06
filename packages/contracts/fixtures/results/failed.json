@@ -16,7 +16,8 @@
     "coverage": {
       "status": "not_started",
       "covered_ms": null,
-      "total_ms": null
+      "total_ms": null,
+      "media": null
     },
     "version": 1,
     "error": {
@@ -30,6 +31,8 @@
     },
     "created_at": "2026-10-04T12:00:00Z",
     "updated_at": "2026-10-04T12:00:08Z",
+    "speech": null,
+    "analysis": null,
     "processing_status": "failed",
     "job": {
       "id": "00000000-0000-4000-8000-000000000103",

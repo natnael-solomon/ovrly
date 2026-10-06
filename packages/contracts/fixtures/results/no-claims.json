@@ -15,7 +15,8 @@
     "coverage": {
       "status": "complete",
       "covered_ms": 58000,
-      "total_ms": 58000
+      "total_ms": 58000,
+      "media": null
     },
     "version": 1,
     "error": null,
@@ -26,6 +27,8 @@
     },
     "created_at": "2026-10-04T12:00:00Z",
     "updated_at": "2026-10-04T12:02:30Z",
+    "speech": null,
+    "analysis": null,
     "processing_status": "complete",
     "job": {
       "id": "00000000-0000-4000-8000-000000000106",

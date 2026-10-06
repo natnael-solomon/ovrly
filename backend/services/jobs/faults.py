@@ -11,12 +11,13 @@ class Checkpoint(StrEnum):
 
     The first three are hit by the worker; the stage-level checkpoints are hit by stage
     handlers through ``JobContext.checkpoint`` once a stage calls a provider or stores an
-    artifact. No production stage exists yet, so tests register stub stages for them.
+    artifact. Speech uses these hooks with HTTP replay; legacy queue tests also use stubs.
     """
 
     CLAIMED = "claimed"
     BEFORE_PUBLISH = "before_publish"
     AFTER_PUBLISH = "after_publish"
+    BEFORE_PROVIDER_CALL = "before_provider_call"
     AFTER_PROVIDER_CALL = "after_provider_call"
     AFTER_ARTIFACT_STORE = "after_artifact_store"
 

@@ -110,6 +110,8 @@ def reanalysis_request_of(stage: str, payload: dict[str, Any] | None) -> uuid.UU
 
 def contract_stage(row: Row[Any]) -> str:
     stage: str = row.stage
+    if stage == "upload_asr":
+        return "asr"
     if stage != REANALYSIS_STAGE:
         return stage
     payload = row.payload or {}

@@ -16,8 +16,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import ColumnElement, Text, and_, case, delete, func, select, update
-from sqlalchemy.dialects.postgresql import array, insert
+from sqlalchemy import ColumnElement, Text, and_, case, delete, func, literal, select, update
+from sqlalchemy.dialects.postgresql import JSONB, array, insert
 from sqlalchemy.engine import Row
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -26,6 +26,7 @@ from services.database import Database
 from services.jobs.models import job_results, jobs
 from services.jobs.retries import RetryClass
 from services.jobs.states import LEASED_STATES, JobState, JobStatus
+from services.models import asr_requests, investigations, upload_text
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +190,9 @@ class JobQueue:
         if not stages:
             return None
         async with self.database.engine.begin() as connection:
+            from services.pipeline.analysis import resolve_due
+
+            await resolve_due(connection)
             await connection.execute(
                 update(jobs)
                 .where(jobs.c.state.in_(_LEASED), jobs.c.lease_expires_at < func.now())
@@ -259,6 +263,10 @@ class JobQueue:
                 .where(self._owned(lease), jobs.c.state.in_(states))
                 .values({"updated_at": func.now(), **values})
             )
+            if result.rowcount == 1 and values.get("state") == JobState.FAILED.value:
+                from services.pipeline.analysis import record_terminal
+
+                await record_terminal(connection, lease.job_id)
         return result.rowcount == 1
 
     async def start(self, lease: Lease) -> bool:
@@ -299,6 +307,7 @@ class JobQueue:
         result: dict[str, Any],
         *,
         connection: AsyncConnection | None = None,
+        successors: Sequence[tuple[StageKey, dict[str, Any]]] = (),
     ) -> PublishedResult:
         """Publish a stage result and mark the job published in one transaction.
 
@@ -319,7 +328,7 @@ class JobQueue:
                             jobs.c.cancel_requested.is_(False),
                         )
                         .values(state=JobState.PUBLISHED.value, **self._cleared())
-                        .returning(jobs.c.version, jobs.c.stage, jobs.c.input_hash)
+                        .returning(jobs.c.version, jobs.c.stage, jobs.c.input_hash, jobs.c.owner_id)
                     )
                 ).first()
                 if row is None:
@@ -335,6 +344,11 @@ class JobQueue:
                         result=result,
                     )
                 )
+                for key, payload in successors:
+                    await self.enqueue(connection, key, payload, owner_id=row.owner_id)
+                from services.pipeline.analysis import record_terminal
+
+                await record_terminal(connection, lease.job_id, result)
                 published = PublishedResult(
                     lease.job_id, _key(row), lease.fencing_token, lease.generation, result
                 )
@@ -403,6 +417,21 @@ class JobQueue:
         """Persist the provider request id before the call so a timeout can reconcile."""
         if not await self._fenced_update(lease, _LEASED, provider_request_id=request_id):
             raise LeaseLost(f"Lease on job {lease.job_id} is no longer current")
+
+    async def lock_active(self, connection: AsyncConnection, lease: Lease) -> None:
+        """Fence stage metadata in the caller's transaction, serialized with cancellation."""
+        active = await connection.scalar(
+            select(jobs.c.id)
+            .where(
+                self._owned(lease),
+                jobs.c.state == JobState.RUNNING.value,
+                jobs.c.cancel_requested.is_(False),
+                jobs.c.lease_expires_at > func.clock_timestamp(),
+            )
+            .with_for_update()
+        )
+        if active is None:
+            raise LeaseLost(f"Lease on job {lease.job_id} is no longer active")
 
     async def find_by_request_id(self, request_id: str) -> JobRecord | None:
         async with self.database.engine.connect() as connection:
@@ -480,6 +509,14 @@ class JobQueue:
         if connection is None:
             async with self.database.engine.begin() as transaction:
                 return await self.delete(job_id, connection=transaction)
+        prerequisite = (
+            await connection.execute(
+                select(jobs.c.owner_id, jobs.c.payload).where(
+                    jobs.c.id == job_id,
+                    jobs.c.stage.in_(["intake", "media_validation", "upload_asr"]),
+                )
+            )
+        ).first()
         result = await connection.execute(
             update(jobs)
             .where(jobs.c.id == job_id, jobs.c.state != JobState.DELETED.value)
@@ -493,6 +530,37 @@ class JobQueue:
         if result.rowcount != 1:
             return False
         await connection.execute(delete(job_results).where(job_results.c.job_id == job_id))
+        await connection.execute(
+            update(asr_requests).where(asr_requests.c.job_id == job_id).values(result=None)
+        )
+        await connection.execute(
+            update(upload_text)
+            .where((upload_text.c.job_id == job_id) | (upload_text.c.media_job_id == job_id))
+            .values(batches=[], completion=None)
+        )
+        if prerequisite is not None:
+            try:
+                identifier = UUID(str(prerequisite.payload.get("investigation_id")))
+            except ValueError:
+                identifier = None
+            if identifier is not None:
+                # A content-free source fence outlives the deleted job's tombstone, even
+                # when no text was submitted yet. Its FK cascades with the investigation.
+                await connection.execute(
+                    insert(upload_text)
+                    .from_select(
+                        ["id", "batches"],
+                        select(investigations.c.id, literal([], type_=JSONB)).where(
+                            investigations.c.id == identifier,
+                            investigations.c.owner_id == prerequisite.owner_id,
+                            investigations.c.source_kind == "upload",
+                        ),
+                    )
+                    .on_conflict_do_update(
+                        index_elements=[upload_text.c.id],
+                        set_={"media_job_id": None, "batches": [], "completion": None},
+                    )
+                )
         return True
 
     async def get(self, job_id: UUID) -> JobRecord | None:
