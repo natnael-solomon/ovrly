@@ -105,25 +105,20 @@ class VoiceController(context: Context, navigator: VoiceNavigator) : AutoCloseab
         override suspend fun refreshChecks() {
             services?.reconciler?.reconcile()
         }
-    }
 
-    private val backend = services?.let { api ->
-        VoiceBackend(VoiceApi(api.api), checkNotNull(targets), confirmations, effects, scope)
+        override suspend fun finished() = this@VoiceController.refreshChecks()
     }
 
     /** Runs a command, then refreshes the `checks` state before the assistant is told. */
-    private val executor = VoiceCommandExecutor { command, done ->
-        val active = backend
-        if (active == null) {
-            VoiceCommandExecutor.UNAVAILABLE.execute(command, done)
-        } else {
-            scope.launch {
-                val outcome = active.run(command)
-                refreshChecks()
-                done(outcome)
-            }
-        }
-    }
+    private val executor: VoiceCommandExecutor = services?.let { api ->
+        VoiceBackend(
+            VoiceApi(api.api),
+            checkNotNull(targets),
+            confirmations,
+            effects,
+            scope
+        )
+    } ?: VoiceCommandExecutor.UNAVAILABLE
 
     init {
         session.commands = VoiceCommands(executor, { checksState }, confirmations::discardAll)

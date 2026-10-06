@@ -9,6 +9,8 @@ import app.ovrly.data.ApiTestServer
 import app.ovrly.data.VoiceApi
 import app.ovrly.data.withServer
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -52,8 +54,9 @@ class VoiceBackendTest {
             VoiceTargets(jobs),
             confirmations,
             effects,
-            scope
-        ) { "voice-req-${ids.incrementAndGet()}" }
+            scope,
+            requestIds = { "voice-req-${ids.incrementAndGet()}" }
+        )
 
     private fun investigation(name: String): Investigation = InvestigationCodec.parseInvestigation(
         ApiTestServer.result(name).investigationPayload()
@@ -237,6 +240,53 @@ class VoiceBackendTest {
         }
         assertEquals(shown.id + 1, next)
     }
+
+    @Test
+    fun aStopBetweenDispatchAndTheCommandRunningStillDiscardsTheConfirmation() =
+        withServer { server ->
+            val queued = ArrayDeque<Runnable>()
+            val held = object : CoroutineDispatcher() {
+                override fun dispatch(context: CoroutineContext, block: Runnable) {
+                    queued.addLast(block)
+                }
+            }
+            val confirmations = VoiceConfirmations(timeoutMillis = 5_000)
+            val order = mutableListOf<String>()
+            val tracked = object : VoiceEffects by effects {
+                override suspend fun finished() {
+                    order += "finished"
+                }
+            }
+            val backend = VoiceBackend(
+                VoiceApi(server.api),
+                VoiceTargets(server.jobs),
+                confirmations,
+                tracked,
+                CoroutineScope(held)
+            )
+            var outcome: VoiceCommandOutcome? = null
+            val cancel = VoiceCommand(VoiceCommandAction.QUEUE_CANCEL, "job_synthetic_1")
+            backend.execute(cancel) {
+                order += "done"
+                outcome = it
+            }
+            // Voice stops on the main thread before the background side starts the command.
+            confirmations.discardAll()
+            while (queued.isNotEmpty()) queued.removeFirst().run()
+            assertEquals(VoiceBackend.CONFIRMATION_DECLINED, outcome?.code)
+            assertEquals(listOf("finished", "done"), order)
+            assertNull(confirmations.pending.value)
+            assertEquals(0, server.server.requestCount)
+            // No dialog was ever shown: the next one is the first.
+            val first = runBlocking {
+                val run = scope.async { confirmations.confirm(cancel.action, cancel.target) }
+                val pending = withTimeout(5_000) { confirmations.pending.filterNotNull().first() }
+                confirmations.answer(pending.id, false)
+                run.await()
+                pending.id
+            }
+            assertEquals(1L, first)
+        }
 
     @Test
     fun theSharedFixturesUseExactlyTheClientAllowlist() {

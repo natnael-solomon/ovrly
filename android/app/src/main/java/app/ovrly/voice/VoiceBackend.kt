@@ -186,6 +186,9 @@ internal interface VoiceEffects {
 
     /** Brings stored checks in line with the server after a queue action. */
     suspend fun refreshChecks()
+
+    /** Runs after every command, before its outcome is reported. */
+    suspend fun finished() = Unit
 }
 
 /**
@@ -202,19 +205,26 @@ internal class VoiceBackend(
     private val scope: CoroutineScope,
     private val requestIds: () -> String = { "voice-${UUID.randomUUID()}" }
 ) : VoiceCommandExecutor {
+    /**
+     * Reads the discard epoch on the caller's thread before switching to [scope], so a stop
+     * that lands before the command starts running still discards its confirmation.
+     */
     override fun execute(command: VoiceCommand, done: (VoiceCommandOutcome) -> Unit) {
-        scope.launch { done(run(command)) }
+        val epoch = confirmations.epoch
+        scope.launch {
+            val outcome = run(command, epoch)
+            effects.finished()
+            done(outcome)
+        }
     }
 
-    suspend fun run(command: VoiceCommand): VoiceCommandOutcome {
-        val epoch = confirmations.epoch
-        return when (val resolved = targets.resolve(command)) {
+    suspend fun run(command: VoiceCommand, epoch: Long = confirmations.epoch): VoiceCommandOutcome =
+        when (val resolved = targets.resolve(command)) {
             is VoiceTargets.Resolution.Missing ->
                 VoiceCommandOutcome(false, resolved.message, NO_TARGET)
 
             is VoiceTargets.Resolution.Target -> confirmed(command.action, resolved.id, epoch)
         }
-    }
 
     private suspend fun confirmed(command: VoiceCommandAction, target: String, epoch: Long) =
         if (command.requiresConfirmation && !confirmations.confirm(command, target, epoch)) {
