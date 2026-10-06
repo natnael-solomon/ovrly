@@ -178,7 +178,7 @@ class CaptureFiles internal constructor(private val root: File, private val cont
             upload = UploadProgress.of(
                 restored,
                 ledger,
-                CaptureApis.current.isTestServer,
+                CaptureApis.isTestServer,
                 wifiOnly = context?.let(CapturePreferences::wifiOnly) == true
             )
         )

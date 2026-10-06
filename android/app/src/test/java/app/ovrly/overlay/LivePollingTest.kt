@@ -46,6 +46,27 @@ class LivePollingTest {
         override suspend fun investigation(investigationId: String) = investigation
     }
 
+    @Test fun aFixtureReportIsLabelledAndARealOneIsNot() = runBlocking {
+        val report = requireNotNull(investigation.report).copy(fixture = true)
+        val stub = investigation.copy(report = report)
+        val labelled = PollingLiveResultsSource(
+            FakeFetcher(stub, listOf(closed(false))),
+            sleep = {}
+        )
+        assertEquals(null, labelled.label)
+        labelled.poll(LiveResultsFixture.session.id)
+        assertEquals("Fixture / not live", labelled.label)
+        assertEquals(FixtureLiveResultsSource.LABEL, labelled.label)
+
+        val real = PollingLiveResultsSource(
+            FakeFetcher(investigation, listOf(closed(false))),
+            sleep = {}
+        )
+        real.poll(LiveResultsFixture.session.id)
+        assertFalse(requireNotNull(investigation.report).fixture)
+        assertEquals(null, real.label)
+    }
+
     @Test fun backoffDoublesAfterFailuresAndIsCapped() {
         val policy = LivePollPolicy()
         assertEquals(

@@ -10,6 +10,18 @@
   content-free operator quota summary. Proposed limits remain disabled by default;
   owner approval and Groq/Voxide/claim-stage integration remain pending.
 
+- Live capture wiring (#31): capture chunks now go to the backend. `data/CaptureApi.kt`
+  sends `/v1/captures` create (with `Idempotency-Key`), multipart chunk `PUT`, close with
+  `continue_research` and status through the AN-03 API client and guest credential, and
+  `ServerCaptureSessionApi` maps its failures to retry or keep-on-device. The overlay's live
+  results panel polls the capture status and investigation once the server session exists,
+  and capture investigations are stored in the Room store like shares. `captureApi=memory` in
+  `api.local.properties` keeps the labelled in-memory test server for offline demonstrations.
+  The live panel labels stub report versions (`fixture`) as "Fixture / not live". After a
+  user Stop, the companion's capture status reads as one line, for example "Stopped · 16
+  sent · research continues", instead of "Research is not connected".
+  Choosing that research will not continue now stops a running upload before its next chunk.
+
 - Android Inbox and Report screens (AN-08, #34): Your space now shows an Inbox of
   checks with stage and age (never a queue position), Cancel with confirmation,
   Try again and Continue checking, offline and update-needed notes, and a Library
@@ -23,6 +35,19 @@
   later shared video as its full video before an expansion names it. "Try again"
   reuses one stored key per check so a lost answer cannot create a duplicate
   check (Room schema version 2). Unknown contract values read neutrally.
+
+- RES-02b device benchmarks (#103):
+  - The Galaxy A21s measurements cover phone ASR replay (Vosk small-en, whisper.cpp
+    tiny.en/base.en) against the existing Groq baselines, ML Kit against Tesseract
+    on identical image bytes, a replay of the shipped screen-text sampler, and real
+    AN-04 chunk verification.
+  - Decision 0004 accepts RFC-D27: Groq turbo on 10 s chunks, falling back to
+    large-v3, with explicit `ASR_UNAVAILABLE` semantics for #20 and no on-device
+    ASR in the submission. It also records on-device ML Kit and the change trigger.
+  - New tooling: native replay drivers in `evaluation/device-harness/`,
+    `evaluation/device_benchmark.py`, the `evaluation/asr_policy.py` reference
+    policy with local test doubles, and the debug-only `ScreenTextReplayTest`.
+  - The 20-frames-per-minute cap dropping a brief card is tracked in #110.
 
 - On-device screen text for live capture (AN-06, #100): frames are probed once a second and
   kept on a visible change or a 5-second heartbeat, at most 20 per minute; likely text regions

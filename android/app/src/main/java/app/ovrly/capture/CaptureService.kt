@@ -75,7 +75,7 @@ class CaptureService : Service() {
                 sessionLifecycle.stop()
                 stopSelf()
             } else {
-                finish("Capture stopped. Research is not connected.")
+                finish(CaptureState.STOPPED)
             }
             return START_NOT_STICKY
         }
@@ -109,6 +109,7 @@ class CaptureService : Service() {
                 throw SecurityException("Screen capture consent was not granted.")
             }
             val replaced = files.begin()
+            CaptureLive.disconnect()
             val manager = getSystemService(MediaProjectionManager::class.java)
             val projection = manager.getMediaProjection(Activity.RESULT_OK, consent)
                 ?: throw IllegalStateException("The system did not grant a projection.")
@@ -342,7 +343,7 @@ class CaptureService : Service() {
                 UploadProgress.of(
                     it,
                     CaptureLedger(root),
-                    CaptureApis.current.isTestServer,
+                    CaptureApis.isTestServer,
                     wifiOnly = CapturePreferences.wifiOnly(context)
                 )
             }
