@@ -702,18 +702,23 @@ no backend manifest yet, the report says the baseline is unavailable; it does
 not claim the regression check passed. Unknown refs, failing baseline tests,
 missing reports or source without a manifest fail instead of taking that path.
 
-The current `services/worker` tree is held to **90% line coverage**, including
-the standalone entry point. `services/api/auth` now exists and is held to the
-same 90% floor; `services/contracts` keeps a future 90% floor and is shown as
-**not implemented / not evaluated**, not 100%, until #15 lands. Android coverage
-is not part of this denominator and must not be inferred from backend results.
+The `services/worker` tree (including the standalone entry point),
+`services/jobs` job engine and `services/api/auth` each require **90% line
+coverage** independently of the overall regression gate. Each floor aggregates
+covered and executable lines across that module's files, including nested
+packages; it does not average file percentages. Exact counts determine pass or
+fail, so a value below 90% fails even if displayed as 90.00%.
+`services/contracts` retains its future 90% floor and is shown as
+**not implemented / not evaluated**, not 100%, while that service path is absent;
+the shared contract package lives in `packages/contracts`.
 
-Remaining [REPO-04 / #13](https://github.com/natnael-solomon/ovrly/issues/13) work:
-Android unit/instrumented reports and capture/share floors depend on the emulator
-work in #37; auth/contracts/job-engine coverage must be verified on their real
-implementations; a maintainer must add **Backend checks** to the main ruleset
-after the workflow lands and reports successfully. This PR does not change
-protection settings or complete the whole issue.
+These are the backend coverage gates for
+[REPO-04 / #13](https://github.com/natnael-solomon/ovrly/issues/13).
+**Backend checks** is required by the main ruleset. Android unit/instrumented
+coverage, capture/share/contracts floors and reviewed Android exclusions are
+tracked separately in [#76](https://github.com/natnael-solomon/ovrly/issues/76).
+Android coverage is not part of this denominator and must not be inferred from
+backend results.
 
 The cancel/delete API and cross-owner recovery cases implement
 [BE-04 part 3 / #75](https://github.com/natnael-solomon/ovrly/issues/75) under
