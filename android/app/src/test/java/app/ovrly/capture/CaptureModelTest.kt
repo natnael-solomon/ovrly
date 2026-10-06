@@ -1,6 +1,9 @@
 package app.ovrly.capture
 
-import org.junit.Assert.*
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CaptureModelTest {
@@ -56,5 +59,78 @@ class CaptureModelTest {
         val missingIntent = CaptureLifecycle()
         assertTrue(missingIntent.stop())
         assertFalse(missingIntent.begin())
+    }
+
+    @Test fun chunkGridIsTenSecondsAndEndsExactlyAtThreeMinutes() {
+        assertEquals(10_000L, CaptureLimits.CHUNK_MS)
+        assertEquals(0, ChunkGrid.seqAt(0))
+        assertEquals(0, ChunkGrid.seqAt(9_999))
+        assertEquals(1, ChunkGrid.seqAt(10_000))
+        assertEquals(17, ChunkGrid.seqAt(179_999))
+        assertEquals(17, ChunkGrid.seqAt(500_000))
+        assertEquals(0, ChunkGrid.seqAt(-5))
+        assertEquals(17, ChunkGrid.lastSeq)
+        assertEquals(170_000L, ChunkGrid.startOf(17))
+        assertEquals(180_000L, ChunkGrid.endOf(17))
+        (0 until ChunkGrid.lastSeq).forEach {
+            assertEquals(ChunkGrid.endOf(it), ChunkGrid.startOf(it + 1))
+        }
+    }
+
+    @Test fun uploadSummarySaysWhatIsStillOnTheDevice() {
+        assertNull(UploadProgress().summary())
+        assertEquals(
+            "Saved on device, not yet sent: 2 of 3 chunks.",
+            UploadProgress(3, 1, UploadStatus.PENDING).summary()
+        )
+        assertEquals(
+            "Sending to the in-memory test server: 1 of 3 chunks sent.",
+            UploadProgress(3, 1, UploadStatus.SENDING, testServer = true).summary()
+        )
+        assertEquals(
+            "Saved on device, not yet sent: 3 of 3 chunks. Not configured.",
+            UploadProgress(3, 0, UploadStatus.NOT_SENT, detail = "Not configured.").summary()
+        )
+        assertEquals(
+            "Upload closed; research will not continue. 1 of 3 chunks were sent.",
+            UploadProgress(3, 1, UploadStatus.CLOSED, continueResearch = false).summary()
+        )
+        assertEquals(
+            "Saved on device, not yet sent: 2 of 2 chunks. Waiting for Wi-Fi.",
+            UploadProgress(2, 0, UploadStatus.PENDING, wifiOnly = true).summary()
+        )
+        val state = CaptureState(
+            message = "Stopped.",
+            upload = UploadProgress(3, 1, UploadStatus.PENDING)
+        )
+        assertEquals(
+            "Stopped. Saved on device, not yet sent: 2 of 3 chunks.",
+            state.displayMessage
+        )
+    }
+
+    @Test fun continuationChoiceIsAskedOnlyAfterStopWithChunks() {
+        val sent = UploadProgress(2, 2, UploadStatus.SENT)
+        val stopped = CaptureState(
+            phase = CapturePhase.FINISHED,
+            hasLocalCapture = true,
+            upload = sent
+        )
+        assertTrue(stopped.needsContinuationChoice)
+        assertFalse(stopped.copy(phase = CapturePhase.RECORDING).needsContinuationChoice)
+        assertFalse(
+            stopped.copy(upload = sent.copy(continueResearch = true)).needsContinuationChoice
+        )
+        assertFalse(stopped.copy(upload = UploadProgress()).needsContinuationChoice)
+    }
+
+    @Test fun uploadStateIsIgnoredWithoutACapture() {
+        CaptureStore.set(CaptureState())
+        CaptureStore.upload(UploadProgress(1, 0, UploadStatus.PENDING))
+        assertEquals(UploadStatus.NONE, CaptureStore.state.value.upload.status)
+        CaptureStore.set(CaptureState(phase = CapturePhase.RECORDING))
+        CaptureStore.upload(UploadProgress(1, 0, UploadStatus.PENDING))
+        assertEquals(UploadStatus.PENDING, CaptureStore.state.value.upload.status)
+        CaptureStore.set(CaptureState())
     }
 }
