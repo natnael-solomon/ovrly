@@ -49,7 +49,8 @@ object CaptureControl {
                     wifiOnly = CapturePreferences.wifiOnly(app)
                 )
             )
-            CaptureUploads.schedule(app, manifest.sessionId)
+            // Stopping research replaces (cancels) a running upload so it stops mid-chunk.
+            CaptureUploads.schedule(app, manifest.sessionId, replace = !continueResearch)
         }
         return accepted
     }

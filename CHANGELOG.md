@@ -14,6 +14,7 @@
   The live panel labels stub report versions (`fixture`) as "Fixture / not live". After a
   user Stop, the companion's capture status reads as one line, for example "Stopped · 16
   sent · research continues", instead of "Research is not connected".
+  Choosing that research will not continue now stops a running upload before its next chunk.
 
 - Android Inbox and Report screens (AN-08, #34): Your space now shows an Inbox of
   checks with stage and age (never a queue position), Cancel with confirmation,
