@@ -11,7 +11,6 @@ import android.media.AudioManager
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
-import android.view.Display
 import androidx.core.content.ContextCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
@@ -47,10 +46,12 @@ class CaptureServiceTest {
     @get:Rule val consent = ProjectionConsent()
 
     private val context: Context get() = Device.context
+    private var displaysBefore = 0
 
     @Before fun cleanSlate() {
         reset()
         if (Build.VERSION.SDK_INT >= TIRAMISU) grant(Manifest.permission.POST_NOTIFICATIONS)
+        displaysBefore = allCaptureDisplays()
     }
 
     @After fun cleanUp() {
@@ -85,7 +86,6 @@ class CaptureServiceTest {
 
     @Test fun startRecordsAndStopReleasesEverything() {
         startCapture()
-        Device.await("the projection's virtual display") { captureDisplays() == 1 }
         Device.await("the first sealed chunk", CHUNK_WAIT_MS) {
             CaptureStore.state.value.upload.chunks >= 1
         }
@@ -119,7 +119,6 @@ class CaptureServiceTest {
 
     @Test fun projectionStoppedBySystemFinishesAndReleases() {
         startCapture()
-        Device.await("the projection's virtual display") { captureDisplays() == 1 }
 
         // A newer projection makes the system stop the running one, the same callback as the
         // user revoking screen capture from the system UI.
@@ -132,7 +131,16 @@ class CaptureServiceTest {
         try {
             val state = awaitPhase(CapturePhase.FINISHED)
             assertTrue(state.message, state.message.contains("revoked or interrupted"))
-            assertReleased()
+            assertFalse(state.message, state.message.contains("Cleanup issue"))
+            // The takeover projection belongs to this package too, so the projection check is
+            // skipped. On Android 10 (API 29) the platform keeps the display of a projection it
+            // stopped until the owning process dies, and the app's release() can no longer
+            // remove it, so the display check runs from Android 11 (API 30) on. The same release
+            // code is checked strictly on every app-initiated stop path on both API levels.
+            assertReleased(
+                projectionCheck = false,
+                displayCheck = Build.VERSION.SDK_INT >= ANDROID_11
+            )
         } finally {
             InstrumentationRegistry.getInstrumentation().runOnMainSync { other?.stop() }
         }
@@ -154,10 +162,15 @@ class CaptureServiceTest {
 
     private fun startCapture() {
         grant(Manifest.permission.RECORD_AUDIO)
+        displaysBefore = allCaptureDisplays()
         ContextCompat.startForegroundService(context, consent.startIntent(consent.request()))
         awaitPhase(CapturePhase.RECORDING)
         assertTrue("foreground notification", notificationShown())
         assertTrue("service running", serviceRunning())
+        Device.await("the projection's virtual display") {
+            allCaptureDisplays() == displaysBefore + 1
+        }
+        Device.await("the app's projection in dumpsys media_projection") { projectionActive() }
     }
 
     /** Waits for [phase]; an unexpected error ends the wait at once with its message. */
@@ -172,9 +185,22 @@ class CaptureServiceTest {
         return CaptureStore.state.value
     }
 
-    private fun assertReleased() {
+    /**
+     * Every stop path must release what start acquired. [displayCheck] proves the app called
+     * VirtualDisplay.release(): only that removes the display, so the count must return to its
+     * value before start. [projectionCheck] proves MediaProjection.stop(): the platform then no
+     * longer lists a projection for this package.
+     */
+    private fun assertReleased(projectionCheck: Boolean = true, displayCheck: Boolean = true) {
         Device.await("the capture service to stop") { !serviceRunning() }
-        Device.await("the projection's virtual display to be released") { captureDisplays() == 0 }
+        if (displayCheck) {
+            Device.await("VirtualDisplay.release() to remove the display") {
+                allCaptureDisplays() == displaysBefore
+            }
+        }
+        if (projectionCheck) {
+            Device.await("MediaProjection.stop() to end the projection") { !projectionActive() }
+        }
         assertTrue(
             "playback recorder still active",
             context.getSystemService(AudioManager::class.java).activeRecordingConfigurations
@@ -184,16 +210,20 @@ class CaptureServiceTest {
     }
 
     /**
-     * Capture displays that still receive frames. Android 10 keeps a virtual display registered,
-     * stopped and off, after the system stops its projection, and the owner's release() can no
-     * longer remove it; Android 11 and later remove it. Before API 30 only displays that are not
-     * off count, so a stopped display left by an earlier test is not mistaken for a leak.
+     * Capture displays the platform holds. Counts are compared with [displaysBefore], so a
+     * display Android 10 kept from an earlier system-stopped projection is not counted twice.
      */
-    private fun captureDisplays(): Int = context.getSystemService(DisplayManager::class.java)
-        .displays.count {
-            it.name == "ovrly-selected-interval" &&
-                (Build.VERSION.SDK_INT >= ANDROID_11 || it.state != Display.STATE_OFF)
-        }
+    private fun allCaptureDisplays(): Int = context
+        .getSystemService(DisplayManager::class.java).displays
+        .count { it.name == DISPLAY_NAME }
+
+    /**
+     * True while the platform lists a media projection owned by this package; MediaProjection
+     * dumps its owner as `(<package>, uid=<uid>)`. startCapture checks this is true while
+     * recording, so a changed dump format fails instead of passing vacuously.
+     */
+    private fun projectionActive(): Boolean =
+        "(${Device.PACKAGE}, uid=" in Device.shell("dumpsys media_projection")
 
     private fun notificationShown(): Boolean = context
         .getSystemService(NotificationManager::class.java).activeNotifications
@@ -223,6 +253,7 @@ class CaptureServiceTest {
     private companion object {
         const val TIRAMISU = 33
         const val ANDROID_11 = 30
+        const val DISPLAY_NAME = "ovrly-selected-interval"
         const val DENIED = "Capture permission or source access was denied."
         const val NOTIFICATION_ID = 101
         const val CHUNK_WAIT_MS = 25_000L
