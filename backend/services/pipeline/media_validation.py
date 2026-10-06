@@ -223,13 +223,18 @@ async def _prepare(
             raise InvalidMedia("Media could not be probed")
         try:
             data = json.loads(probe.stdout)
-            duration = float(data["format"]["duration"])
+            raw_duration = data.get("format", {}).get("duration")
+            duration = float(raw_duration) if raw_duration is not None else None
             streams = {stream["codec_type"] for stream in data["streams"]}
         except (ValueError, KeyError, TypeError, OverflowError):
             raise InvalidMedia("Invalid media metadata") from None
-        if not math.isfinite(duration) or duration <= 0 or not streams & {"audio", "video"}:
-            raise InvalidMedia("Missing usable duration or streams")
-        if duration > settings.max_shared_duration_seconds:
+        if duration is not None and not math.isfinite(duration):
+            raise InvalidMedia("Invalid media metadata")
+        if not streams & {"audio", "video"}:
+            raise InvalidMedia("Missing usable media streams")
+        if duration is not None and duration <= 0:
+            raise InvalidMedia("Missing usable duration")
+        if duration is not None and duration > settings.max_shared_duration_seconds:
             raise MediaTooLong
         if "video" in streams:
             decoded = await _media_command(
@@ -282,7 +287,7 @@ async def _prepare(
                 raise InvalidMedia("Empty video")
             if video_duration > settings.max_shared_duration_seconds:
                 raise MediaTooLong
-            duration = max(duration, video_duration)
+            duration = max(duration or 0, video_duration)
         audio = None
         if "audio" in streams:
             output = Path(directory) / "audio.wav"
@@ -350,7 +355,9 @@ async def _prepare(
                         settings.max_shared_duration_seconds,
                     )
                 )
-            duration = max(duration, audio["duration_seconds"])
+            duration = max(duration or 0, audio["duration_seconds"])
+        if duration is None or duration <= 0:
+            raise InvalidMedia("Missing usable duration")
         return {
             "coverage": {
                 "status": "not_started",

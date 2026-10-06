@@ -2,7 +2,6 @@ import asyncio
 import hashlib
 import io
 import os
-import struct
 import sys
 import uuid
 import wave
@@ -435,11 +434,29 @@ async def test_silent_video_preserves_pending_text_and_absent_speech(harness, tm
         CommandLimits(10, 5, 65536, 1048576),
     )
     assert generated.returncode == 0, generated.stderr
+    ffprobe_without_format_duration = executable(
+        tmp_path,
+        """
+import json
+import subprocess
+import sys
+
+completed = subprocess.run(["ffprobe", *sys.argv[1:]], capture_output=True, check=False)
+if completed.returncode != 0:
+    sys.stdout.buffer.write(completed.stdout)
+    sys.stderr.buffer.write(completed.stderr)
+    sys.exit(completed.returncode)
+payload = json.loads(completed.stdout)
+payload.get("format", {}).pop("duration", None)
+print(json.dumps(payload))
+""",
+    )
     config = media_settings(
         harness,
         embed_worker=True,
         storage_dir=tmp_path / "uploads",
         artifacts_dir=tmp_path / "artifacts",
+        ffprobe_path=ffprobe_without_format_duration,
     )
     app = create_app(config)
     async with (
@@ -484,15 +501,29 @@ async def test_video_cannot_hide_excess_duration_in_container_metadata(harness, 
         CommandLimits(10, 5, 65536, 1048576),
     )
     assert generated.returncode == 0, generated.stderr
-    original = video.read_bytes()
-    duration_element = b"\x44\x89\x88" + struct.pack(">d", 3000)
-    assert original.count(duration_element) == 1
-    content = original.replace(duration_element, b"\x44\x89\x88" + struct.pack(">d", 1000))
+    ffprobe_with_understated_duration = executable(
+        tmp_path,
+        """
+import json
+import subprocess
+import sys
+
+completed = subprocess.run(["ffprobe", *sys.argv[1:]], capture_output=True, check=False)
+if completed.returncode != 0:
+    sys.stdout.buffer.write(completed.stdout)
+    sys.stderr.buffer.write(completed.stderr)
+    sys.exit(completed.returncode)
+payload = json.loads(completed.stdout)
+payload.setdefault("format", {})["duration"] = "1.000000"
+print(json.dumps(payload))
+""",
+    )
     config = media_settings(
         harness,
         embed_worker=True,
         storage_dir=tmp_path / "uploads",
         artifacts_dir=tmp_path / "artifacts",
+        ffprobe_path=ffprobe_with_understated_duration,
         max_shared_duration_seconds=1,
     )
     app = create_app(config)
@@ -500,7 +531,7 @@ async def test_video_cannot_hide_excess_duration_in_container_metadata(harness, 
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http,
     ):
-        identifier, headers = await submit(http, content)
+        identifier, headers = await submit(http, video.read_bytes())
         result = await wait_for_media(http, identifier, headers)
         assert result["state"] == "failed"
         assert result["error"]["code"] == "DURATION_LIMIT_EXCEEDED"
