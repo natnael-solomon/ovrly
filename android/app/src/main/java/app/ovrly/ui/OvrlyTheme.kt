@@ -94,7 +94,7 @@ internal data class OvrlyPalette(
     }
 
     companion object {
-        const val BLURRED_GLASS_ALPHA = 0.86f
+        const val BLURRED_GLASS_ALPHA = 0.88f
         const val OVERLAY_GLASS_ALPHA = 0.88f
 
         /** Share of the accent mixed into light overlay glass, so it reads as ovrly, not white. */
@@ -105,8 +105,11 @@ internal data class OvrlyPalette(
 internal val PaperPalette = OvrlyPalette(
     false, Color(0xFFF0EFE5), Color(0xFFF8F7EF), Color(0xFF252826),
     Color(0xFF53594A), Color(0xFFD3D4C7), Color(0xFFD5EB97),
-    Color(0xFF29371E), Color(0xFF943D35), Color(0xFFFFFFF8)
+    Color(0xFF29371E), Color(PAPER_ERROR), Color(0xFFFFFFF8)
 )
+
+/** Light-theme error ink: 5:1 or better on the light overlay glass over any video (AN-11). */
+private const val PAPER_ERROR = 0xFF8A3830
 internal val ChromePalette = OvrlyPalette(
     true, Color(0xFF080910), Color(0xFF191C29), Color(0xFFEDEEF5),
     Color(0xFFBCC0D1), Color(0xFF414454), Color(0xFFC5B4FA),

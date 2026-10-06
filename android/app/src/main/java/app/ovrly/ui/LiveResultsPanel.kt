@@ -114,11 +114,13 @@ private fun RowScope.LiveHeader(
             overflow = TextOverflow.Ellipsis
         )
         model.sourceLabel?.let {
+            // Two lines, so "FIXTURE / NOT LIVE" keeps its disclosure at large font sizes.
             Text(
                 it.uppercase(),
                 style = MaterialTheme.typography.labelSmall,
                 color = p.error,
-                maxLines = 1
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

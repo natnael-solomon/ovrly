@@ -71,11 +71,12 @@ class OvrlyThemeTest {
             for (overlay in listOf(false, true)) {
                 for (blur in listOf(false, true)) {
                     for (opaque in listOf(false, true)) {
-                        for (backdrop in listOf(Color.White, Color.Black)) {
+                        for (backdrop in listOf(Color.White, Color.Black, Color(0xFF808080))) {
                             val surface = p.glassFill(blur, opaque, overlay).compositeOver(backdrop)
                             val where = "dark=${p.dark} overlay=$overlay blur=$blur"
                             assertTrue("primary text, $where", contrast(p.ink, surface) >= 4.5f)
                             assertTrue("secondary text, $where", contrast(p.muted, surface) >= 4.5f)
+                            assertTrue("error text, $where", contrast(p.error, surface) >= 4.5f)
                         }
                     }
                 }

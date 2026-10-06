@@ -542,7 +542,7 @@ Enable the larger demo from Settings or the gallery with display-over-other-apps
 
 Liquid Chrome is the default. Saved Light/Dark choices are preserved independently of Android's theme. Lexend is used for interface text; Instrument Serif is reserved for editorial styles. Both retain their [SIL Open Font licenses](app/src/main/assets/licenses/).
 
-Native overlay blur requires a supported Android 12+ device. Where blur is unsupported or disabled, overlay glass is 88% opaque so the video shows faintly behind it; higher-opacity mode makes it solid. In light mode the overlay glass (pill, panel, bubble and demo) is tinted slightly toward the accent green; the companion's own screens keep solid surfaces.
+Native overlay blur requires a supported Android 12+ device. Where blur is unsupported or disabled, overlay glass is 88% opaque so the video shows faintly behind it; higher-opacity mode makes it solid. Blurred glass is also 88% opaque, which keeps light-theme error and secondary text at 5:1 or better over black, white or grey video. In light mode the overlay glass (pill, panel, bubble and demo) is tinted slightly toward the accent green; the companion's own screens keep solid surfaces.
 
 The ovrly mark (`res/drawable/ic_ovrly.xml`, also the notification icon, the overlay pill, bubble and panel header, and the Android 13+ themed icon layer `ic_launcher_monochrome.xml`) is the landing page's two-segment ring traced as one filled monochrome shape, with its gap, thickness and rounded ends.
 

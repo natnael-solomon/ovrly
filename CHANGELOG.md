@@ -260,6 +260,8 @@
   the landing page's two-segment ring traced as a filled monochrome shape, replacing the thin
   stroked ring. Overlay glass without system blur is 88% opaque instead of solid, so the
   video shows faintly behind it, and light-mode overlay glass is tinted toward the accent.
+  Blurred glass is 88% opaque (was 86%) and the light theme's error ink is a little darker,
+  so error and secondary text stay at 5:1 or better over black, white or grey video.
 - Evaluation contract v2 requires exactly one occurrence pass and one final adjudication per clip, without a second annotator. Explicit provenance replaces mandatory blind-human attestations; original-occurrence traceability, rights, scenario coverage and split-isolation safeguards remain. Version-1 snapshots require explicit migration, not silent relabeling.
 - Added manual Telegram APK distribution: an exact merged `main` commit builds without credentials, then signs and delivers after owner approval. An immutable ledger supplies version codes; redelivery resends the current issued bytes. Release builds use R8 and resource shrinking. See [release signing](docs/release-signing.md).
 - Reserved Instrument Serif for editorial report/gallery headings and the text-based wordmark. Functional headings, including capture dialogs and demo claims, use Lexend without changing type sizes.
