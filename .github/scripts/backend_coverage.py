@@ -6,6 +6,7 @@ from pathlib import PurePosixPath
 
 MODULE_FLOORS = {
     "services/worker": 90,
+    "services/jobs": 90,
     "services/api/auth": 90,
     "services/contracts": 90,
 }
@@ -101,7 +102,6 @@ def assess(current, baseline, baseline_sha):
         "### Backend coverage\n\n| Scope | Measured lines | Result |\n|---|---|---|\n"
         + "\n".join(rows) + "\n\n" + comparison
         + "\n\nAndroid unit/instrumented coverage and its capture/share floors are not "
-        "measured by this backend job. Future auth/contracts paths must be aligned "
-        "with the actual implementations before those portions of #13 can close.\n"
+        "measured by this backend job; they are tracked separately in #76.\n"
     )
     return summary, failures
