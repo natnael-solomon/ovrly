@@ -21,6 +21,8 @@ Action = Literal["none", "retry", "authenticate", "fix_request", "upload_again"]
 REQUEST_ID_HEADER = "X-Request-Id"
 _REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 _IDENTITY_FIELDS = {"user_id", "owner_id", "principal_id"}
+# error.schema.json caps the message at 240 characters.
+_MESSAGE_LIMIT = 240
 
 
 class ApiError(Exception):
@@ -92,7 +94,14 @@ def _validation_message(exc: RequestValidationError) -> tuple[str, str]:
             return "CLIENT_IDENTITY_REJECTED", "Identity is taken from the bearer credential"
         paths.append(".".join(location) or "body")
     unique = ", ".join(dict.fromkeys(paths)) or "body"
-    return "VALIDATION_FAILED", f"The request is invalid at: {unique}"
+    message = f"The request is invalid at: {unique}"
+    if len(message) > _MESSAGE_LIMIT:
+        suffix = ", ..."
+        head = message[: _MESSAGE_LIMIT - len(suffix)]
+        # Prefer ending on a whole path; a single over-long path is cut mid-path instead.
+        trimmed = head.rsplit(",", 1)[0] if "," in head else head.rstrip(".")
+        message = (trimmed + suffix)[:_MESSAGE_LIMIT]
+    return "VALIDATION_FAILED", message
 
 
 def install(app: FastAPI) -> None:

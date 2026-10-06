@@ -1,17 +1,31 @@
 """Account linking per BC-D07: in-place upgrade, second-device merge and the owner invariant."""
 
+import asyncio
 import uuid
 
 import httpx
 import pytest
 from google.auth.exceptions import GoogleAuthError
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from test_intake_api import URL_BODY, assert_error, completed_upload, guest
+from test_reports_api import publish
 
+from services.api.auth.dependency import Principal
 from services.api.auth.google import GoogleIdTokenVerifier, InvalidIdToken, VerifiedIdentity
-from services.api.auth.linking import transfer_saved_reports
+from services.api.auth.linking import link_account, transfer_saved_reports
+from services.api.errors import ApiError
 from services.api.main import create_app
-from services.models import credentials, idempotency_keys, investigations, principals, uploads
+from services.models import (
+    credentials,
+    idempotency_keys,
+    investigations,
+    principals,
+    report_versions,
+    saved_reports,
+    uploads,
+    voice_actions,
+)
+from services.reports import save_owned_report
 from services.settings import Settings
 
 LINK = "/v1/principals/link"
@@ -177,16 +191,22 @@ async def test_second_device_continues_as_the_existing_account(client, app, veri
     linked = await client.post(LINK, json=link_body("token-alice"), headers=first_device)
     assert linked.status_code == 200 and linked.json()["principal_id"] == account_id
     account_investigation = await create_investigation(client, first_device, "first-device")
+    account_report = await publish(app, account_investigation)
+    saved = await client.post(f"/v1/reports/{account_report.id}/save", headers=first_device)
+    assert saved.status_code == 200, saved.text
 
     guest_id, second_device = await mint(client)
     guest_upload = await completed_upload(client, second_device)
     guest_investigation = await create_investigation(client, second_device, "second-device")
+    guest_report = await publish(app, guest_investigation)
+    guest_saved = await client.post(f"/v1/reports/{guest_report.id}/save", headers=second_device)
+    assert guest_saved.status_code == 200, guest_saved.text
 
     merged = await client.post(LINK, json=link_body("token-alice"), headers=second_device)
     assert merged.status_code == 200, merged.text
     body = merged.json()
     assert body["principal_id"] == account_id and body["kind"] == "account"
-    assert body["linked"] is True and body["merged_saved_reports"] == 0
+    assert body["linked"] is True and body["merged_saved_reports"] == 1
     token = body["credential"]["token"]
     assert set(body["credential"]) == {"token", "token_type"}
     assert "bearer" in body["credential"].values() and token.startswith("ovk_")
@@ -203,7 +223,22 @@ async def test_second_device_continues_as_the_existing_account(client, app, veri
         404,
         "NOT_FOUND",
     )
-    # Investigations, uploads and idempotency keys stay with the revoked guest.
+    # The explicitly saved report moved with its snapshot; the account's own save is kept.
+    recovered = await client.get("/v1/reports/saved", headers=continued)
+    assert [item["report_id"] for item in recovered.json()["items"]] == [
+        guest_report.id,
+        account_report.id,
+    ]
+    assert recovered.json()["items"][0] == guest_saved.json()
+    resaved = await client.post(f"/v1/reports/{guest_report.id}/save", headers=continued)
+    assert resaved.status_code == 200 and resaved.json() == guest_saved.json()
+    assert await saved_owners(app, [guest_report.id, account_report.id]) == {
+        guest_report.id: account_id,
+        account_report.id: account_id,
+    }
+    # The report version itself, like investigations, uploads and idempotency keys, stays
+    # with the revoked guest.
+    assert await owned_ids(app, report_versions, guest_id) == [guest_report.id]
     assert await owned_ids(app, investigations, guest_id) == [guest_investigation]
     assert await owned_ids(app, uploads, guest_id) == [guest_upload["id"]]
     assert await owned_ids(app, investigations, account_id) == [account_investigation]
@@ -246,10 +281,23 @@ async def test_second_device_continues_as_the_existing_account(client, app, veri
     assert account_row.merged_into is None
 
 
+async def saved_owners(app, report_ids):
+    async with app.state.database.engine.connect() as connection:
+        rows = await connection.execute(
+            select(saved_reports.c.report_id, saved_reports.c.owner_id).where(
+                saved_reports.c.report_id.in_([uuid.UUID(value) for value in report_ids])
+            )
+        )
+        return {str(row.report_id): str(row.owner_id) for row in rows}
+
+
 async def test_link_cannot_move_another_owners_rows(client, app):
     bystander_id, bystander = await mint(client)
     bystander_upload = await completed_upload(client, bystander)
     bystander_investigation = await create_investigation(client, bystander, "bystander")
+    bystander_report = await publish(app, bystander_investigation)
+    kept = await client.post(f"/v1/reports/{bystander_report.id}/save", headers=bystander)
+    assert kept.status_code == 200
     account_id, first_device = await mint(client)
     linked = await client.post(LINK, json=link_body("token-bob"), headers=first_device)
     assert linked.status_code == 200
@@ -283,6 +331,7 @@ async def test_link_cannot_move_another_owners_rows(client, app):
     )
     merged = await client.post(LINK, json=link_body("token-bob"), headers=second_device)
     assert merged.status_code == 200 and merged.json()["principal_id"] == account_id
+    assert merged.json()["merged_saved_reports"] == 0
 
     # Only the calling guest was touched; the bystander's rows and credential are intact.
     assert await owned_ids(app, investigations, bystander_id) == [bystander_investigation]
@@ -294,10 +343,49 @@ async def test_link_cannot_move_another_owners_rows(client, app):
     bystander_row = await principal_row(app, bystander_id)
     assert bystander_row.kind == "guest" and bystander_row.merged_into is None
     async with app.state.database.engine.begin() as connection:
-        # The transfer is restricted to the given owner and, until #33, moves nothing.
+        # The transfer is restricted to the given owner; the guest has no saves left.
         moved = await transfer_saved_reports(connection, uuid.UUID(guest_id), uuid.UUID(account_id))
     assert moved == 0
     assert await owned_ids(app, investigations, guest_id) == [guest_investigation]
+    assert await saved_owners(app, [bystander_report.id]) == {bystander_report.id: bystander_id}
+    listing = await client.get("/v1/reports/saved", headers=bystander)
+    assert [item["report_id"] for item in listing.json()["items"]] == [bystander_report.id]
+
+
+async def test_transfer_keeps_the_accounts_save_when_both_saved_one_report(client, app):
+    first_id, first = await mint(client)
+    second_id, second = await mint(client)
+    report = await publish(app, await create_investigation(client, first, "shared"))
+    other = await publish(app, await create_investigation(client, first, "other"))
+    for report_id in (report.id, other.id):
+        assert (
+            await client.post(f"/v1/reports/{report_id}/save", headers=first)
+        ).status_code == 200
+    account_save = (await client.get("/v1/reports/saved", headers=first)).json()["items"]
+    async with app.state.database.engine.begin() as connection:
+        # Give the second principal a later save of one of the same reports.
+        rows = (
+            await connection.execute(
+                select(saved_reports).where(saved_reports.c.owner_id == uuid.UUID(first_id))
+            )
+        ).all()
+        for row in rows:
+            await connection.execute(
+                saved_reports.insert().values({**row._mapping, "owner_id": uuid.UUID(second_id)})
+            )
+        await connection.execute(
+            saved_reports.delete().where(
+                saved_reports.c.owner_id == uuid.UUID(first_id),
+                saved_reports.c.report_id == uuid.UUID(other.id),
+            )
+        )
+        moved = await transfer_saved_reports(connection, uuid.UUID(second_id), uuid.UUID(first_id))
+    assert moved == 1
+    after = (await client.get("/v1/reports/saved", headers=first)).json()["items"]
+    assert sorted(item["report_id"] for item in after) == sorted([report.id, other.id])
+    kept = next(item for item in after if item["report_id"] == report.id)
+    assert kept == next(item for item in account_save if item["report_id"] == report.id)
+    assert (await client.get("/v1/reports/saved", headers=second)).json() == {"items": []}
 
 
 async def test_google_verifier_maps_outcomes_without_network(monkeypatch):
@@ -327,3 +415,82 @@ async def test_google_verifier_maps_outcomes_without_network(monkeypatch):
             await verifier.verify(token)
     assert all(audience == "client-id.apps.googleusercontent.com" for _, audience in calls)
     assert len(calls) == 5
+
+
+async def test_save_by_a_merged_guest_is_refused_and_stores_nothing(client, app):
+    """A save authenticated before a second-device link commits must not land under the
+    merged guest: the save transaction share-locks the principal and sees merged_into."""
+    account_id, first_device = await mint(client)
+    assert (
+        await client.post(LINK, json=link_body("token-alice"), headers=first_device)
+    ).status_code == 200
+    guest_id, second_device = await mint(client)
+    report = await publish(app, await create_investigation(client, second_device, "late"))
+    async with app.state.database.engine.begin() as connection:
+        # The state a racing save observes once the link transaction has committed.
+        await connection.execute(
+            update(principals)
+            .where(principals.c.id == uuid.UUID(guest_id))
+            .values(merged_into=uuid.UUID(account_id), merged_at=func.now())
+        )
+    async with app.state.database.engine.begin() as connection:
+        with pytest.raises(ApiError) as refused:
+            await save_owned_report(
+                connection, Principal(uuid.UUID(guest_id), "guest"), uuid.UUID(report.id)
+            )
+    assert (refused.value.status_code, refused.value.code) == (401, "INVALID_CREDENTIAL")
+    voice = {
+        "request_id": "req_synthetic_merged_save",
+        "action": "save_report",
+        "target": {"kind": "report", "id": report.id},
+    }
+    # Both HTTP save paths give the revoked-credential answer while the credential is valid.
+    assert_error(
+        await client.post(f"/v1/reports/{report.id}/save", headers=second_device),
+        401,
+        "INVALID_CREDENTIAL",
+    )
+    assert_error(
+        await client.post("/v1/voice/actions", json=voice, headers=second_device),
+        401,
+        "INVALID_CREDENTIAL",
+    )
+    assert await saved_owners(app, [report.id]) == {}
+    async with app.state.database.engine.connect() as connection:
+        audited = await connection.scalar(
+            select(func.count())
+            .select_from(voice_actions)
+            .where(voice_actions.c.request_id == "req_synthetic_merged_save")
+        )
+    assert audited == 0
+
+
+async def test_save_waits_for_a_concurrent_link_and_is_refused(client, app, verifier):
+    """True race: the link holds the guest row lock; the save waits, then is refused."""
+    account_id, first_device = await mint(client)
+    assert (
+        await client.post(LINK, json=link_body("token-bob"), headers=first_device)
+    ).status_code == 200
+    guest_id, second_device = await mint(client)
+    report = await publish(app, await create_investigation(client, second_device, "race"))
+    guest = Principal(uuid.UUID(guest_id), "guest")
+    engine = app.state.database.engine
+    async with engine.connect() as link_connection:
+        link_transaction = await link_connection.begin()
+        await link_account(
+            link_connection, guest, VerifiedIdentity("google", verifier.tokens["token-bob"])
+        )
+
+        async def save():
+            async with engine.begin() as connection:
+                await save_owned_report(connection, guest, uuid.UUID(report.id))
+
+        saving = asyncio.create_task(save())
+        await asyncio.sleep(0.3)
+        assert not saving.done(), "The save must wait for the link's row lock"
+        await link_transaction.commit()
+        with pytest.raises(ApiError) as refused:
+            await asyncio.wait_for(saving, 5)
+    assert refused.value.code == "INVALID_CREDENTIAL"
+    assert await saved_owners(app, [report.id]) == {}
+    assert (await principal_row(app, guest_id)).merged_into == uuid.UUID(account_id)

@@ -19,11 +19,23 @@ from services.api.routes.common import engine, settings
 from services.api.schemas import (
     InvestigationCreateRequest,
     InvestigationListResponse,
+    InvestigationReadModel,
     InvestigationResponse,
+    JobSummary,
+    ProcessingStatus,
+    ReportVersion,
+    SafeError,
     UploadSource,
 )
 from services.jobs.models import jobs
-from services.models import idempotency_keys, investigations, uploads
+from services.jobs.states import JobState
+from services.models import (
+    capture_chunks,
+    idempotency_keys,
+    investigations,
+    reanalysis_requests,
+    uploads,
+)
 from services.pipeline.intake import (
     COVERAGE_PLACEHOLDER,
     INITIAL_STATE,
@@ -31,6 +43,7 @@ from services.pipeline.intake import (
     INTAKE_VERSION,
     intake_stage_key,
 )
+from services.reports import latest_reports, summarize_job
 
 router = APIRouter(tags=["investigations"])
 
@@ -102,6 +115,104 @@ async def job_states(
         )
     )
     return {keys[row.input_hash]: row.state for row in rows}
+
+
+async def latest_jobs(
+    connection: AsyncConnection, investigation_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, JobSummary]:
+    """The most recently created live job of each investigation.
+
+    Candidates are the ``intake`` job, its reanalysis jobs and its capture chunk jobs;
+    deleted jobs are tombstones, so an investigation whose jobs are all deleted has none.
+    """
+    if not investigation_ids:
+        return {}
+    keys = {intake_stage_key(identifier).input_hash: identifier for identifier in investigation_ids}
+    candidates: list[tuple[uuid.UUID, Row[Any]]] = []
+    intake = await connection.execute(
+        select(jobs).where(
+            jobs.c.version == INTAKE_VERSION,
+            jobs.c.stage == INTAKE_STAGE,
+            jobs.c.input_hash.in_(list(keys)),
+        )
+    )
+    candidates.extend((keys[row.input_hash], row) for row in intake)
+    for link, owner in (
+        (reanalysis_requests.c.job_id, reanalysis_requests.c.investigation_id),
+        (capture_chunks.c.job_id, capture_chunks.c.session_id),
+    ):
+        linked = await connection.execute(
+            select(jobs, owner.label("investigation_id"))
+            .join_from(jobs, owner.table, link == jobs.c.id)
+            .where(owner.in_(investigation_ids))
+        )
+        candidates.extend((row.investigation_id, row) for row in linked)
+    newest: dict[uuid.UUID, Row[Any]] = {}
+    for investigation_id, row in candidates:
+        if row.state == JobState.DELETED.value:
+            continue
+        current = newest.get(investigation_id)
+        if current is None or (row.created_at, str(row.id)) > (current.created_at, str(current.id)):
+            newest[investigation_id] = row
+    return {key: summarize_job(row) for key, row in newest.items()}
+
+
+def read_model(
+    row: Row[Any],
+    job_state: str | None,
+    job: JobSummary | None,
+    report: ReportVersion | None,
+) -> InvestigationReadModel:
+    """The contract read model: progress, stored state, job and findings kept apart.
+
+    A failure never carries a report and a report never carries an error, matching the
+    branches of packages/contracts/schemas/investigation.schema.json. A provisional report
+    reads as ``partial`` (state ``running``), a final one as ``complete``.
+    """
+    base = investigation_response(row, job_state)
+    state = base.state
+    error = base.error
+    status: ProcessingStatus
+    if state == "failed":
+        status = "failed"
+        report = None
+        if error is None:
+            error = SafeError.model_validate(safe_error(PROCESSING_FAILED))
+    elif state == "cancelled":
+        status = "cancelled"
+    elif report is not None:
+        state, status = ("running", "partial") if report.provisional else ("completed", "complete")
+    elif state == "queued":
+        status = "waiting"
+    else:
+        # Running, or a stored completion that published no report yet: still checking.
+        state, status = "running", "checking"
+    if state != "failed":
+        error = None
+    return InvestigationReadModel(
+        **{
+            **base.model_dump(),
+            "state": state,
+            "error": error,
+            "version": row.version if report is None else report.version,
+        },
+        processing_status=status,
+        job=job,
+        report=report,
+    )
+
+
+async def read_models(
+    connection: AsyncConnection, rows: list[Row[Any]]
+) -> list[InvestigationReadModel]:
+    identifiers = [row.id for row in rows]
+    states = await job_states(connection, identifiers)
+    current = await latest_jobs(connection, identifiers)
+    reports = await latest_reports(connection, identifiers)
+    return [
+        read_model(row, states.get(row.id), current.get(row.id), reports.get(row.id))
+        for row in rows
+    ]
 
 
 def request_hash(body: InvestigationCreateRequest) -> str:
@@ -193,7 +304,9 @@ async def _create(
             .returning(investigations)
         )
     ).one()
-    response = investigation_response(row).model_dump(mode="json")
+    dispatcher: InvestigationDispatcher = request.app.state.dispatcher
+    await dispatcher.dispatch(connection, row.id, principal.id)
+    response = (await read_models(connection, [row]))[0].model_dump(mode="json")
     await connection.execute(
         insert(idempotency_keys).values(
             owner_id=principal.id,
@@ -205,12 +318,10 @@ async def _create(
             created_at=now,
         )
     )
-    dispatcher: InvestigationDispatcher = request.app.state.dispatcher
-    await dispatcher.dispatch(connection, row.id, principal.id)
     return 202, response
 
 
-@router.post("/investigations", status_code=202, response_model=InvestigationResponse)
+@router.post("/investigations", status_code=202, response_model=InvestigationReadModel)
 async def create_investigation(
     request: Request,
     body: InvestigationCreateRequest,
@@ -248,17 +359,14 @@ async def list_investigations(
     )
     async with engine(request).connect() as connection:
         rows = (await connection.execute(query)).all()
-        states = await job_states(connection, [row.id for row in rows])
-    return InvestigationListResponse(
-        items=[investigation_response(row, states.get(row.id)) for row in rows]
-    )
+        items = await read_models(connection, list(rows))
+    return InvestigationListResponse(items=items)
 
 
-@router.get("/investigations/{investigation_id}", response_model=InvestigationResponse)
+@router.get("/investigations/{investigation_id}", response_model=InvestigationReadModel)
 async def get_investigation(
     request: Request, investigation_id: uuid.UUID, principal: CurrentPrincipal
-) -> InvestigationResponse:
+) -> InvestigationReadModel:
     async with engine(request).connect() as connection:
         row = await load_owned(connection, investigations, investigation_id, principal)
-        states = await job_states(connection, [row.id])
-    return investigation_response(row, states.get(row.id))
+        return (await read_models(connection, [row]))[0]

@@ -4,7 +4,7 @@
     "title": "Ovrly API",
     "version": "0.2.0-draft",
     "summary": "Contract between the Android client and the backend.",
-    "description": "Ovrly contracts 0.2.0-draft (pre-1.0). Shared-media investigation reads derive state from the intake job (queued/leased -> queued, running -> running, failed -> failed with PROCESSING_FAILED, cancelled/deleted -> cancelled). Capture progress uses GET /v1/captures/{capture_id}; media analysis and claim extraction are not implemented yet. Every schema is a reference into schemas/*.schema.json so the OpenAPI document, the JSON Schema fixtures and the Android models cannot drift from each other. Every error response uses the shared error shape; stage-specific error codes are listed per operation and must be SCREAMING_SNAKE_CASE. Paths listed here are those the backend serves today (BE-05, #19, including account linking from BC-D07, the owner-scoped job actions from BE-04 part 3, #75, and incremental capture intake from BE-06, #24) plus POST /v1/voice/actions (BE-13, #67; served by BE-10, #33). Report-version retrieval and reanalysis are #33.",
+    "description": "Ovrly contracts 0.2.0-draft (pre-1.0). Shared-media investigation reads derive state from the intake job (queued/leased -> queued, running -> running, failed -> failed with PROCESSING_FAILED, cancelled/deleted -> cancelled). Capture progress uses GET /v1/captures/{capture_id}; media analysis and claim extraction are not implemented yet. Every schema is a reference into schemas/*.schema.json so the OpenAPI document, the JSON Schema fixtures and the Android models cannot drift from each other. Every error response uses the shared error shape; stage-specific error codes are listed per operation and must be SCREAMING_SNAKE_CASE. Paths listed here are those the backend serves today (BE-05, #19, including account linking from BC-D07, the owner-scoped job actions from BE-04 part 3, #75, and incremental capture intake from BE-06, #24) plus the report versions, explicit saves and POST /v1/voice/actions of BE-10 (#33; the voice contract is BE-13, #67). Reanalysis and the export payload are BE-10 too.",
     "license": {
       "name": "PolyForm Noncommercial 1.0.0",
       "identifier": "PolyForm-Noncommercial-1.0.0"
@@ -22,6 +22,7 @@
     { "name": "uploads", "description": "Declared and verified media uploads (BE-05)." },
     { "name": "investigations", "description": "Checks: idempotent creation and owner-scoped reads (BE-05)." },
     { "name": "voice", "description": "Allowlisted voice actions (BE-13 contract, BE-10 endpoint)." },
+    { "name": "reports", "description": "Immutable report versions and explicit, owner-scoped saves (BE-10)." },
     { "name": "jobs", "description": "Owner-scoped job cancellation and deletion receipts (BE-04 part 3)." },
     { "name": "captures", "description": "Owner-scoped incremental capture intake, close and polling (BE-06)." }
   ],
@@ -506,12 +507,182 @@
         }
       }
     },
+    "/v1/investigations/{investigation_id}/reports": {
+      "parameters": [{ "$ref": "#/components/parameters/InvestigationId" }],
+      "get": {
+        "tags": ["reports"],
+        "operationId": "listReportVersions",
+        "summary": "List the published versions of one owned investigation's report.",
+        "description": "Oldest first, each with its change summary. Versions are immutable: a correction or expansion publishes a new version that names the one it supersedes. An investigation without a report has an empty list. Another owner's investigation is a plain 404.",
+        "responses": {
+          "200": {
+            "description": "Report versions, oldest first.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ReportVersionList" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/investigations/{investigation_id}/reports/{version}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/InvestigationId" },
+        { "$ref": "#/components/parameters/ReportVersionNumber" }
+      ],
+      "get": {
+        "tags": ["reports"],
+        "operationId": "getReportVersion",
+        "summary": "Read one immutable report version.",
+        "description": "A missing version, a missing investigation and another owner's investigation all answer the same 404. A development stub published while the server runs with OVRLY_STUB_REPORTS=1 is provisional, says in its change_summary that it is a development fixture and not a check of the media, and has fixture true in the version list.",
+        "responses": {
+          "200": {
+            "description": "The report version.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ReportVersion" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/investigations/{investigation_id}/reports/{version}/export": {
+      "parameters": [
+        { "$ref": "#/components/parameters/InvestigationId" },
+        { "$ref": "#/components/parameters/ReportVersionNumber" }
+      ],
+      "get": {
+        "tags": ["reports"],
+        "operationId": "exportReportVersion",
+        "summary": "Shareable, allowlisted export payload of one owned report version.",
+        "description": "Decision 0003 export contents: each claim's normalized meaning, interval, correction flag and assessment; source links with type, inspection level, retraction status and the relation the assessment gave them; the provisional and fixture flags, the report version and the retrieval date (retrieved_at, the time of this request); plain-language limitations. Transcript wording, evidence excerpts, assessment notes, media and identity are never included. On-device export (AN-11) covers the submission; this is the server-built equivalent.",
+        "responses": {
+          "200": {
+            "description": "The export payload.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ReportExport" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/investigations/{investigation_id}/reanalyze": {
+      "parameters": [{ "$ref": "#/components/parameters/InvestigationId" }],
+      "post": {
+        "tags": ["reports"],
+        "operationId": "reanalyzeInvestigation",
+        "summary": "Correct a claim, expand to the confirmed full video, or search deeper.",
+        "description": "Requires Idempotency-Key, scoped to the caller: the same key and body replays the original 202 body; the same key with a different body is 409 IDEMPOTENCY_KEY_REUSED. base_version must be the latest published version. correction publishes a new immutable version at once (published_version): the claim keeps its original wording, its correction records the superseded proposition attributed to the user, its evidence and assessment are removed until the job reruns that claim only, and every other claim keeps its assessment; earlier versions are unchanged. expansion requires match_confirmed true and deeper changes nothing yet; for both, published_version is null and the reanalysis job publishes the version that supersedes base_version. Every reason enqueues one owner-scoped reanalysis job, cancellable through POST /v1/jobs/{job_id}/cancel; its job.stage is the contract stage the work starts at (retrieval, or media_validation for expansion). Until the assessment pipeline (#27) registers the production handler the job stays queued; a server running the development-only OVRLY_STUB_REPORTS publishes a placeholder fixture version instead.",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ReanalysisRequest" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Reanalysis accepted; replays return the same body.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ReanalysisResponse" } }
+            }
+          },
+          "400": {
+            "description": "IDEMPOTENCY_KEY_REQUIRED, IDEMPOTENCY_KEY_INVALID or CLIENT_IDENTITY_REJECTED.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": {
+            "description": "IDEMPOTENCY_KEY_REUSED, REPORT_NOT_AVAILABLE (no published report yet; action retry) or REPORT_VERSION_STALE (base_version is not the latest).",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_FAILED, CLIENT_IDENTITY_REJECTED, MATCH_CONFIRMATION_REQUIRED (expansion without match_confirmed true), CLAIM_NOT_IN_VERSION or CORRECTION_UNCHANGED.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/reports/{report_id}/save": {
+      "parameters": [{ "$ref": "#/components/parameters/ReportId" }],
+      "post": {
+        "tags": ["reports"],
+        "operationId": "saveReport",
+        "summary": "Explicitly save one owned report version; idempotent.",
+        "description": "No request body; a body is rejected with VALIDATION_FAILED. Stores the caller's snapshot of the version. Repeating the save answers 200 with the same body and the original saved_at. A report the caller already saved stays saveable after a second-device link moved the save (BC-D07). A missing report, a malformed id and another owner's report all answer the same 404.",
+        "responses": {
+          "200": {
+            "description": "The save, first or repeated.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SavedReport" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ClientIdentityRejected" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/reports/saved": {
+      "get": {
+        "tags": ["reports"],
+        "operationId": "listSavedReports",
+        "summary": "List the caller's saved reports, newest save first (at most 100).",
+        "description": "Includes saves moved to this account by a second-device link (BC-D07). Used by AN-10 recovery.",
+        "responses": {
+          "200": {
+            "description": "Saved reports.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SavedReportList" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
     "/v1/voice/actions": {
       "post": {
         "tags": ["voice"],
         "operationId": "executeVoiceAction",
         "summary": "Execute one allowlisted voice action against one owned target.",
-        "description": "Contract fixed by BE-13 (#67); the endpoint is BE-10 (#33). A body that fails schema validation is rejected by the framework with the shared error shape before a handler runs. In-contract denials answer 200 with result denied and one of the four voice error codes.",
+        "description": "Contract fixed by BE-13 (#67); the endpoint is BE-10 (#33). A well-formed request_id and an action string of 1 to 64 characters with a name outside the allowlist answers 200 denied with VOICE_ACTION_UNSUPPORTED. For an allowlisted action, a body that fails schema validation (missing or mismatched target, extra fields such as confirmed) is 422 VALIDATION_FAILED in the shared error shape. Other in-contract denials answer 200 with result denied: VOICE_TARGET_NOT_FOUND for a missing target and, without revealing existence, another owner's target (the server does not emit VOICE_TARGET_NOT_OWNED); VOICE_ACTION_INVALID_STATE when the job state does not allow the action. queue_retry and queue_continue never change a job: they are accepted for a queued or running job and denied for a finished, failed or cancelled one, because the queue has no transition out of a terminal state. Every request writes one audit row with no transcript. Repeating a request_id replays the stored response without running the action again; reusing it for a different action or target is 409 IDEMPOTENCY_KEY_REUSED.",
         "requestBody": {
           "required": true,
           "content": {
@@ -530,7 +701,15 @@
               }
             }
           },
+          "400": { "$ref": "#/components/responses/ClientIdentityRejected" },
           "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "409": {
+            "description": "IDEMPOTENCY_KEY_REUSED: the request_id was already used by this caller for a different action or target.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
           "422": { "$ref": "#/components/responses/ValidationFailed" },
           "500": { "$ref": "#/components/responses/InternalError" },
           "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
@@ -575,6 +754,20 @@
         "required": true,
         "description": "Canonical lowercase UUID of the job, as the queue stores it. The path parameters of both job actions are described by schemas/job-action-request.schema.json; neither operation takes a body.",
         "schema": { "$ref": "schemas/job-action-request.schema.json#/properties/job_id" }
+      },
+      "ReportId": {
+        "name": "report_id",
+        "in": "path",
+        "required": true,
+        "description": "Id of a report version (ReportVersion.id). The server issues canonical lowercase UUID strings; any other value names no report (404).",
+        "schema": { "$ref": "schemas/report-version.schema.json#/properties/id" }
+      },
+      "ReportVersionNumber": {
+        "name": "version",
+        "in": "path",
+        "required": true,
+        "description": "Report version number, 1 or greater; 0, a negative or a non-integer value is VALIDATION_FAILED.",
+        "schema": { "type": "integer" }
       },
       "IdempotencyKey": {
         "name": "Idempotency-Key",
@@ -706,6 +899,178 @@
       "Investigation": { "$ref": "schemas/investigation.schema.json" },
       "Job": { "$ref": "schemas/job.schema.json" },
       "ReportVersion": { "$ref": "schemas/report-version.schema.json" },
+      "ReportVersionList": {
+        "type": "object",
+        "description": "Mirrors services/api/schemas.py ReportVersionListResponse: every published version of one investigation's report, oldest first, without claims, evidence or assessments. Empty items when no report exists.",
+        "additionalProperties": false,
+        "required": ["investigation_id", "items"],
+        "properties": {
+          "investigation_id": { "$ref": "schemas/common.schema.json#/$defs/uuid" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/ReportVersionSummary" } }
+        }
+      },
+      "ReportVersionSummary": {
+        "type": "object",
+        "description": "Mirrors services/api/schemas.py ReportVersionSummary. fixture is true only for a development stub built from fixtures/results/complete.json while the server runs with OVRLY_STUB_REPORTS=1 (until #27); such a report is not a check of the media and its change_summary says so.",
+        "additionalProperties": false,
+        "required": ["id", "version", "created_at", "provisional", "change_summary", "supersedes", "fixture"],
+        "properties": {
+          "id": { "$ref": "schemas/report-version.schema.json#/properties/id" },
+          "version": { "$ref": "schemas/report-version.schema.json#/properties/version" },
+          "created_at": { "$ref": "schemas/common.schema.json#/$defs/timestamp" },
+          "provisional": { "$ref": "schemas/report-version.schema.json#/properties/provisional" },
+          "change_summary": { "$ref": "schemas/report-version.schema.json#/properties/change_summary" },
+          "supersedes": { "$ref": "schemas/report-version.schema.json#/properties/supersedes" },
+          "fixture": { "type": "boolean" }
+        }
+      },
+      "ReanalysisRequest": {
+        "description": "Mirrors services/api/schemas.py ReanalysisRequest, discriminated on reason (a body that matches no branch is 422 VALIDATION_FAILED). base_version is 1 or greater and must be the latest published version.",
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reason", "base_version", "claim_id", "proposition"],
+            "properties": {
+              "reason": { "type": "string", "const": "correction" },
+              "base_version": { "type": "integer" },
+              "claim_id": { "$ref": "schemas/common.schema.json#/$defs/opaque_id" },
+              "proposition": { "type": "string", "minLength": 1, "maxLength": 2000 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reason", "base_version", "match_confirmed"],
+            "properties": {
+              "reason": { "type": "string", "const": "expansion" },
+              "base_version": { "type": "integer" },
+              "match_confirmed": { "type": "boolean" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reason", "base_version"],
+            "properties": {
+              "reason": { "type": "string", "const": "deeper" },
+              "base_version": { "type": "integer" }
+            }
+          }
+        ]
+      },
+      "ReanalysisResponse": {
+        "type": "object",
+        "description": "Mirrors services/api/schemas.py ReanalysisResponse. published_version is the version a correction published at once, null for expansion and deeper. job is the owner-scoped reanalysis job.",
+        "additionalProperties": false,
+        "required": ["id", "investigation_id", "reason", "base_version", "published_version", "job", "created_at"],
+        "properties": {
+          "id": { "$ref": "schemas/common.schema.json#/$defs/uuid" },
+          "investigation_id": { "$ref": "schemas/common.schema.json#/$defs/uuid" },
+          "reason": { "type": "string", "enum": ["correction", "expansion", "deeper"] },
+          "base_version": { "type": "integer" },
+          "published_version": { "$ref": "schemas/common.schema.json#/$defs/nullable_integer" },
+          "job": { "$ref": "#/components/schemas/Job" },
+          "created_at": { "$ref": "schemas/common.schema.json#/$defs/timestamp" }
+        }
+      },
+      "ReportExport": {
+        "type": "object",
+        "description": "Mirrors services/api/schemas.py ReportExport: an explicit allowlist. retrieved_at is the retrieval date of the export. limitations are plain-language notes, always ending with the statement that assessments are not a verdict on the whole video.",
+        "additionalProperties": false,
+        "required": ["format", "format_version", "investigation_id", "report_id", "version", "supersedes", "provisional", "fixture", "report_created_at", "retrieved_at", "change_summary", "claims", "sources", "limitations"],
+        "properties": {
+          "format": { "type": "string", "const": "ovrly.report-export" },
+          "format_version": { "type": "integer", "const": 1 },
+          "investigation_id": { "$ref": "schemas/common.schema.json#/$defs/uuid" },
+          "report_id": { "$ref": "schemas/report-version.schema.json#/properties/id" },
+          "version": { "type": "integer" },
+          "supersedes": { "$ref": "schemas/report-version.schema.json#/properties/supersedes" },
+          "provisional": { "type": "boolean" },
+          "fixture": { "type": "boolean" },
+          "report_created_at": { "$ref": "schemas/common.schema.json#/$defs/timestamp" },
+          "retrieved_at": { "$ref": "schemas/common.schema.json#/$defs/timestamp" },
+          "change_summary": { "$ref": "schemas/report-version.schema.json#/properties/change_summary" },
+          "claims": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "proposition", "interval", "corrected", "assessment"],
+              "properties": {
+                "id": { "$ref": "schemas/common.schema.json#/$defs/opaque_id" },
+                "proposition": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                "interval": { "$ref": "schemas/common.schema.json#/$defs/interval" },
+                "corrected": { "type": "boolean" },
+                "assessment": {
+                  "oneOf": [
+                    { "type": "null" },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["overall", "summary", "provisional"],
+                      "properties": {
+                        "overall": { "$ref": "schemas/assessment.schema.json#/properties/overall" },
+                        "summary": { "type": "string", "minLength": 1, "maxLength": 600 },
+                        "provisional": { "type": "boolean" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["evidence_id", "claim_id", "title", "publisher", "url", "published_at", "retrieved_at", "source_type", "inspection_level", "retraction_status", "relation"],
+              "properties": {
+                "evidence_id": { "$ref": "schemas/common.schema.json#/$defs/opaque_id" },
+                "claim_id": { "$ref": "schemas/common.schema.json#/$defs/opaque_id" },
+                "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+                "publisher": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "url": { "$ref": "schemas/evidence.schema.json#/$defs/source/properties/url" },
+                "published_at": { "$ref": "schemas/common.schema.json#/$defs/nullable_timestamp" },
+                "retrieved_at": { "$ref": "schemas/common.schema.json#/$defs/timestamp" },
+                "source_type": { "$ref": "schemas/evidence.schema.json#/properties/source_type" },
+                "inspection_level": { "$ref": "schemas/evidence.schema.json#/properties/inspection_level" },
+                "retraction_status": { "$ref": "schemas/evidence.schema.json#/properties/retraction_status" },
+                "relation": {
+                  "oneOf": [{ "type": "null" }, { "$ref": "schemas/assessment.schema.json#/$defs/evidence_relation/properties/relation" }]
+                }
+              }
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 240 }
+          }
+        }
+      },
+      "SavedReport": {
+        "type": "object",
+        "description": "Mirrors services/api/schemas.py SavedReport: the caller's explicit save of one immutable version with the snapshot taken at save time. saved_at is the first save; repeats do not change it. A save moved to an account by a second-device link (BC-D07) keeps its snapshot after the guest workspace expires.",
+        "additionalProperties": false,
+        "required": ["report_id", "investigation_id", "version", "saved_at", "report"],
+        "properties": {
+          "report_id": { "$ref": "schemas/report-version.schema.json#/properties/id" },
+          "investigation_id": { "$ref": "schemas/common.schema.json#/$defs/uuid" },
+          "version": { "$ref": "schemas/report-version.schema.json#/properties/version" },
+          "saved_at": { "$ref": "schemas/common.schema.json#/$defs/timestamp" },
+          "report": { "$ref": "#/components/schemas/ReportVersion" }
+        }
+      },
+      "SavedReportList": {
+        "type": "object",
+        "description": "Mirrors services/api/schemas.py SavedReportListResponse: newest save first, at most 100.",
+        "additionalProperties": false,
+        "required": ["items"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/SavedReport" } }
+        }
+      },
       "Claim": { "$ref": "schemas/claim.schema.json" },
       "Evidence": { "$ref": "schemas/evidence.schema.json" },
       "Assessment": { "$ref": "schemas/assessment.schema.json" },

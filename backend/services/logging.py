@@ -35,10 +35,20 @@ _MESSAGES = frozenset(
         "Request %s completed (%d)",
         "Retention policy disabled; no automatic deletion",
         "Retention completed (%d principals, %d uploads, %d jobs, %d purged)",
+        "Stub reports enabled; fixture reports will be published",
+        "Voice action %s %s",
     }
 )
 _CODES = frozenset(
     {
+        "open_check",
+        "save_report",
+        "queue_cancel",
+        "queue_retry",
+        "queue_continue",
+        "unsupported",
+        "accepted",
+        "denied",
         "transient",
         "rate_limited",
         "schema_repair",

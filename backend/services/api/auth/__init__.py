@@ -6,6 +6,7 @@ from services.api.auth.dependency import (
     Principal,
     create_guest_principal,
     current_principal,
+    lock_active_principal,
     reject_client_identity,
 )
 from services.api.auth.google import (
@@ -30,6 +31,7 @@ __all__ = [
     "hash_token",
     "link_account",
     "load_owned",
+    "lock_active_principal",
     "mint_token",
     "owned_rows",
     "reject_client_identity",

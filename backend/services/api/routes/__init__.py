@@ -5,7 +5,15 @@ from fastapi import FastAPI
 from services.api import errors
 from services.api.auth.google import GoogleIdTokenVerifier, IdTokenVerifier
 from services.api.intake import InvestigationDispatcher
-from services.api.routes import captures, investigations, jobs, principals, uploads
+from services.api.routes import (
+    captures,
+    investigations,
+    jobs,
+    principals,
+    reports,
+    uploads,
+    voice,
+)
 from services.settings import Settings
 from services.storage import LocalFilesystemStore
 
@@ -35,3 +43,5 @@ def register(
     app.include_router(investigations.router, prefix="/v1")
     app.include_router(jobs.router, prefix="/v1")
     app.include_router(captures.router, prefix="/v1")
+    app.include_router(reports.router, prefix="/v1")
+    app.include_router(voice.router, prefix="/v1")

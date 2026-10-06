@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     retention_tombstone_seconds: int = Field(default=604800, ge=60, le=7776000)
     retention_poll_seconds: int = Field(default=60, ge=1, le=3600)
     retention_batch_size: int = Field(default=100, ge=1, le=1000)
+    # DEVELOPMENT ONLY. Publishes a report built from the contract fixtures after intake so
+    # clients have report data before the assessment pipeline (#27) exists. Never enable it
+    # for real users; every such report is marked ``fixture: true``.
+    stub_reports: bool = False
 
     @model_validator(mode="after")
     def backoff_bounds(self) -> Self:

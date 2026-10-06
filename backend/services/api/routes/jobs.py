@@ -7,8 +7,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncConnection
 
-from services.api.auth import CurrentPrincipal, load_owned
+from services.api.auth import CurrentPrincipal, Principal, load_owned
 from services.api.auth.ownership import not_found
 from services.api.errors import ApiError
 from services.api.routes.common import engine
@@ -45,6 +46,31 @@ async def require_empty_body(request: Request) -> None:
             )
 
 
+async def cancel_owned_job(
+    connection: AsyncConnection, queue: JobQueue, job_id: UUID, principal: Principal
+) -> CancelOutcome:
+    """Cancel one of the caller's jobs inside ``connection``; replays the stored receipt.
+
+    Shared by the cancel route and the ``queue_cancel`` voice action. Missing, other-owner,
+    legacy ownerless and deleted jobs raise the same 404.
+    """
+    row = await load_owned(connection, jobs, job_id, principal, for_update=True)
+    # Deletion revokes reads, including a previously stored cancellation receipt.
+    if row.state == JobState.DELETED.value:
+        raise not_found()
+    if row.cancel_outcome is not None:
+        return CancelOutcome(row.cancel_outcome)
+    outcome = (
+        CancelOutcome.EFFECTIVE
+        if row.state == JobState.CANCELLED.value
+        else await queue.request_cancel(job_id, connection=connection)
+    )
+    await connection.execute(
+        update(jobs).where(jobs.c.id == job_id).values(cancel_outcome=outcome.value)
+    )
+    return outcome
+
+
 @router.post(
     "/jobs/{job_id}/cancel",
     response_model=CancelResponse,
@@ -54,21 +80,7 @@ async def cancel_job(request: Request, job_id: UUID, principal: CurrentPrincipal
     await require_empty_body(request)
     queue = JobQueue(request.app.state.database)
     async with engine(request).begin() as connection:
-        row = await load_owned(connection, jobs, job_id, principal, for_update=True)
-        # Deletion revokes reads, including a previously stored cancellation receipt.
-        if row.state == JobState.DELETED.value:
-            raise not_found()
-        if row.cancel_outcome is not None:
-            outcome = CancelOutcome(row.cancel_outcome)
-        else:
-            outcome = (
-                CancelOutcome.EFFECTIVE
-                if row.state == JobState.CANCELLED.value
-                else await queue.request_cancel(job_id, connection=connection)
-            )
-            await connection.execute(
-                update(jobs).where(jobs.c.id == job_id).values(cancel_outcome=outcome.value)
-            )
+        outcome = await cancel_owned_job(connection, queue, job_id, principal)
     if outcome == CancelOutcome.NOT_CANCELLABLE:
         raise ApiError(409, "JOB_NOT_CANCELLABLE", "The job can no longer be cancelled")
     response = CancelResponse(
