@@ -68,8 +68,8 @@
 - Android instrumented tests in CI (REPO-05 part 1, #76): a new **Android
   instrumented checks** workflow runs AndroidX Test, Espresso and Compose tests
   on API 29 and API 34 emulators for every PR that touches Android, with the
-  same documentation-only skip as Android checks, AVD snapshots cached only by
-  `main`, one automatic retry with flakes named in the job summary, and reports
+  same documentation-only skip as Android checks, an API 34 AVD snapshot cached
+  only by `main`, one automatic retry with flakes named in the job summary, and reports
   kept for seven days. The first tests cover share intake against a provider in
   another app with real `content://` grants (granted, ungranted, revoked and
   deleted sources, oversize, overlong and mislabelled files), the share sheet's
@@ -226,6 +226,13 @@
 - Added public-window background blur on supported Android 12+ devices, with opaque fallbacks.
 
 ### Fixed
+
+- Android instrumented checks no longer hang or fail before testing on API 29
+  (#76 follow-up): API 29 cold-boots instead of resuming a cached snapshot, the
+  device must publish its system services before any test, the emulator is
+  stopped with a bounded grace period, and a hung test fails within its
+  5-minute timeout or the 14-minute test budget with logcat and the running
+  test's name.
 
 - Share intake no longer crashes on a file whose provider calls it a video but
   whose bytes are not a readable media container; it is rejected as not a
