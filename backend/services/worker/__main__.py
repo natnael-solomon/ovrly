@@ -8,7 +8,7 @@ from services.database import Database
 from services.jobs.handlers import default_handlers
 from services.jobs.retries import RetryPolicy
 from services.logging import configure_logging
-from services.pipeline.stub_reports import enable_stub_reports
+from services.pipeline.registry import worker_handlers
 from services.privacy import RETENTION_STAGE, Retention
 from services.settings import load_settings
 from services.storage import LocalFilesystemStore
@@ -20,9 +20,7 @@ async def serve() -> None:
     database = Database(settings)
     store = LocalFilesystemStore(settings.storage_dir)
     retention = Retention(database, settings, store)
-    handlers = dict(default_handlers(store))
-    if settings.stub_reports:
-        enable_stub_reports(handlers)
+    handlers = worker_handlers(database, settings, default_handlers(store))
     if settings.retention_enabled:
         handlers[RETENTION_STAGE] = retention.run
     else:

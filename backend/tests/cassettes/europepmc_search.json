@@ -1,0 +1,17 @@
+{
+  "synthetic": true,
+  "description": "Synthetic Europe PMC search reply for DOI:\"10.5555/synthetic.0002\": open access with a PMCID. Not a recording of a live call.",
+  "hitCount": 1,
+  "resultList": {
+    "result": [
+      {
+        "id": "00000001",
+        "source": "MED",
+        "pmcid": "PMC0000002",
+        "doi": "10.5555/synthetic.0002",
+        "title": "Diesel buses remain in service: fleet records 2020 to 2025",
+        "isOpenAccess": "Y"
+      }
+    ]
+  }
+}

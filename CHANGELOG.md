@@ -4,6 +4,20 @@
 
 ### Added
 
+- Evidence stages (BE-09, #27): `retrieval` and `assessment` queue stages turn a
+  published version with claims into the next version with evidence and assessments.
+  Router-written neutral and disconfirming queries search Scholarxiv Papers; hits are
+  deduplicated by DOI and arXiv id, ranked with in-house BM25 and read as abstracts or
+  open-access full text from arXiv or Europe PMC, with the inspection level recorded;
+  Crossref flags retracted, withdrawn or corrected sources and unknown stays unknown.
+  The router labels each passage, retracted sources are never counted, the overall label
+  is computed and abstains when evidence is missing, and every version is
+  citation-checked before it is published. Budgets per claim keep unreached claims
+  visible but unassessed. Papers and Router calls share a PostgreSQL token bucket under
+  the account limit (migration `0010_provider_buckets`). The production `reanalysis`
+  handler reruns corrected claims, searches deeper, or brings in the confirmed full
+  video. Registered only with the server-side `OVRLY_SCHOLARXIV_API_KEY`; tests replay
+  synthetic cassettes and never call a provider.
 - Capture pipeline orchestration (#24): successful byte validation atomically
   queues `asr` and `device_text`, then `claim_extraction` after both publish,
   with owner-scoped, idempotent per-chunk jobs and Stop cancellation across the
