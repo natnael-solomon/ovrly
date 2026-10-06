@@ -34,6 +34,10 @@ quality = [
 contracts = [
     "openapi-spec-validator>=0.7,<1",
 ]
+# Release workflow only: CycloneDX SBOM of the exported runtime requirements. Not a runtime dependency.
+release = [
+    "cyclonedx-bom==7.5.0",
+]
 
 [build-system]
 requires = ["hatchling"]
