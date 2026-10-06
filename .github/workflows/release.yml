@@ -1,0 +1,317 @@
+name: Release
+
+# Tagged demo build (REPO-07, #17). A pushed v* tag produces one answer to "which build did we demo":
+#
+#   gate             tag v<versionName> on a main commit with green Android checks, the version and date
+#                    assigned in CHANGELOG.md with known limitations, and a protected `release` environment.
+#   build            two independent unsigned release builds of the same commit (different runners and
+#                    checkout paths, no caches), plus Android and backend SBOMs.
+#   reproducibility  compares the two builds entry by entry; unexplained differences fail.
+#   attest           GitHub build provenance for the unsigned APK, mapping and SBOMs.
+#   sign             owner approval (`release` environment), then demo-key or throwaway-debug-key signing,
+#                    provenance for the signed APK and one artifact bundle. Nothing is published.
+#
+# Pull requests that change this workflow or its helpers, and manual runs, execute build and
+# reproducibility only. See docs/release-signing.md#tagged-demo-releases.
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/scripts/apk_reproducibility.py
+      - .github/scripts/release_tag.py
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  RELEASE_OWNER: natnael-solomon
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  gate:
+    name: Release gate
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+      actions: read
+    outputs:
+      version: ${{ steps.gate.outputs.version }}
+    steps:
+      - name: Check out the tagged helpers, changelog and app version
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/scripts/
+            CHANGELOG.md
+            android/app/build.gradle.kts
+
+      - name: Test the release helpers
+        run: python3 -m unittest discover -s .github/scripts -p 'test_release_*.py'
+
+      - name: Check the tag, changelog, approval environment and Android checks
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release_tag.py gate --notes notes/release-notes.md
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-notes
+          path: notes/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  build:
+    name: Build unsigned release (${{ matrix.build }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - build: primary
+            dir: .
+          - build: rebuild
+            dir: rebuild/ovrly
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ${{ matrix.dir }}
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Ensure required Android SDK packages
+        run: |
+          missing=()
+          [[ -f "$ANDROID_HOME/platforms/android-37.0/android.jar" ]] || missing+=("platforms;android-37.0")
+          [[ -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" ]] || missing+=("build-tools;36.0.0")
+          if (( ${#missing[@]} )); then sdkmanager --install "${missing[@]}"; fi
+
+      - name: Set up Gradle and validate wrappers
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          # A release consumes no cache written elsewhere: every dependency is downloaded and verified.
+          cache-disabled: true
+
+      - name: Build the unsigned release and Android SBOM
+        working-directory: ${{ matrix.dir }}/android
+        run: >-
+          sh gradlew --no-daemon --console=plain --dependency-verification=strict --no-build-cache
+          :app:assembleRelease :app:cyclonedxDirectBom
+
+      - name: Collect build outputs
+        env:
+          SRC: ${{ matrix.dir }}
+        run: |
+          mkdir -p out
+          cp "$SRC/android/app/build/outputs/apk/release/app-release-unsigned.apk" out/
+          cp "$SRC/android/app/build/outputs/mapping/release/mapping.txt" out/
+          cp "$SRC/android/app/build/reports/sbom/ovrly-android.cdx.json" out/
+          sha256sum out/*
+
+      - name: Set up uv
+        if: matrix.build == 'primary'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Backend SBOM from the locked runtime requirements
+        if: matrix.build == 'primary'
+        run: |
+          uv export --project backend --frozen --no-default-groups --no-emit-project \
+            --format requirements-txt --output-file out/backend-requirements.txt
+          uv run --project backend --frozen --only-group release cyclonedx-py requirements \
+            --pyproject backend/pyproject.toml --mc-type application --of JSON --output-reproducible \
+            -o out/ovrly-backend.cdx.json out/backend-requirements.txt
+
+      - name: Upload build outputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-build-${{ matrix.build }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  reproducibility:
+    name: Compare the two builds
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the comparison helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Download both builds
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-build-*
+          path: builds
+          digest-mismatch: error
+
+      - name: Size and content comparison (apkanalyzer)
+        run: |
+          apkanalyzer="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+          {
+            echo '## apkanalyzer apk compare --different-only'
+            echo '```'
+            "$apkanalyzer" apk compare --different-only \
+              builds/release-build-primary/app-release-unsigned.apk \
+              builds/release-build-rebuild/app-release-unsigned.apk
+            echo '```'
+          } | tee apkanalyzer.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Entry-by-entry comparison
+        run: >-
+          python3 .github/scripts/apk_reproducibility.py
+          builds/release-build-primary builds/release-build-rebuild --report reproducibility.md
+          && cat reproducibility.md >> "$GITHUB_STEP_SUMMARY"
+          || { cat reproducibility.md >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+
+      - name: Upload the comparison
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-reproducibility
+          path: |
+            reproducibility.md
+            apkanalyzer.md
+          if-no-files-found: warn
+          retention-days: 7
+
+  attest:
+    name: Attest build provenance
+    needs: [gate, build]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the primary build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-build-primary
+          path: in
+          digest-mismatch: error
+
+      - name: Attest the unsigned APK, mapping and SBOMs
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            in/app-release-unsigned.apk
+            in/mapping.txt
+            in/ovrly-android.cdx.json
+            in/ovrly-backend.cdx.json
+
+  sign:
+    name: Sign the demo APK
+    needs: [gate, build, reproducibility, attest]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the signing helpers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Ensure build-tools for apksigner and aapt2
+        run: |
+          if [[ ! -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ||
+                ! -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" ]]; then
+            sdkmanager --install "build-tools;36.0.0"
+          fi
+
+      - name: Download the primary build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-build-primary
+          path: in
+          digest-mismatch: error
+
+      - name: Download the release notes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-notes
+          path: notes
+          digest-mismatch: error
+
+      - name: Sign and record provenance
+        env:
+          DEMO_KEYSTORE_B64: ${{ secrets.DEMO_KEYSTORE_B64 }}
+          DEMO_KEYSTORE_PASSWORD: ${{ secrets.DEMO_KEYSTORE_PASSWORD }}
+          DEMO_KEY_ALIAS: ${{ secrets.DEMO_KEY_ALIAS }}
+          DEMO_KEY_PASSWORD: ${{ secrets.DEMO_KEY_PASSWORD }}
+          DEMO_SIGNING_CERT_SHA256: ${{ vars.DEMO_SIGNING_CERT_SHA256 }}
+        run: |
+          python3 .github/scripts/release_tag.py sign \
+            --unsigned in/app-release-unsigned.apk --notes notes/release-notes.md --out out
+          cp in/* out/
+          cat out/release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest the signed APK
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: out/ovrly-${{ needs.gate.outputs.version }}.apk
+
+      - name: Upload the release bundle (not published)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ovrly-${{ needs.gate.outputs.version }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 90
