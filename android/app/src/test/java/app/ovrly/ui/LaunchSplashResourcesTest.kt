@@ -42,13 +42,18 @@ class LaunchSplashResourcesTest {
         bitmapAtEveryDensity("splash_ovrly", "drawable", heightDp = 288, maxKb = 150)
     }
 
-    @Test fun notificationIconKeepsItsThinMonochromeGeometry() {
-        val logo = xml("res/drawable/ic_ovrly.xml").elements("path").single()
-        assertEquals(
-            "M16.75,20.227241 A9.5,9.5 0,1 1,16.75 3.772759 M20.927080,8.750809 A9.5,9.5 0,0 1,20.927080 15.249191",
-            logo.attr("pathData"),
-        )
-        assertEquals("#363C3B", logo.attr("strokeColor"))
+    @Test fun notificationIconIsTheFilledLandingMark() {
+        val icon = xml("res/drawable/ic_ovrly.xml")
+        val logo = icon.elements("path").single()
+        // The landing ring traced on a 920-unit square: two filled segments, no stroke.
+        assertEquals(2, Regex("Z").findAll(logo.attr("pathData")).count())
+        assertEquals("#363C3B", logo.attr("fillColor"))
+        assertEquals("", logo.attr("strokeColor"))
+        val group = icon.elements("group").single()
+        val scale = group.attr("scaleX").toDouble()
+        val diameter = MARK_UNITS * scale
+        assertEquals(22.0, diameter, 0.01)
+        assertEquals(12.0, MARK_UNITS / 2 * scale + group.attr("translateX").toDouble(), 0.01)
     }
 
     @Test fun headerWordmarkBitmapShipsAtEveryDensity() {
@@ -77,9 +82,9 @@ class LaunchSplashResourcesTest {
         assertEquals("108dp", mono.attr("width"))
         val group = mono.elements("group").single()
         val scale = group.attr("scaleX").toDouble()
-        val outer = (9.5 + 2.6 / 2) * scale
-        val center = 12 * scale + group.attr("translateX").toDouble()
-        assertEquals(54.0, center, 0.0)
+        val outer = MARK_UNITS / 2 * scale
+        val center = MARK_UNITS / 2 * scale + group.attr("translateX").toDouble()
+        assertEquals(54.0, center, 0.01)
         assertTrue("monochrome ring must stay inside the 66dp safe zone", outer * 2 <= 66)
         assertEquals(xml("res/drawable/ic_ovrly.xml").elements("path").single().attr("pathData"),
             mono.elements("path").single().attr("pathData"))
@@ -157,4 +162,9 @@ class LaunchSplashResourcesTest {
 
     private fun Element.activity(name: String): Element =
         elements("activity").single { it.attr("name") == ".${name}Activity" }
+
+    private companion object {
+        /** The traced landing ring spans 920 units: outer diameter of both segments. */
+        const val MARK_UNITS = 920.0
+    }
 }

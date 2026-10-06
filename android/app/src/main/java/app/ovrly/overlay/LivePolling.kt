@@ -97,9 +97,19 @@ internal class PollingLiveResultsSource(
 
     private var job: Job? = null
 
+    /** The capture session being polled; keys the overlay's once-per-session expand. */
+    @Volatile var sessionId: String? = null
+        private set
+
+    /** The capture's investigation, once the first status read named it. */
+    @Volatile var investigationId: String? = null
+        private set
+
     fun start(scope: CoroutineScope, sessionId: String) {
         stop()
         fixtureReport = false
+        investigationId = null
+        this.sessionId = sessionId
         mutable.value = LiveResults.NotConnected
         job = scope.launch { poll(sessionId) }
     }
@@ -120,6 +130,7 @@ internal class PollingLiveResultsSource(
         while (true) {
             val keep = try {
                 val status = fetcher.captureStatus(sessionId)
+                investigationId = status.session.investigationId
                 val report = fetcher.investigation(status.session.investigationId).report
                 fixtureReport = report?.fixture == true
                 val next = reduceLiveResults(status, report, mutable.value)
@@ -155,12 +166,17 @@ internal class PollingLiveResultsSource(
 internal object LiveResultsConnection {
     private var active: PollingLiveResultsSource? = null
 
-    fun start(scope: CoroutineScope, fetcher: LiveResultsFetcher, sessionId: String) {
+    fun start(
+        scope: CoroutineScope,
+        fetcher: LiveResultsFetcher,
+        sessionId: String
+    ): PollingLiveResultsSource {
         stop()
         val source = PollingLiveResultsSource(fetcher)
         active = source
         OverlayStore.liveSource.value = source
         source.start(scope, sessionId)
+        return source
     }
 
     fun stop() {

@@ -1,6 +1,7 @@
 package app.ovrly.capture
 
 import android.content.Context
+import app.ovrly.AppNotifications
 import app.ovrly.contract.CaptureStatus
 import app.ovrly.contract.Investigation
 import app.ovrly.data.ApiServices
@@ -9,9 +10,13 @@ import app.ovrly.overlay.LiveConnection
 import app.ovrly.overlay.LiveResultsConnection
 import app.ovrly.overlay.LiveResultsFetcher
 import app.ovrly.overlay.OverlayStore
+import app.ovrly.overlay.researchSettled
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * The live panel's reads: the capture status through the capture API and the investigation
@@ -37,6 +42,7 @@ internal class CaptureLiveResultsFetcher(
 internal object CaptureLive {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var connected: String? = null
+    private var watcher: Job? = null
 
     /** Starts polling [sessionId] unless it is already polling or ended normally. */
     fun connect(context: Context, sessionId: String) {
@@ -47,16 +53,25 @@ internal object CaptureLive {
             val lost = OverlayStore.liveSource.value.results.value.connection == LiveConnection.LOST
             if (connected == sessionId && !lost) return
             connected = sessionId
-            LiveResultsConnection.start(
+            val source = LiveResultsConnection.start(
                 scope,
                 CaptureLiveResultsFetcher(capture, investigations),
                 sessionId
             )
+            watcher?.cancel()
+            val app = context.applicationContext
+            // Independent of the overlay: dismissing it does not stop research or this notice.
+            watcher = scope.launch {
+                val settled = source.results.first { researchSettled(it) }
+                AppNotifications.resultsReady(app, settled.claims.size, source.investigationId)
+            }
         }
     }
 
     /** Returns the overlay to "not connected"; called when a new capture replaces the old one. */
     fun disconnect() = synchronized(this) {
+        watcher?.cancel()
+        watcher = null
         if (connected != null) {
             connected = null
             LiveResultsConnection.stop()

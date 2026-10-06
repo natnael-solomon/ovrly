@@ -70,6 +70,12 @@ class LiveResultsCopyTest {
         assertFalse(description.contains(".."))
     }
 
+    @Test fun talkBackDescriptionKeepsTheFullClaimTheRowTruncates() {
+        val long = List(40) { "word$it" }.joinToString(" ")
+        val description = claimDescription(speech.copy(text = long), updated.phase)
+        assertTrue(description.contains(long))
+    }
+
     @Test fun copyNeverUsesAnEmDash() {
         val copy = LiveSessionPhase.entries.map(::livePhaseLabel) +
             LiveClaimState.entries.map(::label) +

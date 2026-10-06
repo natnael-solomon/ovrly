@@ -5,29 +5,25 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -36,7 +32,11 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.ovrly.overlay.LiveClaim
@@ -44,105 +44,128 @@ import app.ovrly.overlay.LiveClaimState
 import app.ovrly.overlay.LiveCoverage
 import app.ovrly.overlay.LiveResults
 import app.ovrly.overlay.LiveSessionPhase
-import kotlin.math.roundToInt
+
+/** Size and look of the expanded live panel, set by the host from the demo panel geometry. */
+internal data class LivePanelFrame(
+    val width: Dp = 340.dp,
+    val maxHeight: Dp = 360.dp,
+    val higherOpacity: Boolean = false,
+    /** False when the phone's animations are off: forms switch at once, nothing pulses. */
+    val animate: Boolean = true
+)
 
 /**
- * Compact live results: session state, the captured-segment label, update notices and the
- * claims in spoken order, or one claim's detail. [showStop] adds a Stop control for hosts
- * without the recording pill; Stop only opens the choice, it never stops capture directly.
+ * The expanded live results, in the demo panel's frame and style ([OverlayPanelScaffold]): it
+ * grows with its content up to [LivePanelFrame.maxHeight] and scrolls inside. The header
+ * carries the mark, "Examining m:ss" (or the session state after Stop), the fixture label,
+ * Stop while examining or Dismiss after it, and Collapse. The Stop choice opens in the body.
  */
 @Composable
-internal fun LiveResultsPanel(
+internal fun LiveExpandedPanel(
     model: LiveOverlayModel,
     actions: LivePanelActions,
     modifier: Modifier = Modifier,
-    layout: LiveOverlayLayout = LiveOverlayLayout(),
-    showStop: Boolean = false
+    frame: LivePanelFrame = LivePanelFrame()
 ) {
-    val p = LocalOvrlyPalette.current
-    val results = model.results
-    val panel = model.panel
-    val detail = panel.detailClaimId?.let { id -> results.claims.firstOrNull { it.id == id } }
-    CompositionLocalProvider(LocalContentColor provides p.ink) {
-        Column(
-            modifier
-                .widthIn(max = 360.dp)
-                .heightIn(max = layout.maxHeight)
-                .mockGlass(layout.higherOpacity)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            LiveHeader(results, model.sourceLabel, showStop, actions)
-            // Everything below the header scrolls as one region, so large text never hides
-            // the list behind the coverage line and notice. The host cap bounds it; without
-            // one (previews) it falls back to a fixed height.
-            Column(
-                Modifier
-                    .weight(1f, fill = false)
-                    .heightIn(max = scrollCap(layout.maxHeight))
-                    .onGloballyPositioned { actions.onListTop(it.positionInRoot().y.roundToInt()) }
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                results.coverage?.let { CapturedSegment(it) }
-                panel.notices.lastOrNull()?.let { id ->
-                    results.claims.firstOrNull { it.id == id }?.let { UpdateNotice(it, actions) }
-                }
-                HorizontalDivider(color = p.rule)
-                if (detail != null) {
-                    ClaimDetail(detail, results.phase, actions.onCloseClaim)
-                } else {
-                    ClaimList(results, actions.onOpenClaim)
-                }
-            }
+    OverlayPanelScaffold(
+        header = { LiveHeader(model, actions, model.examining) },
+        footer = { OverlayPanelFooter("Drag header to move") },
+        modifier = modifier,
+        spec = OverlayPanelSpec(
+            frame.width,
+            frame.maxHeight,
+            fixedHeight = false,
+            higherOpacity = frame.higherOpacity,
+            onHeaderHeight = actions.onHeaderHeight
+        )
+    ) {
+        if (model.panel.stopPrompt) {
+            StopChoiceContent(actions.onStopChoice, actions.onCancelStop)
+        } else {
+            LiveResultsBody(model, actions)
         }
     }
 }
 
+/** The running capture, for the header and the pill. */
+internal data class ExaminingState(val seconds: Int, val canStop: Boolean = true)
+
 @Composable
-private fun LiveHeader(
-    results: LiveResults,
-    sourceLabel: String?,
-    showStop: Boolean,
+private fun RowScope.LiveHeader(
+    model: LiveOverlayModel,
     actions: LivePanelActions,
-    modifier: Modifier = Modifier
+    examining: ExaminingState?
 ) {
     val p = LocalOvrlyPalette.current
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
+    OverlayMark(Modifier.size(22.dp))
+    Spacer(Modifier.width(10.dp))
+    Column(Modifier.weight(1f)) {
+        Text(
+            examining?.let { examiningLabel(it.seconds) } ?: "Live results",
+            modifier = Modifier.semantics { heading() },
+            style = MaterialTheme.typography.titleSmall
+        )
+        Text(
+            liveStatusLabel(model.results),
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            style = MaterialTheme.typography.labelSmall,
+            color = p.muted,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        model.sourceLabel?.let {
+            // Two lines, so "FIXTURE / NOT LIVE" keeps its disclosure at large font sizes.
             Text(
-                "Live results",
-                modifier = Modifier.semantics { heading() },
-                style = MaterialTheme.typography.titleSmall
+                it.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = p.error,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
-            Text(
-                liveStatusLabel(results),
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                style = MaterialTheme.typography.labelMedium,
-                color = p.muted
-            )
-            sourceLabel?.let {
-                Text(it.uppercase(), style = MaterialTheme.typography.labelMedium, color = p.error)
-            }
         }
-        if (showStop) {
-            PanelIconButton(Glyph.Stop, "Stop capture", actions.onRequestStop)
-        }
-        PanelIconButton(Glyph.Close, "Hide live results. Capture continues", actions.onHide)
+    }
+    if (examining != null) {
+        if (examining.canStop) PanelIconButton(Glyph.Stop, "Stop examining", actions.onRequestStop)
+    } else {
+        PanelIconButton(Glyph.Close, "Dismiss overlay. Research continues", actions.onDismiss)
+    }
+    PanelIconButton(Glyph.Collapse, "Collapse live results", actions.onCollapse)
+}
+
+/** Coverage, the newest update notice, then the claims in spoken order or one claim's detail. */
+@Composable
+internal fun ColumnScope.LiveResultsBody(model: LiveOverlayModel, actions: LivePanelActions) {
+    val p = LocalOvrlyPalette.current
+    val results = model.results
+    val detail = model.panel.detailClaimId?.let { id -> results.claims.firstOrNull { it.id == id } }
+    results.coverage?.let { CapturedSegment(it) }
+    model.panel.notices.lastOrNull()?.let { id ->
+        results.claims.firstOrNull { it.id == id }?.let { UpdateNotice(it, actions) }
+    }
+    HorizontalDivider(color = p.rule)
+    if (detail != null) {
+        ClaimDetail(detail, results.phase, actions.onCloseClaim)
+    } else {
+        ClaimList(results, actions.onOpenClaim)
     }
 }
 
 @Composable
 private fun CapturedSegment(coverage: LiveCoverage, modifier: Modifier = Modifier) {
     val p = LocalOvrlyPalette.current
-    Column(modifier.semantics(mergeDescendants = true) {}) {
-        Text(CAPTURED_SEGMENT_LABEL, style = MaterialTheme.typography.labelLarge)
-        Text(
-            capturedCoverageLabel(coverage),
-            style = MaterialTheme.typography.bodySmall,
-            color = p.muted
-        )
-    }
+    // One line: what was analyzed and how much of the video that is.
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = p.ink, fontWeight = FontWeight.Medium)) {
+                append(CAPTURED_SEGMENT_LABEL)
+            }
+            append(" · ")
+            append(capturedCoverageLabel(coverage))
+        },
+        modifier = modifier,
+        style = MaterialTheme.typography.labelMedium,
+        color = p.muted
+    )
 }
 
 @Composable
@@ -155,8 +178,8 @@ private fun UpdateNotice(
     Row(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(p.accent.copy(alpha = if (p.dark) 0.22f else 0.42f))
+            .clip(RoundedCornerShape(14.dp))
+            .background(p.accent.copy(alpha = if (p.dark) 0.18f else 0.36f))
             .semantics { liveRegion = LiveRegionMode.Polite },
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -169,13 +192,13 @@ private fun UpdateNotice(
                     onClickLabel = "Open claim detail",
                     onClick = { actions.onOpenClaim(claim.id) }
                 )
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
-            Text(UPDATE_NOTICE_LABEL, style = MaterialTheme.typography.labelLarge)
+            Text(UPDATE_NOTICE_LABEL, style = MaterialTheme.typography.labelMedium)
             Text(
                 claim.text ?: PENDING_CLAIM_TEXT,
                 style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
@@ -193,7 +216,7 @@ private fun ClaimList(
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (results.claims.isEmpty()) {
             Text(
                 emptyClaimsLabel(results.extraction, results.phase),
@@ -226,18 +249,21 @@ private fun ClaimRow(
                 contentDescription = claimDescription(claim, phase)
                 stateDescription = state
             }
-            .padding(horizontal = 6.dp, vertical = 8.dp),
+            .padding(horizontal = 4.dp, vertical = 6.dp),
         verticalAlignment = Alignment.Top
     ) {
-        Text(
-            claim.startMs?.let(::clockLabel) ?: "--:--",
-            modifier = Modifier.widthIn(min = 44.dp).padding(end = 4.dp),
-            softWrap = false,
-            style = MaterialTheme.typography.labelMedium,
-            color = p.muted
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            StateChip(claim.state, state)
+        // The time sits on the state line, so the claim text gets the panel's full width.
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    claim.startMs?.let(::clockLabel) ?: "--:--",
+                    softWrap = false,
+                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                    color = p.muted
+                )
+                Spacer(Modifier.width(8.dp))
+                StateChip(claim.state, state)
+            }
             Text(
                 claim.text ?: PENDING_CLAIM_TEXT,
                 style = MaterialTheme.typography.bodyMedium,
@@ -320,7 +346,7 @@ private fun ClaimDetail(
 }
 
 @Composable
-private fun PanelIconButton(
+internal fun PanelIconButton(
     glyph: Glyph,
     label: String,
     onClick: () -> Unit,
@@ -337,8 +363,3 @@ private fun PanelIconButton(
         OverlayGlyph(glyph, Modifier.size(18.dp))
     }
 }
-
-private val MaxListHeight = 260.dp
-
-private fun scrollCap(maxHeight: Dp): Dp =
-    if (maxHeight == Dp.Unspecified) MaxListHeight else Dp.Unspecified

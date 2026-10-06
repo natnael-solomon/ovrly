@@ -31,7 +31,7 @@ Compact controls and the larger demo are mutually exclusive modes of one foregro
 | Start capture or voice from the companion | Close the demo. Capture starting through another route also closes it. |
 | Close a demo | Do not restart capture or voice. |
 | Change theme or opacity | Update the active window without restarting capture. |
-| Stop from the compact overlay | Ask "Continue research in queue" or "Keep only available results" (or keep recording), then pass the answer to capture through `StopChoiceHandler`; the overlay never closes a session itself. |
+| Stop from the overlay | Ask "Continue research in queue" or "Keep only available results" (or keep examining), then pass the answer to capture through `StopChoiceHandler`; the overlay never closes a session itself. |
 | Hide the live results panel | Keep capture running; Stop stays on the pill and in the capture notification. |
 
 The compact overlay's live results panel reads `OverlayStore.liveSource`, which is "not connected" until a capture session starts the polling adapter (`LiveResultsConnection.start`); fixture results are labelled and reachable only from previews, tests and a debug-only launcher. See [Live overlay results](../android/README.md#live-overlay-results).

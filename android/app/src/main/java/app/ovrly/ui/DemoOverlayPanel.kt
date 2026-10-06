@@ -1,12 +1,18 @@
 package app.ovrly.ui
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -64,11 +71,8 @@ internal fun DemoOverlayPanel(
     var selected by remember { mutableIntStateOf(0) }
     var details by remember { mutableStateOf(false) }
     var checking by remember { mutableStateOf(false) }
-    val headerPadding = with(LocalDensity.current) { 12.dp.roundToPx() }
-    CompositionLocalProvider(LocalContentColor provides p.ink) {
-    Column(modifier.width(panelWidth).height(maxHeight).mockGlass().padding(12.dp)) {
-        Row(Modifier.fillMaxWidth().onSizeChanged { onHeaderHeight(it.height + headerPadding) },
-            verticalAlignment = Alignment.CenterVertically) {
+    OverlayPanelScaffold(
+        header = {
             Column(Modifier.weight(1f)) {
                 Text("Demo", style = MaterialTheme.typography.titleSmall)
                 Text("DEMO / SIMULATED", style = MaterialTheme.typography.labelMedium,
@@ -77,10 +81,11 @@ internal fun DemoOverlayPanel(
             IconButton(onClick = onClose, modifier = Modifier.size(48.dp).semantics { contentDescription = "Close demo overlay" }) {
                 OverlayGlyph(Glyph.Close, Modifier.size(20.dp))
             }
-        }
-        HorizontalDivider(Modifier.padding(vertical = 8.dp))
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        },
+        footer = { OverlayPanelFooter("Drag header to move / no recording") },
+        modifier = modifier,
+        spec = OverlayPanelSpec(panelWidth, maxHeight, onHeaderHeight = onHeaderHeight)
+    ) {
             Text("A moment outside / sample", style = MaterialTheme.typography.bodySmall, color = p.muted)
             if (checking) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -120,12 +125,76 @@ internal fun DemoOverlayPanel(
                 Text(if (checking) "Show sample results" else "Preview checking state")
             }
             Text(blurLabel, style = MaterialTheme.typography.labelSmall, color = p.muted)
+    }
+}
+
+/**
+ * The large overlay panel shared by the demo and the expanded live results, so the two never
+ * drift apart: glass, 12 dp padding, a header row (the only drag area; its height plus the top
+ * padding goes to [OverlayPanelSpec.onHeaderHeight]), dividers, a scrolling body and a footer
+ * line, sized by [spec].
+ */
+@Composable
+internal fun OverlayPanelScaffold(
+    header: @Composable RowScope.() -> Unit,
+    footer: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    spec: OverlayPanelSpec = OverlayPanelSpec(),
+    body: @Composable ColumnScope.() -> Unit
+) {
+    val p = LocalOvrlyPalette.current
+    val headerPadding = with(LocalDensity.current) { 12.dp.roundToPx() }
+    val fixedHeight = spec.fixedHeight
+    val size =
+        if (fixedHeight) Modifier.height(spec.height) else Modifier.heightIn(max = spec.height)
+    CompositionLocalProvider(LocalContentColor provides p.ink) {
+        Column(
+            modifier.width(spec.width).then(size).mockGlass(spec.higherOpacity)
+                .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
+                .padding(12.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().onSizeChanged {
+                    spec.onHeaderHeight(it.height + headerPadding)
+                },
+                verticalAlignment = Alignment.CenterVertically,
+                content = header
+            )
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Column(
+                Modifier.weight(1f, fill = fixedHeight).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                content = body
+            )
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            footer()
         }
-        HorizontalDivider(Modifier.padding(vertical = 8.dp))
-        Text("Drag header to move / no recording", style = MaterialTheme.typography.labelSmall, color = p.muted,
-            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
     }
-    }
+}
+
+/**
+ * The panel's size and glass. With [fixedHeight] it is always [height] tall (the demo);
+ * otherwise it grows with its content up to [height].
+ */
+@Immutable
+internal data class OverlayPanelSpec(
+    val width: Dp = 340.dp,
+    val height: Dp = 360.dp,
+    val fixedHeight: Boolean = true,
+    val higherOpacity: Boolean = false,
+    /** Height of the header plus the top padding: the window's drag area. */
+    val onHeaderHeight: (Int) -> Unit = {}
+)
+
+/** The panel's footer line, announced politely when it changes. */
+@Composable
+internal fun OverlayPanelFooter(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        modifier = modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        style = MaterialTheme.typography.labelSmall,
+        color = LocalOvrlyPalette.current.muted
+    )
 }
 
 @Preview(name = "Mock 1 / demo panel", widthDp = 380, heightDp = 740)
