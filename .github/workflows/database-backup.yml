@@ -1,0 +1,116 @@
+name: Database backup
+
+# Manual pg_dump of the BE-11 Postgres (#21), restored into a disposable PostgreSQL 16
+# service container to prove the dump restores, then, only when `upload` is checked,
+# encrypted and uploaded. See docs/operations/deployment.md. Needs the repository secret
+# OVRLY_BACKUP_DATABASE_URL (an externally reachable postgres:// URL), and
+# OVRLY_BACKUP_PASSPHRASE for uploads.
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: Upload the encrypted dump as a 7-day artifact (owner decision; see the data map)
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-backup
+  cancel-in-progress: false
+
+env:
+  # Same pinned image as Backend checks; pg_dump must be at least the server's major version.
+  PG_IMAGE: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+
+jobs:
+  backup:
+    name: Dump, restore check and encrypt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      restore:
+        image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+        env:
+          POSTGRES_USER: restore
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: restore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restore -d restore"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dump the deployed database
+        env:
+          SOURCE_URL: ${{ secrets.OVRLY_BACKUP_DATABASE_URL }}
+        run: |
+          if [[ -z "$SOURCE_URL" ]]; then
+            echo "::error::Set the OVRLY_BACKUP_DATABASE_URL repository secret."
+            exit 1
+          fi
+          # The app uses postgresql+psycopg://; libpq needs a plain postgresql:// URL.
+          export DATABASE_URL="postgresql://${SOURCE_URL#*://}"
+          mkdir -p "$RUNNER_TEMP/backup"
+          docker run --rm --network host -e DATABASE_URL \
+            -v "$RUNNER_TEMP/backup:/backup" "$PG_IMAGE" \
+            sh -c 'pg_dump --format=custom --no-owner --no-privileges \
+              --dbname="$DATABASE_URL" --file=/backup/ovrly.dump'
+          echo "Dump size: $(stat -c %s "$RUNNER_TEMP/backup/ovrly.dump") bytes"
+      - name: Restore into a disposable database
+        run: |
+          docker run --rm --network host -v "$RUNNER_TEMP/backup:/backup:ro" \
+            -e PGPASSWORD=ci-only "$PG_IMAGE" \
+            pg_restore --no-owner --no-privileges --exit-on-error \
+              -h 127.0.0.1 -U restore -d restore /backup/ovrly.dump
+          head=$(find backend/migrations/versions -name '0*.py' -printf '%f\n' | sort | tail -1)
+          head=${head%.py}
+          restored=$(docker run --rm --network host -e PGPASSWORD=ci-only "$PG_IMAGE" \
+            psql -h 127.0.0.1 -U restore -d restore -tAc 'SELECT version_num FROM alembic_version')
+          counts=$(docker run --rm --network host -e PGPASSWORD=ci-only "$PG_IMAGE" \
+            psql -h 127.0.0.1 -U restore -d restore -tAc \
+            "SELECT 'principals=' || (SELECT count(*) FROM principals)
+               || ' investigations=' || (SELECT count(*) FROM investigations)
+               || ' jobs=' || (SELECT count(*) FROM jobs)")
+          {
+            echo "### Database backup"
+            echo
+            echo "Restored schema: $restored (repository head: $head)"
+            echo "Restored rows: $counts"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [[ "$restored" != "$head" ]]; then
+            echo "::warning::The restored schema is not at the repository migration head."
+          fi
+      - name: Encrypt the dump
+        if: ${{ inputs.upload }}
+        env:
+          PASSPHRASE: ${{ secrets.OVRLY_BACKUP_PASSPHRASE }}
+        run: |
+          if [[ ${#PASSPHRASE} -lt 20 ]]; then
+            echo "::error::Set OVRLY_BACKUP_PASSPHRASE (at least 20 characters)."
+            exit 1
+          fi
+          cd "$RUNNER_TEMP/backup"
+          gpg --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 --output ovrly.dump.gpg ovrly.dump <<< "$PASSPHRASE"
+          sha256sum ovrly.dump.gpg > ovrly.dump.gpg.sha256
+      - name: Remove the plaintext dump
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/backup/ovrly.dump"
+      - name: Upload the encrypted dump
+        if: ${{ inputs.upload }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: database-backup
+          path: |
+            ${{ runner.temp }}/backup/ovrly.dump.gpg
+            ${{ runner.temp }}/backup/ovrly.dump.gpg.sha256
+          retention-days: 7
+          if-no-files-found: error
