@@ -5,7 +5,9 @@ should BE-07 use? Related OCR/sampling questions: RFC-D28, D68 and D71.
 
 **Status:** Open, recorded 4 October 2026; updated 5 October. Offline scoring
 and an opt-in paired Groq trial runner are implemented. No winner or production
-chunk size is accepted.
+chunk size is accepted. The on-device screen-text route for live capture is recorded
+separately in [0005](0005-on-device-screen-text.md) (bundled ML Kit, telemetry upload
+removed); it does not close the comparisons below.
 
 **Owner and participants:** Neb-iyu owns RES-02 (#14). Product-owner approval
 and the Android/BE-07 handoff remain necessary for cross-cutting choices.

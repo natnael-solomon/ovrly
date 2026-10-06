@@ -24,15 +24,27 @@ class CaptureFilesTest {
     private fun manifest(root: File) = LocalManifest.parse(File(root, "capture.json").readText())
     private val audio = byteArrayOf(1, 0, 2, 0)
 
+    private fun text(pts: Long, status: FrameStatus = FrameStatus.RECOGNIZED) = FrameText(
+        pts,
+        status,
+        1,
+        if (status == FrameStatus.RECOGNIZED) {
+            listOf(TextObservation("Breaking", listOf(100, 200, 9_000, 800), pts))
+        } else {
+            emptyList()
+        },
+        recognitionMs = 42
+    )
+
     @Test fun audioAndFramesBecomeSequencedChunksWithCaptureRelativeOffsets() {
         val root = root()
         val files = CaptureFiles(root)
         files.begin()
         files.writeAudio(audio, 4, 0)
-        files.writeFrame(byteArrayOf(42, 43), 4_000)
+        files.writeFrame(byteArrayOf(42, 43), text(4_000))
         files.writeAudio(audio, 4, 9_990)
         files.writeAudio(audio, 4, 10_010)
-        files.writeFrame(byteArrayOf(44), 15_000)
+        files.writeFrame(byteArrayOf(44), text(15_000))
         files.advance(20_000)
         files.writeAudio(audio, 4, 21_000)
         files.finish(25_500, "Explicit stop", true)
@@ -47,7 +59,7 @@ class CaptureFilesTest {
             manifest.chunks.map { it.startMs to it.endMs }
         )
         assertEquals(
-            listOf(Modality.SPEECH, Modality.SPEECH, Modality.SPEECH),
+            listOf(Modality.BOTH, Modality.BOTH, Modality.SPEECH),
             manifest.chunks.map { it.modality }
         )
         assertEquals(
@@ -65,12 +77,25 @@ class CaptureFilesTest {
         assertThrows(IOException::class.java) { files.writeAudio(audio, 4, 26_000) }
     }
 
+    private fun assertPolicyAndRecognizer(description: JSONObject) {
+        val sampling = description.getJSONObject("sampling")
+        assertEquals("change_triggered", sampling.getString("policy"))
+        assertEquals(1_000, sampling.getInt("probe_interval_ms"))
+        assertEquals(5_000, sampling.getInt("heartbeat_ms"))
+        assertEquals(20, sampling.getInt("max_frames_per_minute"))
+        val recognizer = description.getJSONObject("recognizer")
+        assertEquals("mlkit-text-recognition-latin-bundled", recognizer.getString("name"))
+        assertEquals("16.0.1", recognizer.getString("version"))
+    }
+
     @Test fun chunkPackageHoldsOnlyCaptureTimesAndItsHashMatches() {
         val root = root()
         val files = CaptureFiles(root)
         files.begin()
         files.writeAudio(audio, 4, 100)
-        files.writeFrame(byteArrayOf(42, 43), 5_000)
+        files.writeFrame(byteArrayOf(42, 43), text(5_000))
+        files.writeFrame(null, text(6_000, FrameStatus.CAPPED))
+        files.writeFrame(byteArrayOf(9), text(6_500, FrameStatus.FAILED))
         files.finish(7_000, "Stop", true)
         val chunk = manifest(root).chunks.single()
         val file = File(root, chunk.fileName)
@@ -90,37 +115,53 @@ class CaptureFilesTest {
             assertEquals(0, description.getInt("start_ms"))
             assertEquals(7_000, description.getInt("end_ms"))
             assertEquals("capture", description.getString("timebase"))
-            assertEquals("speech", description.getString("modality"))
+            assertEquals("both", description.getString("modality"))
             assertFalse(description.getBoolean("frames_uploaded"))
-            assertEquals(5_000, description.getJSONArray("local_frame_pts").getInt(0))
-            assertEquals(0, description.getJSONArray("text_observations").length())
-            val sampling = description.getJSONObject("sampling")
-            assertEquals("fixed", sampling.getString("policy"))
-            assertEquals(5_000, sampling.getInt("interval_ms"))
-            assertTrue(description.isNull("recognizer"))
+            val frames = description.getJSONArray("frames")
+            assertEquals(2, frames.length())
+            assertEquals(5_000, frames.getJSONObject(0).getInt("frame_pts"))
+            assertEquals("recognized", frames.getJSONObject(0).getString("status"))
+            assertEquals(42, frames.getJSONObject(0).getInt("recognition_ms"))
+            assertEquals("failed", frames.getJSONObject(1).getString("status"))
+            val observation = description.getJSONArray("text_observations").getJSONObject(0)
+            assertEquals("Breaking", observation.getString("text"))
+            assertEquals(5_000, observation.getInt("frame_pts"))
+            assertEquals(9_000, observation.getJSONArray("box").getInt(2))
+            assertPolicyAndRecognizer(description)
             assertArrayEquals(
                 audio,
                 zip.getInputStream(zip.getEntry("audio-16000-mono-s16le.pcm")).readBytes()
             )
         }
         assertTrue(File(root, "frames/frame-5000ms.jpg").exists())
-        assertEquals(1, manifest(root).frames)
+        assertFalse(File(root, "frames/frame-6000ms.jpg").exists())
+        val manifest = manifest(root)
+        assertEquals(2, manifest.frames)
+        assertEquals(1, manifest.cappedFrames)
+        assertEquals(1, manifest.failedFrames)
+        assertEquals(1, manifest.chunks.single().observations)
+        val local = JSONObject(File(root, "capture.json").readText())
+        assertEquals("16.0.1", local.getJSONObject("recognizer").getString("version"))
     }
 
-    @Test fun framesStayOnTheDeviceAndAChunkWithoutAudioIsNotUploaded() {
+    @Test fun aChunkWithReadFramesButNoAudioDeclaresTextAndShipsNoImage() {
         val root = root()
         val files = CaptureFiles(root)
         files.begin()
-        files.writeFrame(byteArrayOf(7), 0)
-        files.writeFrame(byteArrayOf(8), 5_000)
-        files.finish(9_000, "Stop", false)
+        files.writeFrame(byteArrayOf(7), text(0))
+        files.writeFrame(byteArrayOf(8), text(5_000, FrameStatus.NO_TEXT_REGIONS))
+        files.advance(10_500)
+        files.writeFrame(byteArrayOf(9), text(12_000, FrameStatus.FAILED))
+        files.finish(19_000, "Stop", false)
         val manifest = manifest(root)
-        assertTrue(manifest.chunks.isEmpty())
-        assertEquals(listOf(0), manifest.skippedSeqs)
-        assertEquals(2, manifest.frames)
+        assertEquals(listOf(0), manifest.chunks.map { it.seq })
+        assertEquals(Modality.TEXT, manifest.chunks.single().modality)
+        assertEquals(listOf(1), manifest.skippedSeqs)
+        assertEquals(3, manifest.frames)
         assertTrue(File(root, "frames/frame-0ms.jpg").exists())
-        assertTrue(File(root, "frames/frame-5000ms.jpg").exists())
-        assertFalse(File(root, "chunk-000.zip").exists())
+        ZipFile(File(root, "chunk-000.zip")).use { zip ->
+            assertEquals(listOf("chunk.json"), zip.entries().toList().map { it.name })
+        }
     }
 
     @Test fun lateFramesAreDroppedAndCountedButLateAudioIsKept() {
@@ -129,13 +170,159 @@ class CaptureFilesTest {
         files.begin()
         files.writeAudio(audio, 4, 0)
         files.advance(10_500)
-        files.writeFrame(byteArrayOf(1), 9_900)
+        files.writeFrame(byteArrayOf(1), text(9_900))
         files.writeAudio(audio, 4, 9_995)
         files.finish(12_000, "Stop", false)
         val manifest = manifest(root)
         assertEquals(1, manifest.droppedFrames)
         assertEquals(0, manifest.frames)
         assertEquals(listOf(4L, 4L), manifest.chunks.map { it.audioBytes })
+    }
+
+    @Test fun aFrameStillBeingReadAtTheChunkBoundaryKeepsItsTextInItsChunk() {
+        val root = root()
+        val files = CaptureFiles(root)
+        files.begin()
+        files.writeAudio(audio, 4, 0)
+        files.frameStarted { 9_800 }
+        // The ticker passes the 10 s boundary and audio moves on while the frame is read.
+        files.advance(10_200)
+        files.writeAudio(audio, 4, 10_300)
+        assertFalse(File(root, "chunk-000.zip").exists())
+        assertTrue(manifest(root).chunks.isEmpty())
+        files.writeFrame(byteArrayOf(5), text(9_800))
+        assertTrue(File(root, "chunk-000.zip").exists())
+        files.advance(10_500)
+        files.finish(15_000, "Stop", true)
+
+        val manifest = manifest(root)
+        assertEquals(listOf(0, 1), manifest.chunks.map { it.seq })
+        assertEquals(listOf(listOf(9_800L), emptyList()), manifest.chunks.map { it.frameOffsetsMs })
+        assertEquals(listOf(4L, 4L), manifest.chunks.map { it.audioBytes })
+        assertEquals(listOf(1, 0), manifest.chunks.map { it.observations })
+        assertEquals(Modality.BOTH, manifest.chunks.first().modality)
+        assertEquals(0, manifest.droppedFrames)
+        assertEquals(1, manifest.frames)
+        assertFalse(File(root, "open").exists())
+    }
+
+    @Test fun laterChunksWaitBehindAHeldChunkSoChunksAreSealedInOrder() {
+        val root = root()
+        val files = CaptureFiles(root)
+        files.begin()
+        files.frameStarted { 9_000 }
+        files.writeAudio(audio, 4, 15_000)
+        files.advance(21_000)
+        assertTrue(manifest(root).chunks.isEmpty())
+        files.writeFrame(byteArrayOf(5), text(9_000))
+        assertEquals(listOf(0, 1), manifest(root).chunks.map { it.seq })
+
+        files.frameStarted { 22_000 }
+        files.advance(31_000)
+        // A frame that could not be read is written as failed, which releases its chunk.
+        files.writeFrame(null, FrameText(22_000, FrameStatus.FAILED, 0, emptyList()))
+        files.finish(32_000, "Stop", false)
+        val manifest = manifest(root)
+        assertEquals(listOf(0, 1), manifest.chunks.map { it.seq })
+        assertEquals(listOf(2, 3), manifest.skippedSeqs)
+        assertEquals(1, manifest.failedFrames)
+        assertEquals(0, manifest.droppedFrames)
+    }
+
+    @Test fun aProbeRegisteredBeforeTheBoundaryKeepsItsChunkUntilOcrFinishes() {
+        val root = root()
+        val files = CaptureFiles(root)
+        files.begin()
+        files.writeAudio(audio, 4, 0)
+        // The probe's time is taken and registered at 9.99 s; the 10 s boundary passes (audio
+        // at 10.005 s) during the bitmap copy and thumbnail, before OCR starts.
+        val probe = checkNotNull(files.frameStarted { 9_990 })
+        assertEquals(9_990L, probe.elapsedMs)
+        files.writeAudio(audio, 4, 10_005)
+        files.advance(10_200)
+        assertTrue(manifest(root).chunks.isEmpty())
+        files.writeFrame(byteArrayOf(5), text(9_990))
+        probe.release()
+        files.finish(12_000, "Stop", true)
+
+        val manifest = manifest(root)
+        assertEquals(listOf(listOf(9_990L), emptyList()), manifest.chunks.map { it.frameOffsetsMs })
+        assertEquals(listOf(4L, 4L), manifest.chunks.map { it.audioBytes })
+        assertEquals(0, manifest.droppedFrames)
+        assertEquals(1, manifest.frames)
+    }
+
+    @Test fun aReleasedProbeFreesItsChunkWithoutBeingCounted() {
+        val root = root()
+        val files = CaptureFiles(root)
+        files.begin()
+        files.writeAudio(audio, 4, 0)
+        val unchanged = checkNotNull(files.frameStarted { 9_990 })
+        files.advance(10_200)
+        assertTrue(manifest(root).chunks.isEmpty())
+        // The change trigger kept nothing (or OCR never started): the caller releases it.
+        unchanged.release()
+        assertEquals(listOf(0), manifest(root).chunks.map { it.seq })
+        unchanged.release()
+        files.finish(12_000, "Stop", false)
+        assertNull(files.frameStarted { 1_000 })
+
+        val manifest = manifest(root)
+        assertEquals(0, manifest.frames)
+        assertEquals(0, manifest.droppedFrames)
+        assertEquals(0, manifest.unfinishedFrames)
+        assertEquals(0, manifest.cappedFrames)
+    }
+
+    @Test fun aFrameThatNeverFinishesReleasesItsChunkAfterTheHoldLimit() {
+        val root = root()
+        val files = CaptureFiles(root)
+        files.begin()
+        files.writeAudio(audio, 4, 0)
+        files.frameStarted { 9_000 }
+        val limit = ChunkCursor.HOLD_LIMIT_MS
+        assertEquals(45_000L, limit)
+        files.advance(9_000 + limit)
+        // Still within the bound: chunk 0 and every chunk after it wait.
+        assertTrue(manifest(root).chunks.isEmpty())
+        assertTrue(manifest(root).skippedSeqs.isEmpty())
+        files.advance(9_000 + limit + 200)
+        val released = manifest(root)
+        assertEquals(listOf(0), released.chunks.map { it.seq })
+        assertEquals(listOf(1, 2, 3, 4), released.skippedSeqs)
+        // A result that finally arrives is ignored; the frame was counted once, as unfinished.
+        files.writeFrame(byteArrayOf(5), text(9_000))
+        files.finish(56_000, "Stop", true)
+        val manifest = manifest(root)
+        assertEquals(1, manifest.unfinishedFrames)
+        assertEquals(0, manifest.droppedFrames)
+        assertEquals(0, manifest.frames)
+        assertEquals(emptyList<Long>(), manifest.chunks.single().frameOffsetsMs)
+    }
+
+    @Test fun framesStillBeingReadAtStopAreCountedAsUnfinished() {
+        val root = root()
+        val files = CaptureFiles(root)
+        files.begin()
+        files.writeAudio(audio, 4, 0)
+        files.frameStarted { 8_000 }
+        files.advance(12_000)
+        files.frameStarted { 12_500 }
+        files.finish(13_000, "Stop", true)
+        // A result that arrives after Stop changes nothing; the frame is already counted.
+        files.writeFrame(byteArrayOf(5), text(12_500))
+        files.writeFrame(byteArrayOf(6), text(8_000))
+
+        val manifest = manifest(root)
+        assertEquals(2, manifest.unfinishedFrames)
+        assertEquals(0, manifest.droppedFrames)
+        assertEquals(0, manifest.frames)
+        assertEquals(listOf(0), manifest.chunks.map { it.seq })
+        assertEquals(listOf(1), manifest.skippedSeqs)
+        assertEquals(
+            2,
+            JSONObject(File(root, "capture.json").readText()).getInt("unfinishedFrames")
+        )
     }
 
     @Test fun gapsAndChunksWithoutMediaAreRecordedExplicitly() {
@@ -226,7 +413,7 @@ class CaptureFilesTest {
         val files = CaptureFiles(root)
         files.begin()
         val random = Random(3)
-        files.writeFrame(random.nextBytes(12 * 1024 * 1024), 1_000)
+        files.writeFrame(random.nextBytes(12 * 1024 * 1024), text(1_000))
         val block = random.nextBytes(11 * 1024 * 1024)
         files.writeAudio(block, block.size, 2_000)
         files.writeAudio(block, block.size, 10_000)
@@ -256,7 +443,7 @@ class CaptureFilesTest {
         val files = CaptureFiles(root)
         files.begin()
         files.writeAudio(audio, 4, 0)
-        files.writeFrame(byteArrayOf(1), 5_000)
+        files.writeFrame(byteArrayOf(1), text(5_000))
         files.writeAudio(audio, 4, 10_100)
         // The process dies here: no finish().
 

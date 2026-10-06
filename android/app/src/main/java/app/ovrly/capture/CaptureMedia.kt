@@ -55,7 +55,8 @@ internal class CaptureMedia(
     private var display: VirtualDisplay? = null
     private var reader: ImageReader? = null
     private var imageThread: HandlerThread? = null
-    private var lastFrameMs = -CaptureLimits.FRAME_INTERVAL_MS
+    private val sampler = FrameSampler()
+    private val text = ScreenTextReader { SystemClock.elapsedRealtime() }
 
     @Volatile private var startedMs = 0L
 
@@ -116,6 +117,7 @@ internal class CaptureMedia(
         }
         imageThread?.quitSafely()
         imageThread = null
+        text.close()
         release("projection callback") { projection?.unregisterCallback(projectionCallback) }
         release("projection") { projection?.stop() }
         projection = null
@@ -141,14 +143,25 @@ internal class CaptureMedia(
         val images = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         reader = images
         images.setOnImageAvailableListener({ source ->
-            synchronized(frameLock) {
-                try {
-                    source.acquireLatestImage()?.use(::sampleFrame)
-                } catch (error: IOException) {
-                    main.post { onStop("Screen sampling stopped: ${error.message}", error) }
-                } catch (error: IllegalStateException) {
-                    main.post { onStop("Screen sampling was interrupted.", error) }
+            try {
+                // Only the copy out of the reader holds frameLock; recognition runs after it,
+                // so release() never waits for ML Kit.
+                val probe = synchronized(frameLock) { source.acquireLatestImage()?.use(::probe) }
+                probe?.let { (frame, started) ->
+                    // Set as soon as recognition returns, so an error after it never recycles
+                    // a frame ML Kit may still be reading.
+                    val inUse = AtomicBoolean(false)
+                    try {
+                        readText(frame, started.elapsedMs, inUse)
+                    } finally {
+                        started.release()
+                        if (!inUse.get()) frame.recycle()
+                    }
                 }
+            } catch (error: IOException) {
+                main.post { onStop("Screen sampling stopped: ${error.message}", error) }
+            } catch (error: IllegalStateException) {
+                main.post { onStop("Screen sampling was interrupted.", error) }
             }
         }, Handler(thread.looper))
         // One virtual display per consent token; fixed-size samples can be letterboxed on rotation.
@@ -164,28 +177,68 @@ internal class CaptureMedia(
         )
     }
 
-    private fun sampleFrame(image: Image) {
-        val elapsed = (SystemClock.elapsedRealtime() - startedMs).coerceAtLeast(0)
-        val due = elapsed < CaptureLimits.LIVE_MS &&
-            elapsed - lastFrameMs >= CaptureLimits.FRAME_INTERVAL_MS
-        if (!running.get() || !due) return
+    /**
+     * A copy of the frame when a 1 Hz probe is due, with its registered capture time;
+     * otherwise null. The registration holds the probe's chunk until it is written or released.
+     */
+    private fun probe(image: Image): Pair<Bitmap, CaptureFiles.Probe>? {
+        val clock = { (SystemClock.elapsedRealtime() - startedMs).coerceAtLeast(0) }
+        val elapsed = clock()
+        val due = running.get() && elapsed < CaptureLimits.LIVE_MS && sampler.probeDue(elapsed)
+        val started = if (due) files.frameStarted(clock) else null
+        started ?: return null
         val plane = image.planes[0]
         val padded = createBitmap(plane.rowStride / plane.pixelStride, image.height)
-        var cropped: Bitmap? = null
-        val output = ByteArrayOutputStream()
-        val encoded = try {
+        val frame = try {
             padded.copyPixelsFromBuffer(plane.buffer)
-            val frame = Bitmap.createBitmap(padded, 0, 0, image.width, image.height)
-            cropped = frame
-            frame.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)
-        } finally {
-            // createBitmap may return the padded bitmap itself when no crop is needed.
-            if (cropped != null && cropped !== padded) cropped.recycle()
+            Bitmap.createBitmap(padded, 0, 0, image.width, image.height)
+        } catch (error: IllegalArgumentException) {
             padded.recycle()
+            started.release()
+            throw IllegalStateException("Screen frame copy failed.", error)
         }
-        if (!encoded) throw IOException("Screen frame encoding failed.")
-        if (running.get()) files.writeFrame(output.toByteArray(), elapsed)
-        lastFrameMs = elapsed
+        // createBitmap may return the padded bitmap itself when no crop is needed.
+        if (frame !== padded) padded.recycle()
+        return frame to started
+    }
+
+    /**
+     * Applies the change trigger; recognizes kept frames and keeps their image on the device.
+     * [inUse] is set when ML Kit may still read [frame] after recognition timed out.
+     */
+    private fun readText(frame: Bitmap, elapsed: Long, inUse: AtomicBoolean) {
+        val result = when (sampler.decide(elapsed, text.thumbnail(frame))) {
+            FrameSampler.Decision.CHANGED, FrameSampler.Decision.HEARTBEAT -> {
+                var read: FrameText? = null
+                try {
+                    read = text.read(frame, elapsed)
+                } finally {
+                    // A frame that could not be read is written as failed, releasing its chunk.
+                    if (read == null && running.get()) {
+                        val unread = FrameText(elapsed, FrameStatus.FAILED, 0, emptyList())
+                        files.writeFrame(null, unread)
+                    }
+                }
+                checkNotNull(read).also { inUse.set(it.frameInUse) }
+            }
+
+            FrameSampler.Decision.CAPPED -> FrameText(elapsed, FrameStatus.CAPPED, 0, emptyList())
+
+            // The caller releases the probe's registration.
+            FrameSampler.Decision.UNCHANGED -> return
+        }
+        val jpeg = if (result.status == FrameStatus.CAPPED) {
+            null
+        } else {
+            val output = ByteArrayOutputStream()
+            if (!frame.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)) {
+                if (running.get()) files.writeFrame(null, result)
+                throw IOException("Screen frame encoding failed.")
+            }
+            output.toByteArray()
+        }
+        // After Stop the capture has already counted this frame as still being read.
+        if (running.get()) files.writeFrame(jpeg, result)
     }
     private fun prepareAudio(currentProjection: MediaProjection) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) !=

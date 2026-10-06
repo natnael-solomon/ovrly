@@ -168,7 +168,7 @@ fun CompanionScreen(
             }
             SettingsDisclosure(
                 "Capture details",
-                "Playback audio in 10-second chunks; a screen image every 5 s stays on this device."
+                "Playback audio in 10-second chunks plus screen text read on this device."
             )
             CaptureUploadSettings()
             HorizontalDivider()
@@ -339,7 +339,7 @@ fun CompanionScreen(
                     )
                     Text(
                         "Stores eligible playback audio (not your microphone) and a screen image " +
-                            "about every 5 seconds. This is not a full video recording " +
+                            "when it changes; text is read on the device. Not a full recording " +
                             "and cannot cover unseen content."
                     )
                     Text(

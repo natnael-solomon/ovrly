@@ -52,7 +52,8 @@ internal data class SealedChunk(
     val sizeBytes: Long,
     val sha256: String,
     val audioBytes: Long,
-    val frameOffsetsMs: List<Long>
+    val frameOffsetsMs: List<Long>,
+    val observations: Int = 0
 ) {
     val fileName: String get() = fileName(seq)
 
@@ -73,6 +74,10 @@ internal data class LocalManifest(
     val mediaBytes: Long = 0,
     val frames: Int = 0,
     val droppedFrames: Int = 0,
+    val cappedFrames: Int = 0,
+    val failedFrames: Int = 0,
+    /** Kept frames still being read when the capture stopped; their text is lost. */
+    val unfinishedFrames: Int = 0,
     val chunks: List<SealedChunk> = emptyList(),
     val skippedSeqs: List<Int> = emptyList(),
     val gaps: List<CaptureGap> = emptyList(),
@@ -84,8 +89,8 @@ internal data class LocalManifest(
         .put("timebase", "capture")
         .put("format", FORMAT)
         .put("chunkDurationMs", CaptureLimits.CHUNK_MS)
-        .put("sampling", ChunkPackage.sampling())
-        .put("recognizer", JSONObject.NULL)
+        .put("sampling", SamplingPolicy.toJson())
+        .put("recognizer", Recognizer.toJson())
         .put("framesUploaded", false)
         .put("finished", finished)
         .put("durationMs", durationMs)
@@ -94,6 +99,9 @@ internal data class LocalManifest(
         .put("mediaBytes", mediaBytes)
         .put("frames", frames)
         .put("droppedFrames", droppedFrames)
+        .put("cappedFrames", cappedFrames)
+        .put("failedFrames", failedFrames)
+        .put("unfinishedFrames", unfinishedFrames)
         .put("chunks", JSONArray(chunks.map(::chunkJson)))
         .put("skippedSeqs", JSONArray(skippedSeqs))
         .put("gaps", JSONArray(gaps.map(::gapJson)))
@@ -104,7 +112,8 @@ internal data class LocalManifest(
     companion object {
         const val VERSION = 2
         const val FORMAT = "Chunks are ZIP files: chunk.json, " +
-            "PCM signed 16-bit little-endian mono 16000 Hz audio; sampled frames stay on the device"
+            "PCM signed 16-bit little-endian mono 16000 Hz audio and " +
+            "on-device text observations; sampled frames stay on the device"
 
         /** A manifest written before chunking (no `manifestVersion`) or by an older version. */
         fun isLegacy(text: String): Boolean = try {
@@ -125,6 +134,9 @@ internal data class LocalManifest(
                 mediaBytes = json.getLong("mediaBytes"),
                 frames = json.getInt("frames"),
                 droppedFrames = json.getInt("droppedFrames"),
+                cappedFrames = json.optInt("cappedFrames"),
+                failedFrames = json.optInt("failedFrames"),
+                unfinishedFrames = json.optInt("unfinishedFrames"),
                 chunks = json.getJSONArray("chunks").objects().map(::parseChunk),
                 skippedSeqs = json.getJSONArray("skippedSeqs").ints(),
                 gaps = json.getJSONArray("gaps").objects().map {
@@ -148,6 +160,7 @@ internal data class LocalManifest(
             .put("sha256", chunk.sha256)
             .put("audioBytes", chunk.audioBytes)
             .put("frameOffsetsMs", JSONArray(chunk.frameOffsetsMs))
+            .put("observations", chunk.observations)
 
         private fun parseChunk(json: JSONObject) = SealedChunk(
             seq = json.getInt("seq"),
@@ -159,7 +172,8 @@ internal data class LocalManifest(
             audioBytes = json.getLong("audioBytes"),
             frameOffsetsMs = json.getJSONArray("frameOffsetsMs").let { offsets ->
                 List(offsets.length()) { offsets.getLong(it) }
-            }
+            },
+            observations = json.optInt("observations")
         )
 
         private fun gapJson(gap: CaptureGap) = JSONObject()
@@ -173,9 +187,9 @@ internal data class LocalManifest(
 }
 
 /**
- * Builds the bytes of one chunk: its audio and a description. Frame images are sampled every
- * [CaptureLimits.FRAME_INTERVAL_MS] and stay on the device; no text is recognized on the device,
- * so `text_observations` is always empty and no recognizer is named.
+ * Builds the bytes of one chunk: its audio, and the text read on the device from the frames
+ * kept in its interval as `{text, box, frame_pts}` observations. Frame images stay on the
+ * device and are never packaged.
  */
 internal object ChunkPackage {
     const val AUDIO_ENTRY = "audio-16000-mono-s16le.pcm"
@@ -185,16 +199,15 @@ internal object ChunkPackage {
     private const val ENTRY_TIME = 315_532_800_000L
 
     /**
-     * Only audio is uploaded, so a chunk declares `speech` coverage or nothing. Screen text is
-     * not declared: frames are neither recognized nor uploaded.
+     * `speech` when the chunk has audio, `text` when at least one frame in it was read (even if
+     * it held no text), `both` for both; null for a chunk without either.
      */
-    fun modality(audioBytes: Long): Modality? = if (audioBytes > 0) Modality.SPEECH else null
-
-    /** The fixed frame-sampling policy, recorded in every manifest and chunk. */
-    fun sampling(): JSONObject = JSONObject()
-        .put("policy", "fixed")
-        .put("interval_ms", CaptureLimits.FRAME_INTERVAL_MS)
-        .put("frame_long_edge", CaptureLimits.FRAME_LONG_EDGE)
+    fun modality(audioBytes: Long, readFrames: Int): Modality? = when {
+        audioBytes > 0 && readFrames > 0 -> Modality.BOTH
+        audioBytes > 0 -> Modality.SPEECH
+        readFrames > 0 -> Modality.TEXT
+        else -> null
+    }
 
     fun frameName(offsetMs: Long): String = "frame-${offsetMs}ms.jpg"
 
@@ -202,7 +215,7 @@ internal object ChunkPackage {
         seq: Int,
         endMs: Long,
         audio: File?,
-        frameOffsetsMs: List<Long>,
+        frames: List<FrameText>,
         modality: Modality
     ): ByteArray {
         val output = ByteArrayOutputStream()
@@ -231,10 +244,25 @@ internal object ChunkPackage {
                     } ?: JSONObject.NULL
                 )
                 .put("frames_uploaded", false)
-                .put("local_frame_pts", JSONArray(frameOffsetsMs))
-                .put("text_observations", JSONArray())
-                .put("sampling", sampling())
-                .put("recognizer", JSONObject.NULL)
+                .put(
+                    "frames",
+                    JSONArray(
+                        frames.map {
+                            JSONObject()
+                                .put("frame_pts", it.framePtsMs)
+                                .put("status", it.status.wireName)
+                                .put("regions", it.regions)
+                                .put("recognition_ms", it.recognitionMs)
+                                .put("failed_regions", it.failedRegions)
+                        }
+                    )
+                )
+                .put(
+                    "text_observations",
+                    JSONArray(frames.flatMap { it.observations }.map { it.toJson() })
+                )
+                .put("sampling", SamplingPolicy.toJson())
+                .put("recognizer", Recognizer.toJson())
             entry(MANIFEST_ENTRY, description.toString().toByteArray())
             audioBytes?.let { entry(AUDIO_ENTRY, it.readBytes()) }
         }

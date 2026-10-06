@@ -9,7 +9,6 @@ object CaptureLimits {
     const val SHARED_MS = 600_000L
     const val MAX_BYTES = 32L * 1024 * 1024
     const val SAMPLE_RATE = 16_000
-    const val FRAME_INTERVAL_MS = 5_000L
     const val FRAME_LONG_EDGE = 720
 
     /**

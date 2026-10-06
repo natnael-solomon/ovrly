@@ -6,7 +6,7 @@
 
 | Package | Responsibility |
 | --- | --- |
-| `capture` | Projection/playback capture, 10-second chunks on the capture timeline, local-only frame samples, bounded local storage, chunk upload scheduling and lifecycle |
+| `capture` | Projection/playback capture, 10-second chunks on the capture timeline, on-device screen-text recognition with local-only frames, bounded local storage, chunk upload scheduling and lifecycle |
 | `contract` | Typed models and the production parsers for the shared `packages/contracts` schemas: voice actions, uploads, investigations with jobs and report versions, claims, evidence, assessments, capture sessions and chunks |
 | `overlay` | Floating-window lifecycle, movement and controls |
 | `share` | Share intake: on-device checks, private staging, upload and investigation creation, duplicate detection |

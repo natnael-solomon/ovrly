@@ -56,6 +56,21 @@ a user-data column requires updating this map.
 | Provider copies, object storage, pipeline artifacts | Not implemented in this checkout | Future integration owner | No erasure claim. Each integration must supply a real deletion path, retention/region evidence and failure tests before adding personal data. Synthetic harness artifact stores are not production storage. |
 | Evidence-stage provider requests (BE-09) | Claim propositions and search queries derived from them, sent to the Scholarxiv Papers and Router APIs; paper DOIs and arXiv ids sent to Crossref, Europe PMC and arXiv. No media, transcript, identity or credential of a user is sent. The retrieval artifact (passages, excerpts, query counts) is stored as the `job_results` row of the `retrieval` job | Evidence stages; provider retention and region are the providers' and are not established | The artifact follows the job: `JobQueue.delete` and workspace expiry remove it. No erasure claim at the providers; sending real claims needs the rights and consent steps in BC-D03 and the evaluation contract. |
 
+### Android capture data on the device
+
+Live capture (#97, #100) keeps its working data in the app's private, no-backup
+storage (`no_backup/capture`): sealed chunk ZIPs, the local manifest, upload
+markers and the sampled frame JPEGs (`frames/`). Frames and on-device text
+recognition never leave the phone. ML Kit reads the frames on the device with
+its bundled model; its Google `datatransport` upload components are removed
+from the app manifest, and a build check fails if any reappear, so no OCR data
+or SDK metrics go to Google (decision
+[0005](../decisions/0005-on-device-screen-text.md); device verification is
+pending). Only the recognized lines, as `{text, box, frame_pts}` observations
+inside each chunk, and the PCM audio are sent to the ovrly backend, where they
+are the `capture_chunks` bytes above. The SDK may keep unsent metrics in a local
+database in the same private storage; uninstalling or clearing app data deletes
+it. Local captures expire after 24 hours and a new capture replaces a sent one.
 Alembic's version table is schema metadata, not user data. Git and CI artifacts
 must contain synthetic fixtures and test reports only: no database dumps,
 tokens, user media or private references.
