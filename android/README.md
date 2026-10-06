@@ -343,7 +343,7 @@ line only, since ChromeOS is not a supported device (BC-D02).
 
 ## Live overlay results
 
-AN-07 (#31) adds the compact overlay's live results panel in `app.ovrly.overlay`. The
+AN-07 (#31) adds the overlay's live results in `app.ovrly.overlay`. The
 panel reads `OverlayStore.liveSource`. Until `LiveResultsConnection.start` is called for a
 capture session, it holds `NotConnectedLiveResultsSource`, which reports "not connected" and
 never emits claims, so builds look as before apart from the Stop choice.
@@ -352,25 +352,37 @@ never emits claims, so builds look as before apart from the Stop choice.
 | --- | --- |
 | `LiveResultsSource` | Emits `LiveResults`: the session phase, the captured duration and missing time, claim-extraction progress and claims in spoken order (capture-relative start, then status order). |
 | `reduceLiveResults` | Folds one capture status poll (`CaptureApiCodec.parseStatus`) and the latest report version of the same investigation into `LiveResults`. Per-claim `processing_status` maps to waiting, checking evidence, provisional or assessed; failed and cancelled stay incomplete. A provisional assessment the user saw that is then replaced becomes updated, with the before and after assessment and the report's change summary. `UNKNOWN` statuses, a missing status and `UNKNOWN` assessments render as "Unknown state" and never as assessed. A report of another investigation is ignored. |
-| `LivePanelController` | Hide and show, the "Assessment updated" notices, claim detail and the Stop prompt. Hiding the panel never stops capture. |
+| `LivePanelController` | Expand and collapse (including the one automatic expand and its collapse), the update dot, the "Assessment updated" notices, claim detail and the Stop prompt. Collapsing never stops capture. |
 | `StopChoiceHandler.onStopChoice(continueResearch: Boolean)` | Called once after the user picks "Continue research in queue" (`true`) or "Keep only available results" (`false`). `CaptureServiceStopChoice` sends `CaptureService.STOP` with the Boolean extra `CaptureService.EXTRA_CONTINUE_RESEARCH`, which `CaptureService` passes to `CaptureControl` to close the session with `continue_research`. |
 | `PollingLiveResultsSource` | The live adapter. Each poll reads the capture status and the investigation through an injected `LiveResultsFetcher` (to be backed by `CaptureSessionApi.status` and `OvrlyApi.getInvestigation`; this module has no HTTP code of its own), every 2 s while healthy. Failures back off 4, 8, 16 then 30 s, keep the last results on screen with "reconnecting", and after 8 consecutive failures stop with "connection lost". Polling ends when the session is abandoned, closed with "Keep only available results", or closed with "Continue research in queue" once claim extraction is complete and every claim is assessed, failed or cancelled. After close it polls every 5 s for at most 120 polls (10 minutes), then stops with "stopped waiting for updates", so a claim in an unknown state cannot keep it polling. |
 | `LiveResultsConnection.start(scope, fetcher, sessionId)` / `stop()` | The integration seam: installs the polling source as `OverlayStore.liveSource` for one session, or returns to "not connected". |
 | `FixtureLiveResultsSource` | Development, previews and tests only. Labelled "Fixture / not live". Built from `packages/contracts` fixtures (the `capture-status-waiting` session and the `partial` report, checked by `LiveResultsFixtureTest`) plus an Android-side version 2 that finalizes one claim. |
 
-The compact overlay keeps the recording pill. Stop on the pill opens the choice with a
-third option, "Keep recording"; the choice replaces the results panel while it is open. The
-panel is capped at 60% of the usable screen height; its header (with Stop and hide) stays
-fixed and everything below it scrolls, so it stays usable at 200% text. Once a live source
-is connected the panel shows "Live results", the session phase, "Captured segment analyzed" with the captured length (not
-the full video) and any time not received, a non-blocking "Assessment updated" notice, and
-the claim list; tapping a notice or a claim opens a minimal in-panel detail that explains
-the change. After "Keep only available results" or an abandoned session, unfinished claims
-read "Incomplete". The panel's close control hides it and leaves a "Show live results"
-button; capture continues, and Stop stays available on the pill and in the capture
-notification. The window drags only by the header so the area below it can scroll.
+### Overlay forms (#31 follow-up)
 
-`DemoOverlayPanel` is unchanged and remains labelled "DEMO / SIMULATED"; the service
+The live overlay starts small and only grows when asked. `liveOverlayForm` picks one of four
+forms from the panel state, the live results and whether a capture is running:
+
+| Form | When | What it shows |
+| --- | --- | --- |
+| Pill | While examining (a capture runs) | The ovrly mark, "Examining m:ss", the claim count, an update dot and Stop. Tapping anywhere but Stop expands it once live results are connected; a drag that moves past the touch slop moves the window instead. Stop opens the choice in a card under the pill: "Continue research in queue", "Keep only available results" or "Keep examining". |
+| Expanded | After a tap, or once automatically | The demo panel's frame and style through the shared `OverlayPanelScaffold`: the demo's width minus a 72 dp gutter on the right (kept free for the like, comment and share buttons of short-video apps), docked at the bottom margin, growing with its content up to the demo's half-screen height and scrolling inside. The header (the only drag area) has the mark, "Examining m:ss" or the session state after Stop, the fixture label, Stop while examining or Dismiss after it, and Collapse. The body has the captured-segment line, the newest "Assessment updated" notice, then the claims or one claim's detail; the Stop choice opens here when Stop is tapped in the panel. The footer reads "Drag header to move". |
+| Bubble | After Stop with "Continue research in queue" | A round mark with the claim count and the update dot. It drags anywhere and snaps to the nearer side edge; tapping it expands the panel. A long press then a drag onto the round target near the bottom dismisses the overlay; TalkBack offers a "Dismiss overlay" action, and the expanded panel has Dismiss in its header. Dismissing only hides the overlay; research and the results in the app continue. |
+| Saved | After Stop with "Keep only available results" | "Saved to Inbox · N claims" for 3 s, then the overlay closes. |
+
+The first claims of a capture expand the panel once, unless the user already expanded or
+collapsed it or the Stop choice is open; that automatic expand collapses after 8 s without
+a touch, and never while TalkBack is on. Later claims and updates only change the count and
+light the dot, which pulses twice. The expanded panel fades to 55% after 4 s without a touch
+or a new result, and returns on the next touch or result; there is no fade under TalkBack.
+Moving between forms takes about 250 ms (fade and scale), and is instant when the phone's
+animations are off. Collapse returns the pill to where it was. When research that continued
+after Stop has settled, `CaptureLive` posts a silent, low-priority "Results ready · N claims"
+notification that opens the capture's report (`MainActivity.ACTION_OPEN_CHECK`), whether or
+not the overlay is still shown. The claim list keeps working at 200% text: everything below
+the header scrolls. After "Keep only available results" or an abandoned session, unfinished
+claims read "Incomplete".
+`DemoOverlayPanel` keeps its behaviour and text and remains labelled "DEMO / SIMULATED"; it now draws through `OverlayPanelScaffold`, the same frame as the expanded live panel. The service
 renders it from `OverlayContent.Demo`, which carries no results, and
 `LivePanelControllerTest` checks that its signature accepts no overlay or contract types.
 
@@ -384,7 +396,7 @@ adb shell am start -n app.ovrly/.overlay.LiveFixtureActivity
 
 The fixture advances every five seconds through waiting, checking evidence, provisional and
 updated; its Stop choice closes the fixture session instead of calling capture. Previews
-for both themes and 200% text are in `ui/LiveResultsPreviews.kt`.
+for every form in both themes and at 200% text are in `ui/LiveResultsPreviews.kt`.
 
 Live wiring (#26): `capture/CaptureLive.kt` implements `LiveResultsFetcher` as
 `CaptureLiveResultsFetcher`, reading `GET /v1/captures/{id}` through `CaptureSessionApi`
@@ -513,7 +525,9 @@ Enable the larger demo from Settings or the gallery with display-over-other-apps
 
 Liquid Chrome is the default. Saved Light/Dark choices are preserved independently of Android's theme. Lexend is used for interface text; Instrument Serif is reserved for editorial styles. Both retain their [SIL Open Font licenses](app/src/main/assets/licenses/).
 
-Native overlay blur requires a supported Android 12+ device. Unsupported or disabled blur and higher-opacity mode use solid surfaces.
+Native overlay blur requires a supported Android 12+ device. Where blur is unsupported or disabled, overlay glass is 88% opaque so the video shows faintly behind it; higher-opacity mode makes it solid. In light mode the overlay glass (pill, panel, bubble and demo) is tinted slightly toward the accent green; the companion's own screens keep solid surfaces.
+
+The ovrly mark (`res/drawable/ic_ovrly.xml`, also the notification icon, the overlay pill, bubble and panel header, and the Android 13+ themed icon layer `ic_launcher_monochrome.xml`) is the landing page's two-segment ring traced as one filled monochrome shape, with its gap, thickness and rounded ends.
 
 On Android 12, the splash icon appears only for home/system-originated launches. It was visible from Samsung One UI Home but absent from Niagara Launcher and `adb shell am start` on the tested Samsung SM-A217F. Android 13+ supports `icon_preferred`; an Android 15 emulator showed the icon from every launch source. There is no supported per-app override on Android 12.
 

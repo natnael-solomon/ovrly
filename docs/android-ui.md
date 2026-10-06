@@ -10,7 +10,7 @@ Lexend is the default for interface text, including dialog and demo-overlay clai
 
 ## Live results panel
 
-The compact overlay's live results panel, Stop choice and "Show live results" button (`ui/LiveCompactOverlay.kt`, `ui/LiveResultsPanel.kt`, copy in `ui/LiveResultsCopy.kt`, previews in `ui/LiveResultsPreviews.kt`) use the same overlay glass, palette and Lexend type as the recording pill, in both Light and Dark. Every control has a 48 dp target and a TalkBack label; claim rows announce time, wording, assessment and state, and the phase line and update notice are polite live regions. Claim state is always written out ("Waiting", "Checking evidence", "Provisional", "Updated", "Assessed", "Incomplete: ...", "Unknown state"), never shown by color alone. Previews cover Light, Dark and 200% text with the labelled fixture. Behavior is in the [Android README](../android/README.md#live-overlay-results).
+The live overlay's forms (the examining pill, the expanded panel, the idle bubble and the "Saved to Inbox" pill) and the Stop choice (`ui/LiveCompactOverlay.kt`, `ui/LiveResultsPanel.kt`, copy in `ui/LiveResultsCopy.kt`, previews in `ui/LiveResultsPreviews.kt`) use the overlay glass, palette and Lexend type, in both Light and Dark. The expanded panel shares `OverlayPanelScaffold` with the demo panel (`ui/DemoOverlayPanel.kt`): glass, 12 dp padding, a header row with 48 dp controls, dividers, a scrolling body and a footer line. Every control has a 48 dp target and a TalkBack label; claim rows announce time, wording, assessment and state, and the phase line and update notice are polite live regions. Claim state is always written out ("Waiting", "Checking evidence", "Provisional", "Updated", "Assessed", "Incomplete: ...", "Unknown state"), never shown by color alone. Previews cover every form in Light, Dark and 200% text with the labelled fixture. Behavior is in the [Android README](../android/README.md#live-overlay-results).
 
 ## App icon
 
@@ -20,9 +20,9 @@ The adaptive launcher icon is `mipmap-anydpi/ic_launcher.xml`:
 | --- | --- |
 | Foreground | `mipmap-*/ic_launcher_foreground.webp`: rendered chrome ring on a 108 dp canvas at five densities, filling 92% of the 66 dp safe zone. |
 | Background | `drawable/ic_launcher_background.xml`: navy radial gradient with a faint lavender bloom. |
-| Monochrome | `drawable/ic_launcher_monochrome.xml`: thin two-gap ring for Android 13+ themed icons. |
+| Monochrome | `drawable/ic_launcher_monochrome.xml`: the ovrly mark (below) at 60 dp inside the 66 dp safe zone, for Android 13+ themed icons. |
 
-Notifications and compact overlay controls use `drawable/ic_ovrly.xml`. The generator `scripts/splash_icon.py` produces launcher foregrounds with the splash asset.
+Notifications and the overlay (idle setup ring, examining pill, bubble and panel header) use `drawable/ic_ovrly.xml`, the ovrly mark: the landing page's two-segment ring (`landing/public/art/ring.webp`) traced as one filled monochrome shape with the same gap, thickness and rounded ends, drawn on a 920-unit square at a 22 dp diameter. The generator `scripts/splash_icon.py` produces launcher foregrounds with the splash asset.
 
 ## Header wordmark
 

@@ -15,8 +15,8 @@ import java.util.function.Consumer
 
 internal enum class BlurMode(val label: String) {
     NATIVE("Native background blur"),
-    FALLBACK("Solid glass / blur unavailable"),
-    OPAQUE("Solid glass / higher opacity"),
+    FALLBACK("Translucent glass / blur unavailable"),
+    OPAQUE("Solid glass / higher opacity")
 }
 
 internal fun blurMode(sdk: Int, systemEnabled: Boolean, higherOpacity: Boolean): BlurMode = when {
@@ -33,7 +33,7 @@ internal class OverlayWindow(
     private val context: Context,
     private val manager: WindowManager,
     private val params: WindowManager.LayoutParams,
-    private val onBlurMode: (BlurMode) -> Unit,
+    private val onBlurMode: (BlurMode) -> Unit
 ) {
     private val dialog = Dialog(context, R.style.Theme_Ovrly_Overlay)
     private val window: Window = requireNotNull(dialog.window)
@@ -75,14 +75,28 @@ internal class OverlayWindow(
     private fun updateMaterial() {
         val mode = blurMode(Build.VERSION.SDK_INT, systemBlur, higherOpacity)
         val p = paletteFor(dark)
-        window.setBackgroundDrawable(GradientDrawable().apply {
-            cornerRadius = 28f * context.resources.displayMetrics.density
-            setColor(p.surface.copy(alpha = if (mode == BlurMode.NATIVE) 0.08f else 1f).toArgb())
-        })
+        window.setBackgroundDrawable(
+            GradientDrawable().apply {
+                cornerRadius = 28f * context.resources.displayMetrics.density
+                // Fallback glass is drawn by Compose at 88% so the video shows faintly through it.
+                val alpha = when (mode) {
+                    BlurMode.NATIVE -> NATIVE_TINT_ALPHA
+                    BlurMode.FALLBACK -> 0f
+                    BlurMode.OPAQUE -> 1f
+                }
+                setColor(p.surface.copy(alpha = alpha).toArgb())
+            }
+        )
         if (Build.VERSION.SDK_INT >= 31) {
             // Deliberately no FLAG_BLUR_BEHIND: the video outside the panel stays sharp.
             window.setBackgroundBlurRadius(
-                if (mode == BlurMode.NATIVE) (24 * context.resources.displayMetrics.density).toInt().coerceAtMost(100) else 0,
+                if (mode ==
+                    BlurMode.NATIVE
+                ) {
+                    (24 * context.resources.displayMetrics.density).toInt().coerceAtMost(100)
+                } else {
+                    0
+                }
             )
         }
         onBlurMode(mode)
@@ -90,7 +104,11 @@ internal class OverlayWindow(
 
     fun layout(width: Int, height: Int, x: Int, y: Int) {
         val current = window.attributes
-        if (current.width == width && current.height == height && current.x == x && current.y == y) return
+        if (current.width == width && current.height == height && current.x == x &&
+            current.y == y
+        ) {
+            return
+        }
         window.attributes = current.apply {
             this.width = width
             this.height = height
@@ -100,8 +118,15 @@ internal class OverlayWindow(
     }
 
     fun close() {
-        if (Build.VERSION.SDK_INT >= 31) listener?.let(manager::removeCrossWindowBlurEnabledListener)
+        if (Build.VERSION.SDK_INT >=
+            31
+        ) {
+            listener?.let(manager::removeCrossWindowBlurEnabledListener)
+        }
         listener = null
         dialog.dismiss()
     }
 }
+
+/** The faint tint over natively blurred video. */
+private const val NATIVE_TINT_ALPHA = 0.08f

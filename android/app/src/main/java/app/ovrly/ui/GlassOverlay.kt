@@ -400,7 +400,7 @@ internal fun InterruptedRing(modifier: Modifier = Modifier, tint: Color = Graphi
     )
 }
 
-internal enum class Glyph { Stop, Close, Chevron, Neutral, UnavailableSpeaker, Capture }
+internal enum class Glyph { Stop, Close, Chevron, Collapse, Neutral, UnavailableSpeaker, Capture }
 
 @Composable
 internal fun OverlayGlyph(glyph: Glyph, modifier: Modifier = Modifier, tint: Color = Graphite) {
@@ -426,6 +426,11 @@ internal fun OverlayGlyph(glyph: Glyph, modifier: Modifier = Modifier, tint: Col
             Glyph.Chevron -> {
                 line(9f, 5f, 16f, 12f)
                 line(16f, 12f, 9f, 19f)
+            }
+
+            Glyph.Collapse -> {
+                line(5f, 9f, 12f, 16f)
+                line(12f, 16f, 19f, 9f)
             }
 
             Glyph.Neutral -> {

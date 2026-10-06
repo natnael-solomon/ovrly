@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -77,8 +78,28 @@ internal data class OvrlyPalette(
     val error: Color,
     val sheen: Color
 ) {
-    fun glassFill(blurred: Boolean, higherOpacity: Boolean): Color =
-        surface.copy(alpha = if (blurred && !higherOpacity) 0.86f else 1f)
+    fun glassFill(blurred: Boolean, higherOpacity: Boolean, overlay: Boolean = false): Color {
+        val alpha = when {
+            higherOpacity -> 1f
+
+            blurred -> BLURRED_GLASS_ALPHA
+
+            // Over a video without system blur, a little translucency keeps it visible.
+            overlay -> OVERLAY_GLASS_ALPHA
+
+            else -> 1f
+        }
+        val base = if (overlay && !dark) lerp(surface, accent, LIGHT_OVERLAY_TINT) else surface
+        return base.copy(alpha = alpha)
+    }
+
+    companion object {
+        const val BLURRED_GLASS_ALPHA = 0.86f
+        const val OVERLAY_GLASS_ALPHA = 0.88f
+
+        /** Share of the accent mixed into light overlay glass, so it reads as ovrly, not white. */
+        const val LIGHT_OVERLAY_TINT = 0.12f
+    }
 }
 
 internal val PaperPalette = OvrlyPalette(
@@ -93,7 +114,20 @@ internal val ChromePalette = OvrlyPalette(
 )
 internal fun paletteFor(dark: Boolean) = if (dark) ChromePalette else PaperPalette
 internal val LocalOvrlyPalette = staticCompositionLocalOf { PaperPalette }
-internal val LocalWindowBlur = staticCompositionLocalOf { false }
+
+/**
+ * Where glass is drawn: [blurred] when the window blurs what is behind it, [overlay] inside the
+ * overlay window, whose glass sits over a video (see [OvrlyPalette.glassFill]). [plain] draws
+ * a flat fill and border without gradients, for instrumented tests on emulators whose
+ * software renderer crashes on the gradient glass.
+ */
+internal data class WindowGlass(
+    val blurred: Boolean = false,
+    val overlay: Boolean = false,
+    val plain: Boolean = false
+)
+
+internal val LocalWindowBlur = staticCompositionLocalOf { WindowGlass() }
 
 internal val OvrlySans = FontFamily(Font(R.font.lexend))
 internal val OvrlySerif = FontFamily(
@@ -255,8 +289,10 @@ internal fun Modifier.chromeGlare(
 @Composable
 internal fun Modifier.mockGlass(higherOpacity: Boolean = false): Modifier {
     val p = LocalOvrlyPalette.current
-    val fill = p.glassFill(LocalWindowBlur.current, higherOpacity)
+    val glass = LocalWindowBlur.current
+    val fill = p.glassFill(glass.blurred, higherOpacity, glass.overlay)
     val shape = RoundedCornerShape(28.dp)
+    if (glass.plain) return clip(shape).background(fill).border(1.dp, p.rule, shape)
     return clip(shape)
         .background(Brush.linearGradient(listOf(fill, p.paper.copy(alpha = fill.alpha), fill)))
         .border(

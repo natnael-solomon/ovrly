@@ -2,12 +2,14 @@ package app.ovrly.overlay
 
 import android.content.Context
 import android.content.Intent
-import app.ovrly.capture.CapturePhase
 import app.ovrly.capture.CaptureService
-import app.ovrly.capture.CaptureState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 
 /**
@@ -35,18 +37,70 @@ internal class CaptureServiceStopChoice(private val context: Context) : StopChoi
 }
 
 internal data class LivePanelState(
-    /** Hiding the results panel keeps capture running; only Stop ends it. */
-    val panelVisible: Boolean = true,
+    /** The large panel is open; otherwise the pill (examining) or the bubble (after Stop). */
+    val expanded: Boolean = false,
     val stopPrompt: Boolean = false,
     /** The Stop choice already sent, so the panel can say what happens next. */
     val stopChoice: Boolean? = null,
     /** Claims with an unread "Assessment updated" notice, oldest first. */
     val notices: List<String> = emptyList(),
-    val detailClaimId: String? = null
+    val detailClaimId: String? = null,
+    /** This capture's one automatic expand has happened or is no longer wanted. */
+    val autoExpandSpent: Boolean = false,
+    /** The automatic expand collapses on its own unless the user touches the panel first. */
+    val autoCollapsePending: Boolean = false,
+    /** Something changed while collapsed: the update dot on the pill or bubble. */
+    val unseen: Boolean = false
 )
 
+/** What the live overlay shows. */
+internal enum class LiveOverlayForm {
+    /** While examining: mark, timer, claim count, update dot and Stop. */
+    PILL,
+
+    /** The large panel with the claims. */
+    EXPANDED,
+
+    /** After Stop with research continuing: a small round mark with the claim count. */
+    BUBBLE,
+
+    /** After Stop keeping only available results: "Saved to Inbox" before the overlay closes. */
+    SAVED
+}
+
 /**
- * Panel interaction state for the compact overlay. It never stops capture except through
+ * The form for the current state, or null when there is nothing live to show (no capture and
+ * no connected session), where the host keeps its idle controls. [examining] is true while a
+ * capture runs (or the fixture plays).
+ */
+internal fun liveOverlayForm(
+    panel: LivePanelState,
+    results: LiveResults,
+    examining: Boolean
+): LiveOverlayForm? {
+    val connected = results.phase != LiveSessionPhase.NOT_CONNECTED
+    return when {
+        panel.stopChoice == false -> LiveOverlayForm.SAVED
+        panel.expanded && connected -> LiveOverlayForm.EXPANDED
+        examining -> LiveOverlayForm.PILL
+        connected -> LiveOverlayForm.BUBBLE
+        else -> null
+    }
+}
+
+/**
+ * Research that continued after Stop has settled: every claim is final, failed or cancelled,
+ * so the user can be told the results are ready.
+ */
+internal fun researchSettled(results: LiveResults): Boolean =
+    results.phase == LiveSessionPhase.CONTINUING &&
+        results.claims.isNotEmpty() &&
+        results.claims.all {
+            it.complete || it.state == LiveClaimState.FAILED || it.state == LiveClaimState.CANCELLED
+        }
+
+/**
+ * Panel interaction state for the live overlay. It never stops capture except through
  * [StopChoiceHandler], and only after the user picked one of the two Stop choices.
  */
 internal class LivePanelController(private val stopChoice: StopChoiceHandler) {
@@ -61,37 +115,92 @@ internal class LivePanelController(private val stopChoice: StopChoiceHandler) {
         mutable.value = LivePanelState()
     }
 
+    /**
+     * Records new assessment notices. The first claims of a capture expand the panel once,
+     * unless the user already expanded or collapsed it or the Stop choice is open; anything
+     * new while collapsed lights the update dot.
+     */
     fun onResults(results: LiveResults) {
+        val before = last?.claims?.size ?: 0
         val fresh = newAssessmentUpdates(last, results).map { it.id }
         last = results
-        if (fresh.isNotEmpty()) {
-            mutable.update { it.copy(notices = (it.notices - fresh.toSet()) + fresh) }
+        val grew = results.claims.size > before
+        mutable.update {
+            val notices = if (fresh.isEmpty()) it.notices else (it.notices - fresh.toSet()) + fresh
+            val firstClaims = before == 0 && grew && results.phase == LiveSessionPhase.CAPTURING
+            when {
+                firstClaims && !it.autoExpandSpent && !it.stopPrompt -> it.copy(
+                    notices = notices,
+                    expanded = true,
+                    autoExpandSpent = true,
+                    autoCollapsePending = true,
+                    unseen = false
+                )
+
+                !it.expanded && (grew || fresh.isNotEmpty()) ->
+                    it.copy(notices = notices, unseen = true)
+
+                else -> it.copy(notices = notices)
+            }
         }
     }
 
-    /** Hiding closes any claim detail; neither direction touches capture. */
-    fun setPanelVisible(visible: Boolean) = mutable.update {
-        it.copy(panelVisible = visible, detailClaimId = if (visible) it.detailClaimId else null)
+    /**
+     * The user opened or closed the panel; either way the automatic expand is no longer
+     * wanted. Closing returns to the pill or bubble and never touches capture.
+     */
+    fun setExpanded(expanded: Boolean) = mutable.update {
+        it.copy(
+            expanded = expanded,
+            unseen = if (expanded) false else it.unseen,
+            detailClaimId = if (expanded) it.detailClaimId else null,
+            autoExpandSpent = true,
+            autoCollapsePending = false
+        )
     }
 
-    fun requestStop() = mutable.update {
-        if (it.stopChoice == null) it.copy(stopPrompt = true) else it
+    /** Any touch on the panel keeps an automatic expand open. */
+    fun touched() = mutable.update {
+        if (it.autoCollapsePending) it.copy(autoCollapsePending = false) else it
     }
 
-    fun cancelStop() = mutable.update { it.copy(stopPrompt = false) }
+    /** The automatic expand's timer ran out without a touch. */
+    fun autoCollapse() = mutable.update {
+        if (it.autoCollapsePending) {
+            it.copy(expanded = false, detailClaimId = null, autoCollapsePending = false)
+        } else {
+            it
+        }
+    }
 
+    /** Opens the Stop choice (only while no choice was sent yet) or closes it ("Keep examining"). */
+    fun setStopPrompt(open: Boolean) = mutable.update {
+        when {
+            !open -> it.copy(stopPrompt = false)
+            it.stopChoice == null -> it.copy(stopPrompt = true, autoCollapsePending = false)
+            else -> it
+        }
+    }
+
+    /** Continuing research collapses to the bubble; keeping available results shows "Saved". */
     fun chooseStop(continueResearch: Boolean) {
         val before = mutable.value
         if (!before.stopPrompt || before.stopChoice != null) return
-        mutable.value = before.copy(stopPrompt = false, stopChoice = continueResearch)
+        mutable.value = before.copy(
+            stopPrompt = false,
+            stopChoice = continueResearch,
+            expanded = false,
+            detailClaimId = null,
+            autoCollapsePending = false
+        )
         stopChoice.onStopChoice(continueResearch)
     }
 
     /**
      * Capture ended elsewhere (notification Stop, time limit, revoked projection): the prompt
      * no longer applies. Only a new capture (not-running to running) clears the previous
-     * choice; repeated running updates while Stop is in flight keep it, so Stop cannot be
-     * sent twice.
+     * choice and the per-capture expand state; repeated running updates while Stop is in
+     * flight keep it, so Stop cannot be sent twice.
      */
     fun onCaptureRunning(running: Boolean) {
         val started = running && !captureRunning
@@ -99,20 +208,56 @@ internal class LivePanelController(private val stopChoice: StopChoiceHandler) {
         mutable.update {
             when {
                 !running -> it.copy(stopPrompt = false)
-                started -> it.copy(stopChoice = null)
+
+                started -> it.copy(
+                    stopChoice = null,
+                    expanded = false,
+                    autoExpandSpent = false,
+                    autoCollapsePending = false,
+                    unseen = false
+                )
+
                 else -> it
             }
         }
     }
 
-    fun openClaim(claimId: String) = mutable.update {
-        it.copy(panelVisible = true, detailClaimId = claimId, notices = it.notices - claimId)
+    /** Opens one claim's detail in the expanded panel, or closes it with null. */
+    fun openClaim(claimId: String?) = mutable.update {
+        if (claimId == null) {
+            it.copy(detailClaimId = null)
+        } else {
+            it.copy(
+                expanded = true,
+                detailClaimId = claimId,
+                notices = it.notices - claimId,
+                unseen = false,
+                autoCollapsePending = false
+            )
+        }
     }
-
-    fun closeClaim() = mutable.update { it.copy(detailClaimId = null) }
-
     fun dismissNotice(claimId: String) = mutable.update { it.copy(notices = it.notices - claimId) }
 }
+
+/**
+ * Runs the automatic expand's collapse timer for as long as the caller's scope lives: once an
+ * automatic expand is pending, the panel collapses after [delayMs] unless a touch cancelled it
+ * first, and never while [touchExploration] (TalkBack) is on.
+ */
+internal suspend fun runAutoCollapse(
+    controller: LivePanelController,
+    touchExploration: () -> Boolean,
+    delayMs: Long = AUTO_COLLAPSE_MS
+) {
+    controller.state.map { it.autoCollapsePending }.distinctUntilChanged().collectLatest {
+        if (it) {
+            delay(delayMs)
+            if (!touchExploration()) controller.autoCollapse()
+        }
+    }
+}
+
+internal const val AUTO_COLLAPSE_MS = 8_000L
 
 /** What the overlay window renders. The demo carries no live data by construction. */
 internal sealed interface OverlayContent {
@@ -125,22 +270,3 @@ internal fun overlayContent(
     results: LiveResults,
     sourceLabel: String?
 ): OverlayContent = if (demo) OverlayContent.Demo else OverlayContent.Live(results, sourceLabel)
-
-/** The results panel (and so the list that blocks window dragging) is on screen. */
-internal fun livePanelShown(demo: Boolean, results: LiveResults, panel: LivePanelState): Boolean =
-    !demo && results.phase != LiveSessionPhase.NOT_CONNECTED && panel.panelVisible
-
-/**
- * The recording pill is hidden for the fixture (which has no real capture) and once a
- * connected session's capture has finished, where the pill's "Research offline" would be
- * wrong; the panel then carries the state.
- */
-internal fun showRecordingPill(
-    fixture: Boolean,
-    results: LiveResults,
-    capture: CaptureState
-): Boolean {
-    val connected = results.phase != LiveSessionPhase.NOT_CONNECTED
-    val finished = !capture.busy && capture.phase != CapturePhase.IDLE
-    return !fixture && !(connected && finished)
-}

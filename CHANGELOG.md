@@ -4,6 +4,19 @@
 
 ### Added
 
+- Live overlay forms (#31): the overlay now starts as a small "Examining m:ss" pill with the
+  ovrly mark, the claim count, an update dot and Stop, and grows into the large panel only
+  when tapped, or once automatically when a capture's first claims arrive (it collapses after
+  8 s untouched, never under TalkBack). The expanded panel uses the demo panel's frame and
+  style through a shared scaffold, follows Light and Dark, grows with its content up to half
+  the screen, keeps the right 72 dp free for short-video apps' buttons and fades to 55% after
+  4 s without a touch. After Stop with "Continue research" the overlay becomes a small
+  draggable bubble that snaps to the edge and is dismissed by a long-press drag onto a target
+  (or a TalkBack action); "Keep only available results" shows "Saved to Inbox" for 3 s, then
+  closes. A silent "Results ready" notification opens the capture's report when research that
+  continued after Stop settles. "Keep recording" now reads "Keep examining".
+
+
 - Live capture wiring (#31): capture chunks now go to the backend. `data/CaptureApi.kt`
   sends `/v1/captures` create (with `Idempotency-Key`), multipart chunk `PUT`, close with
   `continue_research` and status through the AN-03 API client and guest credential, and
@@ -219,6 +232,10 @@
 
 ### Changed
 
+- The ovrly mark used for notifications, the overlay and the Android 13+ themed icon is now
+  the landing page's two-segment ring traced as a filled monochrome shape, replacing the thin
+  stroked ring. Overlay glass without system blur is 88% opaque instead of solid, so the
+  video shows faintly behind it, and light-mode overlay glass is tinted toward the accent.
 - Evaluation contract v2 requires exactly one occurrence pass and one final adjudication per clip, without a second annotator. Explicit provenance replaces mandatory blind-human attestations; original-occurrence traceability, rights, scenario coverage and split-isolation safeguards remain. Version-1 snapshots require explicit migration, not silent relabeling.
 - Added manual Telegram APK distribution: an exact merged `main` commit builds without credentials, then signs and delivers after owner approval. An immutable ledger supplies version codes; redelivery resends the current issued bytes. Release builds use R8 and resource shrinking. See [release signing](docs/release-signing.md).
 - Reserved Instrument Serif for editorial report/gallery headings and the text-based wordmark. Functional headings, including capture dialogs and demo claims, use Lexend without changing type sizes.

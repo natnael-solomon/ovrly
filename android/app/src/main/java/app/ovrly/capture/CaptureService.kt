@@ -327,7 +327,7 @@ class CaptureService : Service() {
         private fun notification(context: Context, text: String): Notification =
             AppNotifications.build(
                 context,
-                "ovrly is capturing",
+                "ovrly is examining",
                 text,
                 STOP,
                 CaptureService::class.java

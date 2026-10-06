@@ -55,6 +55,7 @@ import app.ovrly.overlay.OverlayService
 import app.ovrly.overlay.OverlayStore
 import app.ovrly.overlay.demoEntry
 import app.ovrly.ui.AppDestination
+import app.ovrly.ui.CheckCommand
 import app.ovrly.ui.AppShell
 import app.ovrly.ui.AppearanceStore
 import app.ovrly.ui.ChecksShell
@@ -595,6 +596,14 @@ class MainActivity : ComponentActivity() {
                 gallery = false
                 destination = AppDestination.SETTINGS
             }
+
+            ACTION_OPEN_CHECK -> {
+                gallery = false
+                destination = AppDestination.SPACE
+                intent.getStringExtra(EXTRA_INVESTIGATION_ID)?.let {
+                    checks.on(CheckCommand.Open(it))
+                }
+            }
         }
     }
 
@@ -608,6 +617,10 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_SETUP = "app.ovrly.OPEN_SETUP"
         const val ACTION_DETAILS = "app.ovrly.OPEN_DETAILS"
+
+        /** Opens one capture's report from the "Results ready" notification. */
+        const val ACTION_OPEN_CHECK = "app.ovrly.OPEN_CHECK"
+        const val EXTRA_INVESTIGATION_ID = "app.ovrly.extra.INVESTIGATION_ID"
         private const val SPLASH_HANDOFF_MILLIS = 900
         private const val SPLASH_SURFACE_DELAY_MILLIS = 150L
         private const val SPLASH_HANDOFF_TIMEOUT_MILLIS = 2500L

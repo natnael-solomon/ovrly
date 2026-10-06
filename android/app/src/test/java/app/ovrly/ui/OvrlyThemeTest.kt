@@ -5,11 +5,12 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Test
 import kotlin.math.max
 import kotlin.math.min
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 class OvrlyThemeTest {
     @Test fun materialTypographyKeepsFunctionalSurfacesInLexend() {
@@ -19,7 +20,7 @@ class OvrlyThemeTest {
                 headlineLarge, headlineMedium, headlineSmall,
                 titleLarge, titleMedium, titleSmall,
                 bodyLarge, bodyMedium, bodySmall,
-                labelLarge, labelMedium, labelSmall,
+                labelLarge, labelMedium, labelSmall
             ).forEach { assertEquals(OvrlySans, it.fontFamily) }
         }
     }
@@ -67,24 +68,33 @@ class OvrlyThemeTest {
 
     @Test fun overlayReadableOnExtremeBackdropsWithOrWithoutBlur() {
         for (p in listOf(PaperPalette, ChromePalette)) {
-            for (blur in listOf(false, true)) {
-                for (opaque in listOf(false, true)) {
-                    for (backdrop in listOf(Color.White, Color.Black)) {
-                        val surface = p.glassFill(blur, opaque).compositeOver(backdrop)
-                        assertTrue("primary text, dark=${p.dark}", contrast(p.ink, surface) >= 4.5f)
-                        assertTrue("secondary text, dark=${p.dark}", contrast(p.muted, surface) >= 4.5f)
+            for (overlay in listOf(false, true)) {
+                for (blur in listOf(false, true)) {
+                    for (opaque in listOf(false, true)) {
+                        for (backdrop in listOf(Color.White, Color.Black)) {
+                            val surface = p.glassFill(blur, opaque, overlay).compositeOver(backdrop)
+                            val where = "dark=${p.dark} overlay=$overlay blur=$blur"
+                            assertTrue("primary text, $where", contrast(p.ink, surface) >= 4.5f)
+                            assertTrue("secondary text, $where", contrast(p.muted, surface) >= 4.5f)
+                        }
                     }
                 }
             }
         }
     }
 
-    @Test fun fallbackIsOpaqueRatherThanFakeBlur() {
+    @Test fun companionFallbackIsOpaqueAndOverlayFallbackShowsTheVideoFaintly() {
         for (p in listOf(PaperPalette, ChromePalette)) {
             assertEquals(1f, p.glassFill(false, false).alpha, 0f)
             assertEquals(1f, p.glassFill(true, true).alpha, 0f)
             assertTrue(p.glassFill(true, false).alpha < 1f)
+            assertEquals(0.88f, p.glassFill(false, false, overlay = true).alpha, 0.005f)
+            assertEquals(1f, p.glassFill(false, true, overlay = true).alpha, 0f)
         }
+        // Light overlay glass is tinted toward the accent; dark glass and the companion are not.
+        assertNotEquals(PaperPalette.surface, PaperPalette.glassFill(false, true, overlay = true))
+        assertEquals(ChromePalette.surface, ChromePalette.glassFill(false, true, overlay = true))
+        assertEquals(PaperPalette.surface, PaperPalette.glassFill(false, true))
     }
 
     @Test fun everyDemoAssessmentDisclosesThatItIsASample() {
