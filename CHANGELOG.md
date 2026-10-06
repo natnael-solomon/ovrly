@@ -4,6 +4,18 @@
 
 ### Added
 
+- REPO-06 security tests (#28): outbound evidence fetches now go through an SSRF
+  guard that resolves each host once, dials only the checked public address (private,
+  loopback, link-local and metadata, shared, IPv6 unique-local and IPv4-embedding
+  addresses are refused, which defeats DNS rebinding), re-checks every redirect hop
+  (at most three, no HTTPS to HTTP downgrade), allows only http(s) on default ports and
+  caps response size. New negative tests cover that guard, an authorization matrix
+  generated from the OpenAPI paths, prompt-injection fixtures under
+  `evaluation/adversarial/`, a media intake fuzz smoke, quota abuse and error-response
+  hygiene. Validation errors no longer echo unknown client field names, and
+  credential-shaped text is redacted from assessment notes. `MEDIA_INVALID` from a codec
+  stage remains blocked by #20.
+
 - Backend `.env.example` now lists every `OVRLY_` setting with its default (job timing
   and retries, stub reports, evidence stages), and the backend README has a
   single-service deployment note for EthioDeploy (#21).
