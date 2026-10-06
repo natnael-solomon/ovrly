@@ -24,6 +24,10 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+        <activity android:name=".ShareIntakeActivity" android:exported="true"
+            android:launchMode="singleTop" android:label="Check with ovrly"
+            android:theme="@style/Theme.Ovrly.ShareSheet">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

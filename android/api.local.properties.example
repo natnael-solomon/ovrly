@@ -1,0 +1,11 @@
+# Share-intake API settings for local builds (AN-03, #18).
+# Copy to api.local.properties (ignored) and rebuild. Values are embedded in the APK.
+# Never commit a hosted address or put a credential here; the guest credential is minted
+# by the app at runtime.
+#
+# Emulator, backend on the host (default): http://10.0.2.2:8000/
+# USB device with `adb reverse tcp:8000 tcp:8000`: http://127.0.0.1:8000/
+# Debug builds allow cleartext only to 10.0.2.2, 127.0.0.1 and localhost; use https otherwise.
+baseUrl=http://10.0.2.2:8000/
+# Must not exceed the backend OVRLY_UPLOAD_MAX_BYTES (default 268435456, 256 MiB).
+uploadMaxBytes=268435456

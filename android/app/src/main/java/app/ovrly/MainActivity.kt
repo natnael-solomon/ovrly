@@ -539,6 +539,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         model.checkRetention()
+        model.reconcile()
         overlayAllowed = Settings.canDrawOverlays(this)
         notificationsAllowed = Build.VERSION.SDK_INT < 33 ||
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
@@ -573,12 +574,6 @@ class MainActivity : ComponentActivity() {
             ACTION_DETAILS -> {
                 gallery = false
                 destination = AppDestination.SETTINGS
-            }
-
-            Intent.ACTION_SEND -> {
-                gallery = false
-                destination = AppDestination.SETTINGS
-                model.acceptShare(intent)
             }
         }
     }

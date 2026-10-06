@@ -5,7 +5,14 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("com.google.devtools.ksp")
     id("org.jlleitschuh.gradle.ktlint")
+}
+
+// Room exports each schema version here; commit it so later migrations can be checked.
+ksp {
+    arg("room.schemaLocation", file("schemas").path)
+    arg("room.generateKotlin", "true")
 }
 
 ktlint {
@@ -32,6 +39,22 @@ check(!liveVoice || voiceConfig.getProperty("enabled") == "true") {
 }
 fun quoted(value: String): String = "\"" + value.replace("\\", "\\\\")
     .replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r") + "\""
+
+// API base URL and upload cap for share intake (AN-03, #18). The ignored
+// api.local.properties overrides them; the default is the emulator's host loopback.
+// Never commit a hosted address.
+val apiConfig = Properties().apply {
+    val config = rootProject.file("api.local.properties")
+    if (config.exists()) config.inputStream().use { load(it) }
+}
+val apiBaseUrl: String = apiConfig.getProperty("baseUrl", "http://10.0.2.2:8000/").trim()
+check(apiBaseUrl.startsWith("http://") || apiBaseUrl.startsWith("https://")) {
+    "api.local.properties baseUrl must be an http or https URL."
+}
+// Mirrors the backend OVRLY_UPLOAD_MAX_BYTES default (256 MiB) until BC-D06 fixes the budget.
+val uploadMaxBytes: Long = apiConfig.getProperty("uploadMaxBytes", "268435456").trim()
+    .toLongOrNull()?.takeIf { it > 0 }
+    ?: error("api.local.properties uploadMaxBytes must be a positive integer.")
 
 // CI passes -Povrly.versionCode=<code> from the release ledger; local builds keep 1.
 // Google Play accepts 1..2100000000 inclusive, so anything else is a configuration error.
@@ -62,6 +85,8 @@ android {
             "VOXIDE_PUBLISHABLE_KEY",
             quoted(if (liveVoice) voiceConfig.getProperty("publishableKey", "") else "")
         )
+        buildConfigField("String", "OVRLY_API_BASE_URL", quoted(apiBaseUrl))
+        buildConfigField("long", "OVRLY_UPLOAD_MAX_BYTES", "${uploadMaxBytes}L")
     }
     buildFeatures {
         compose = true
@@ -117,6 +142,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
+    implementation("androidx.room:room-runtime:2.8.5")
+    implementation("androidx.room:room-ktx:2.8.5")
+    ksp("androidx.room:room-compiler:2.8.5")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260814")

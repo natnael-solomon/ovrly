@@ -226,7 +226,7 @@ fun CompanionScreen(
                 }
             }
             HorizontalDivider()
-            SectionTitle("Shared video", "References only / not analyzed")
+            SectionTitle("Shared video", "Latest share / details in the intake sheet")
             if (share == null) {
                 Text(
                     "Share a video or link to ovrly from another app.",
@@ -234,7 +234,8 @@ fun CompanionScreen(
                 )
                 SettingsDisclosure(
                     "Supported input",
-                    "Video references up to 10 minutes, or one web URL. Nothing is downloaded, copied or queued."
+                    "One video of up to 10 minutes, or one web link. A shared file is copied " +
+                        "privately on this device, then uploaded to the ovrly service for checking."
                 )
             } else {
                 Text(
@@ -243,7 +244,7 @@ fun CompanionScreen(
                     color = if (share.accepted) Graphite else Coral
                 )
                 Text(share.detail, style = MaterialTheme.typography.bodyMedium)
-                TextButton(onClick = onClearShare) { Text("Clear shared reference") }
+                TextButton(onClick = onClearShare) { Text("Clear share summary") }
             }
             HorizontalDivider()
             SectionTitle(

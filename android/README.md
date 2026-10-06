@@ -1,6 +1,6 @@
 # Android
 
-Kotlin/Jetpack Compose app for Android 10+ (API 29), with floating controls, local capture and share validation. No backend or research processing is connected.
+Kotlin/Jetpack Compose app for Android 10+ (API 29), with floating controls, local capture and share intake. Shared videos and links are sent to the ovrly backend configured at build time (see [Data layer](#data-layer-and-share-intake)); research processing beyond intake is not connected yet.
 
 ## Setup
 
@@ -129,6 +129,139 @@ AN-07 still needs to package captured modalities, upload chunks and poll progres
 Empty capture claims with `not_started` are not a no-claims finding.
 Extraction progress uses `CoverageStatus`: `partial` and `complete` parse today,
 and future values map to `UNKNOWN` without dropping the rest of the status.
+
+## Data layer and share intake
+
+AN-03 (#18) connects share intake to the backend on the existing OkHttp client
+and the `app.ovrly.contract` codecs, with no Retrofit and no second serializer,
+and keeps investigations, their local job state and report versions in Room so
+the UI is rebuilt from the store and the server, never from ViewModel memory.
+
+### Configuration
+
+The API base URL and the device-side upload cap are build-time `BuildConfig`
+fields (`OVRLY_API_BASE_URL`, `OVRLY_UPLOAD_MAX_BYTES`). Copy
+`api.local.properties.example` to the ignored `api.local.properties` to change
+them. The default is `http://10.0.2.2:8000/`, the emulator's view of a backend
+on the host; for a USB device run `adb reverse tcp:8000 tcp:8000` and use
+`http://127.0.0.1:8000/`. Debug builds allow cleartext only to those loopback
+hosts (`src/debug/res/xml/network_security_config.xml`); release builds stay
+HTTPS-only. Never commit a hosted address. The upload cap must not exceed the
+backend `OVRLY_UPLOAD_MAX_BYTES` (256 MiB default, pending BC-D06); the server
+still enforces its own limit.
+
+### Client behaviour
+
+| Concern | Behaviour |
+| --- | --- |
+| Identity | `POST /v1/principals/guest` on first need. The opaque token is AES-GCM encrypted with an Android Keystore key and stored in `noBackupFilesDir`, so it is excluded from backup and device transfer. If the server refuses it (`INVALID_CREDENTIAL`, `AUTHENTICATION_REQUIRED`), the client mints a new guest once and repeats the call. Linking an account is #36. |
+| Headers | `Authorization: Bearer`, a new UUID `X-Request-Id` per request, `Idempotency-Key` on `POST /v1/investigations`. Redirects are refused and a target outside the base origin is never called. |
+| Timeouts | 15 s connect, 30 s read, 60 s write. |
+| Cold start | The free host sleeps after 30 minutes idle. The first call of a process, or any call 25 minutes after the last response, uses 60 s connect/read timeouts and is retried once if no response arrives or the gateway answers 502 to 504. After 1.5 s the intake sheet shows "Waking the ovrly service..." instead of an error. |
+| Errors | Every non-2xx body is parsed as the shared error shape (`ErrorCodec.parseError`) into `ApiFailure.Server` with `code`, `message`, `retryable`, `action` and `request_id`. Codes the backend emits today map to `ApiErrorCode`; any other code is `ApiErrorCode.UNKNOWN` and still a failure. A body outside the error shape, or a success body the contract codecs reject, is `ApiFailure.Incompatible`, never success. No response is `ApiFailure.Network`. |
+| Logging | Tag `OvrlyApi`: route label, status, elapsed time, attempt and request id only. No URLs, bodies, headers or tokens. |
+
+### Share intake
+
+Shares open `ShareIntakeActivity`, a translucent bottom sheet over the source
+app, instead of Settings. A file is checked before anything is copied: the
+provider must call it `video/*`, the container must contain a video track and
+its sniffed MIME type wins over the provider's (file names are ignored), the
+duration must be 1 ms to 10 minutes and the declared size must be within the
+cap. Accepted files are streamed in 64 KiB chunks into a per-intake directory under
+`noBackupFilesDir/share-staging` while the URI grant is valid, hashed on the way and
+cut off as soon as the cap is passed. Then `POST /v1/uploads`, `PUT` content,
+`POST .../complete` and `POST /v1/investigations` with an `Idempotency-Key`. The
+staged copy is deleted once the investigation exists, when the sheet is dismissed or
+closed, and when a newer share replaces the intake; dismissing stops a copy in
+progress. Two share sheets (shares from different apps) never touch each other's
+copies; staging directories nothing waits for any more are swept by reconciliation.
+A retry after a failure reuses the staged copy and the same key, so the server
+replays the first answer. It first completes the upload it already declared, so a
+lost `PUT` or `complete` response costs no second upload; the bytes are sent again
+only on `UPLOAD_CONTENT_MISSING` or `UPLOAD_MISMATCH`, and a new upload is declared
+only on `UPLOAD_EXPIRED` or `NOT_FOUND`. A link share creates a `url` source
+investigation.
+
+The sheet keeps the three states apart: a private copy on this device, uploading,
+and accepted by the service (then the polled status). Sharing an item that
+already has an investigation (same SHA-256, or same link) offers the existing
+check, or "Check it again" with a new key. Private or protected, unsupported,
+expired grant, over 10 minutes, over the size limit and unreadable inputs get
+their own copy and a "Choose a video file" alternative; nothing is truncated.
+Settings shows a one-line summary of the latest share.
+
+### Local store and reconciliation
+
+Room 2.8 (code generated by KSP) holds one database, `ovrly.db`, in app-private
+storage that the data-extraction rules already exclude from backup and transfer.
+Schema version 1 is exported to `app/schemas/` and committed; a later change bumps
+the version and adds a migration checked against that export. There is no
+destructive fallback.
+
+| Table | Contents |
+| --- | --- |
+| `investigations` (`InvestigationRecord`) | One row per share: local id, server id, `LocalJobState`, source, idempotency key, duplicate key, staged copy and declared upload (while local), last `processing_status`, the last investigation read as contract JSON, error code and timestamps. |
+| `report_versions` (`ReportCacheEntry`) | Immutable report versions as contract JSON, with `provisional`, `fetched_at` and a `stale` flag. |
+| `pending_chunks` (`PendingChunk`) | Captured chunks waiting for their capture session, keyed by the contract's `(session_id, seq)`; the chunk uploader is AN-07 (#26). |
+
+`LocalJobState` is the app's own state, not `JobState` or `ProcessingStatus`:
+`local_pending -> uploading -> accepted -> queued / running / partial /
+succeeded / failed / cancelled`. Transitions go through `LocalJobState.next`
+and `LocalJobs`; anything else (for example `UploadStarted` on an accepted
+share) is refused and leaves the row unchanged. After acceptance every server
+read wins, even over a terminal local state, and an `UNKNOWN` status keeps the
+current state, so it never becomes success. A `NOT_FOUND` read marks the share
+failed and stops offering it as a duplicate.
+
+`Reconciler.reconcile()` runs from `MainActivity.onResume`, so on app start and
+every return to the foreground. It reads every accepted, unfinished
+investigation again (the server wins), retries shares left `local_pending` or
+`uploading` by an earlier process with their staged copy, declared upload and
+idempotency key (marking them failed when the copy is gone), leaves alone the
+shares an open sheet is handling and that sheet's staging directory (registered
+before any byte is staged), and deletes staging nothing waits for that is older
+than the process start the platform reports. Each row is read again just before
+it is acted on, so a share the user dismissed meanwhile is not retried.
+
+The declared upload is stored as soon as `POST /v1/uploads` answers and the
+upload id as soon as the upload completes, both before the next call, the same
+rule as for the idempotency key. A retry after process death therefore never
+declares or sends the file again, and a retried create sends the same upload id
+with the same key, so the server replays its answer instead of refusing it.
+
+A cached report is stale when a newer investigation version is known, or when it
+is provisional and could not be confirmed against the server within 10 minutes
+(the server was unreachable). A final, complete version never goes stale by age.
+`InvestigationRepository.cachedReport(id)` returns it with that flag.
+
+### Entry points for #31 and #34
+
+| Entry point | Use |
+| --- | --- |
+| `ApiServices.get(context)` | Process-wide `OvrlyApi`, `LocalJobs`, `InvestigationRepository` and `Reconciler`; null if the base URL is unusable. |
+| `InvestigationRepository.refresh(id)` / `track(id)` | One read, or a flow of `InvestigationUpdate`s polled every 3 s (5 s while `partial`, backing off to 30 s on failures) until `complete`, `failed` or `cancelled`, or a non-retryable failure such as `NOT_FOUND`. Every read is stored. |
+| `InvestigationRepository.cached(id)` / `cachedReport(id)` | The last stored read, and the newest cached report version with its `stale` flag, without a network call. |
+| `CheckStatus` (`Investigation.checkStatus`) | `WAITING`, `CHECKING`, `PARTIAL`, `COMPLETE`, `FAILED`, `CANCELLED` from `processing_status`; `UNKNOWN` is neither complete nor terminal. |
+| `OvrlyApi.waking` | True while a cold call waits for the service. |
+
+Every investigation route returns the full contract read model
+(`processing_status`, `job`, `report`) since BE-10 (#33, PR #95). A response
+without those fields, such as an older backend's nine-field body, is reported
+as `ApiFailure.Incompatible` ("Update needed") instead of a guessed status.
+
+| Test | What it proves |
+| --- | --- |
+| `ApiClientTest` | Bearer and per-request `X-Request-Id`, logs without tokens, bodies or URLs, the cold-start retry (connection drop and gateway error) with the waking state, no retry when warm, every known error code and an unknown code and action, HTML/invalid/redirect responses as incompatible, origin pinning and base URL parsing. |
+| `OvrlyApiTest` | Guest minting once and token reuse, replacing a refused credential, the six result fixtures read through `GET` and the repository with their typed status, `UNKNOWN` never complete, the legacy nine-field body rejected, idempotent create replay and polling until terminal or `NOT_FOUND`. |
+| `ShareIntakeTest` | Device checks (MIME, track, duration, size), streamed staging with hash and cap, per-intake staging and the orphan sweep, dismissing during staging (copy stops, file deleted, no stale state), the full upload path with request bodies and the stored record, duplicate offer and expired duplicate, URL source, retry with the same key and no second upload, resuming after a lost `PUT` response with the declared upload stored, re-sending missing bytes to the same upload, re-declaring an expired upload, dismissing before acceptance forgets the share, rejection cases that never reach the server, server limit mapping and a build without a service. |
+| `LocalStoreTest` | The `LocalJobState` transition table, including refused transitions and `UNKNOWN` never reaching success; server reads winning and caching the report; importing an unseen investigation; staleness by age for provisional versions only and by a newer version; `NOT_FOUND` and abandoning; the committed schema export. |
+| `ReconcilerTest` | Unfinished accepted shares refreshed and finished ones left alone, provisional reports going stale when the server is unreachable, a pending link created with its stored key, an interrupted upload completing its declared upload first, a lost staged copy failing without a request, a retryable failure staying pending, shares of an open sheet left alone and the staging sweep. |
+
+Unit tests use OkHttp MockWebServer on loopback (already a test dependency) and
+an in-memory `InvestigationDao` with the same semantics as the Room one; KSP
+checks every Room query against the schema at build time. The Android Keystore,
+Room on a device, `ContentResolver` and the sheet are not unit-tested.
 
 ## Gallery and demo
 

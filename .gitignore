@@ -4,6 +4,7 @@
 **/build/
 local.properties
 voxide.local.properties
+api.local.properties
 .kotlin/
 .cxx/
 .externalNativeBuild/
