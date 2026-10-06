@@ -1,0 +1,18 @@
+{
+  "synthetic": true,
+  "description": "Synthetic Crossref works list for filter=updates:10.5555/synthetic.0003: one retraction notice that updates the DOI. Shaped per the Crossref REST API. Not a recording of a live call.",
+  "status": "ok",
+  "message-type": "work-list",
+  "message": {
+    "total-results": 1,
+    "items": [
+      {
+        "DOI": "10.5555/synthetic.retraction.0003",
+        "type": "journal-article",
+        "update-to": [
+          { "DOI": "10.5555/synthetic.0003", "type": "retraction", "label": "Retraction" }
+        ]
+      }
+    ]
+  }
+}

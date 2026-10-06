@@ -17,8 +17,48 @@
   later shared video as its full video before an expansion names it. "Try again"
   reuses one stored key per check so a lost answer cannot create a duplicate
   check (Room schema version 2). Unknown contract values read neutrally.
-  Expansion content and reanalysis versions depend on #27.
 
+- On-device screen text for live capture (AN-06, #100): frames are probed once a second and
+  kept on a visible change or a 5-second heartbeat, at most 20 per minute; likely text regions
+  are cropped and read on the phone by bundled ML Kit Text Recognition Latin 16.0.1. Chunks now
+  carry `{text, box, frame_pts}` observations, per-frame status and recognition time, the
+  sampling policy and the recognizer version, and declare `text` or `both` coverage. Frames
+  still never leave the device. ML Kit's Google datatransport upload components are removed
+  from the manifest, and a build check fails if any datatransport or Firebase component is
+  left in a merged manifest (decision 0005). Stop no longer waits for recognition. A frame's
+  text stays in the chunk of its probe time even when recognition runs past the chunk's end
+  (the chunk is held until it is in); frames still being read at Stop are counted.
+
+- Android voice actions wired to the API (AN-09, #35): the Voxide manifest
+  advertises `open_check`, `save_report`, `queue_cancel`, `queue_retry` and
+  `queue_continue` beside `open_tab`, each sent through `data/VoiceApi.kt` to
+  `POST /v1/voice/actions` with one `request_id` per command (replayed on
+  client retries and repeated tool calls). Tool results carry a `checks` state
+  of the five most recent checks (ids, status and source; no URLs), and the
+  device resolves the `latest` alias. Cancellation needs an on-screen
+  confirmation bound to its target that times out after 30 seconds and is
+  discarded when voice stops. A voice panel shows the recognized speech, each
+  accepted, denied or failed result and the opened check, and offers a typed
+  command alternative that works without a microphone or connection to Voxide.
+  Recognized text is never logged or stored.
+
+- Evidence stages (BE-09, #27): `retrieval` and `assessment` queue stages turn a
+  published version with claims into the next version with evidence and assessments.
+  Router-written neutral and disconfirming queries search Scholarxiv Papers; hits are
+  deduplicated by DOI and arXiv id, ranked with in-house BM25 and read as abstracts or
+  open-access full text from arXiv or Europe PMC, with the inspection level recorded;
+  Crossref flags retracted, withdrawn or corrected sources and unknown stays unknown.
+  The router labels each passage, retracted sources are never counted, the overall label
+  is computed and abstains when evidence is missing, and every version is
+  citation-checked before it is published. Budgets per claim keep unreached claims
+  visible but unassessed. Papers and Router calls share a PostgreSQL token bucket under
+  the account limit (migration `0010_provider_buckets`); calls wait for a token and a
+  provider 429 holds the bucket for its `Retry-After`. Long stages heartbeat in the
+  background, and assessment is enqueued with the fenced retrieval publish. The
+  production `reanalysis` handler reruns corrected claims, searches deeper, or brings in
+  the confirmed full video once it has a report, re-checking with backoff. Registered
+  only with the server-side `OVRLY_SCHOLARXIV_API_KEY`; tests replay synthetic
+  cassettes and never call a provider.
 - Android instrumented tests in CI (REPO-05 part 1, #76): a new **Android
   instrumented checks** workflow runs AndroidX Test, Espresso and Compose tests
   on API 29 and API 34 emulators for every PR that touches Android, with the

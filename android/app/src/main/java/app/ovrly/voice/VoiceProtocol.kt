@@ -94,7 +94,14 @@ internal sealed interface VoiceEvent {
     data object Interrupted : VoiceEvent
     data object TurnComplete : VoiceEvent
     data class Error(val usageLimit: Boolean) : VoiceEvent
-    data object Text : VoiceEvent
+
+    /**
+     * Speech recognized by the provider: [user] text is what the user said (`text_user`),
+     * otherwise the assistant's reply. Shown on screen only; never logged or stored.
+     */
+    data class Text(val user: Boolean, val text: String, val turnComplete: Boolean) :
+        VoiceEvent
+
     data object Unknown : VoiceEvent
 }
 
@@ -105,6 +112,9 @@ internal sealed interface VoiceEvent {
  */
 internal object VoiceProtocol {
     const val ACTION = "open_tab"
+
+    /** State key the provider sees with every tool result; see [VoiceTargets]. */
+    const val STATE_CHECKS = "checks"
     const val MAX_MESSAGE_BYTES = 96 * 1024
     const val MAX_AUDIO_BYTES = 48_000
     const val MAX_INPUT_BYTES = 640
@@ -113,35 +123,79 @@ internal object VoiceProtocol {
             "space (Your space, the user's saved reports) and explore (Explore, sample reports). " +
             "If the user asks for anything else, say voice can't open it. " +
             "The result says whether the user was already on that tab; tell them so."
+    private const val ID_RULE =
+        "Use an id from the app state `checks`, or the word latest for the user's most " +
+            "recent check. Never invent an id. Only these actions exist: open_check, " +
+            "save_report, queue_cancel, queue_retry, queue_continue and open_tab; voice " +
+            "cannot delete, publish or change settings. Repeat the result message to the user."
 
-    fun manifest(): String = JSONObject()
-        .put(
-            "actions",
-            JSONArray().put(
+    /** The server allowlist (BC-D04); each one is sent to `POST /v1/voice/actions`. */
+    private fun describe(action: VoiceCommandAction): String = when (action) {
+        VoiceCommandAction.OPEN_CHECK ->
+            "Open one of the user's checks (a fact-check of a shared video or link). " +
+                "id: the check's investigation_id."
+
+        VoiceCommandAction.SAVE_REPORT ->
+            "Save a check's report to the user's saved reports. id: the check's report_id."
+
+        VoiceCommandAction.QUEUE_CANCEL ->
+            "Cancel a check that is still running. The app asks the user to confirm on " +
+                "screen first; do not say it is cancelled unless the result says so. " +
+                "id: the check's job_id."
+
+        VoiceCommandAction.QUEUE_RETRY ->
+            "Ask the service to retry a check's job. It only works while the job is still " +
+                "in progress; the result says when it is not possible. id: the check's job_id."
+
+        VoiceCommandAction.QUEUE_CONTINUE ->
+            "Ask the service to continue a check's job. It only works while the job is " +
+                "still in progress; the result says when it is not possible. " +
+                "id: the check's job_id."
+    }
+    fun manifest(): String {
+        val actions = JSONArray().put(
+            JSONObject()
+                .put("name", ACTION)
+                .put("description", TAB_DESCRIPTION)
+                .put(
+                    "params",
+                    JSONObject().put(
+                        "tab",
+                        JSONObject()
+                            .put("type", "string")
+                            .put("required", true)
+                            .put("description", "The tab to open. Must be one of the listed tabs.")
+                            .put("enum", JSONArray(VoiceTab.entries.map { it.wireName }))
+                    )
+                )
+                .put("scope", "global")
+                .put("dangerous", false)
+        )
+        for (action in VoiceCommandAction.entries) {
+            actions.put(
                 JSONObject()
-                    .put("name", ACTION)
-                    .put("description", TAB_DESCRIPTION)
+                    .put("name", action.wireName)
+                    .put("description", "${describe(action)} $ID_RULE")
                     .put(
                         "params",
                         JSONObject().put(
-                            "tab",
+                            "id",
                             JSONObject()
                                 .put("type", "string")
                                 .put("required", true)
-                                .put(
-                                    "description",
-                                    "The tab to open. Must be one of the listed tabs."
-                                )
-                                .put("enum", JSONArray(VoiceTab.entries.map { it.wireName }))
+                                .put("description", "An id from the app state, or latest.")
                         )
                     )
                     .put("scope", "global")
-                    .put("dangerous", false)
+                    .put("dangerous", action.requiresConfirmation)
             )
-        )
-        .put("stateSchema", JSONArray())
-        .put("environment", "production")
-        .toString()
+        }
+        return JSONObject()
+            .put("actions", actions)
+            .put("stateSchema", JSONArray().put(STATE_CHECKS))
+            .put("environment", "production")
+            .toString()
+    }
 
     fun parse(text: String): VoiceEvent {
         val json = objectFrom(text)
@@ -186,11 +240,15 @@ internal object VoiceProtocol {
             "turn_complete" -> VoiceEvent.TurnComplete
 
             "text", "text_user" -> {
-                json.string("text", 8192)
+                val text = json.string("text", 8192)
                 if (json.has("turnComplete") && json.opt("turnComplete") !is Boolean) {
                     throw VoiceProtocolException()
                 }
-                VoiceEvent.Text
+                VoiceEvent.Text(
+                    user = json.getString("type") == "text_user",
+                    text = text,
+                    turnComplete = json.optBoolean("turnComplete", false)
+                )
             }
 
             "error" -> VoiceEvent.Error(json.string("message", 2048) == "usage_limit")
@@ -207,11 +265,18 @@ internal object VoiceProtocol {
 
     fun interrupt(): String = JSONObject().put("type", "interrupt").toString()
 
-    fun toolResult(tool: VoiceEvent.Tool, success: Boolean, message: String): String {
+    fun toolResult(
+        tool: VoiceEvent.Tool,
+        success: Boolean,
+        message: String,
+        code: String? = null,
+        state: JSONObject = JSONObject()
+    ): String {
         val result = JSONObject().put("status", if (success) "success" else "error")
             .put(if (success) "result" else "message", message)
+        if (code != null) result.put("code", code)
         return JSONObject().put("type", "tool_result").put("id", tool.id)
-            .put("name", tool.name).put("result", result).put("state", JSONObject()).toString()
+            .put("name", tool.name).put("result", result).put("state", state).toString()
     }
 
     fun objectFrom(text: String): JSONObject {

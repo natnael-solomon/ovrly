@@ -1,0 +1,24 @@
+{
+  "synthetic": true,
+  "description": "Synthetic Scholarxiv Papers federated-search reply (Go plan) shaped per the public docs. crossref and pubmed report {count: 0, hasMore: false}, which the provider documents as possibly a silent source failure. Not a recording of a live call.",
+  "data": [
+    {
+      "source": "openalex",
+      "sources": ["openalex", "semantic_scholar"],
+      "title": "Electric bus adoption in city fleets: a synthetic survey",
+      "authors": ["A. Synthetic"],
+      "summary": "Nearly two thirds of surveyed city buses are electric.",
+      "year": 2026,
+      "doi": "10.48550/arXiv.2601.00001",
+      "url": "https://openalex.example/W0000000001",
+      "citationCount": 3
+    }
+  ],
+  "bySource": {
+    "openalex": { "count": 1, "hasMore": false },
+    "semantic_scholar": { "count": 1, "hasMore": false },
+    "crossref": { "count": 0, "hasMore": false },
+    "pubmed": { "count": 0, "hasMore": false }
+  },
+  "pagination": { "page": 0, "limit": 10, "hasMore": false, "nextPage": null }
+}

@@ -67,6 +67,15 @@ internal class VoiceSession(
     val state: StateFlow<VoiceState> = mutableState.asStateFlow()
     val level: StateFlow<Float> = presentation.level
     val events: SharedFlow<VoiceOrbEvent> = presentation.events
+
+    /** Product commands, the app state for tool results and the end hook; set before [start]. */
+    var commands: VoiceCommands = VoiceCommands()
+
+    /** Recognized user text and action results; main thread, except [VoiceActivityLog.result]. */
+    val activityLog = VoiceActivityLog()
+
+    /** Recognized user text and the last action result, for the screen only. */
+    val activity: StateFlow<VoiceActivity> = activityLog.state
     private var generation = 0
     private var closed = false
     private var transport: VoiceTransport? = null
@@ -117,6 +126,7 @@ internal class VoiceSession(
             return
         }
         val token = ++generation
+        activityLog.clear()
         mutableState.value = VoiceState(
             "Connecting",
             if (configuration.mock) {
@@ -249,11 +259,19 @@ internal class VoiceSession(
             }
             deadline?.cancel()
             deadline = null
+            val actions = VoiceActions(
+                navigator,
+                diagnostics,
+                commands.executor,
+                commands.state,
+                activityLog,
+                host::post
+            )
             val created = VoiceConversation(
                 configuration,
                 host,
                 presentation,
-                VoiceActions(navigator, diagnostics),
+                actions,
                 permissionGranted,
                 heldStart
             )
@@ -306,7 +324,9 @@ internal class VoiceSession(
                     oldConversation?.cancelTimers()
                 },
                 "audio" to { oldConversation?.audio?.close() },
-                "transport" to { oldTransport?.close() }
+                "transport" to { oldTransport?.close() },
+                // An approval asked for this session must not outlive it.
+                "pending actions" to { commands.ended() }
             )
             completed = true
         } finally {

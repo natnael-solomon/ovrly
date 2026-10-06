@@ -5,6 +5,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -272,4 +273,14 @@ voice_actions = Table(
     Column("error_code", String(64), nullable=True),
     Column("response", JSONB, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+# A token bucket per provider account (BE-09, #27), shared by every worker process: the
+# Scholarxiv Papers and Router APIs share one hourly request limit per account.
+provider_buckets = Table(
+    "provider_buckets",
+    metadata,
+    Column("name", String(64), primary_key=True),
+    Column("tokens", Float, nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )

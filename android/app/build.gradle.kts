@@ -1,3 +1,4 @@
+import com.android.build.api.artifact.SingleArtifact
 import java.util.Properties
 import org.gradle.api.tasks.util.PatternFilterable
 import org.gradle.testing.jacoco.plugins.JacocoPluginExtension
@@ -113,6 +114,11 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            // ML Kit ships native libraries per ABI (#100). Release keeps phone ABIs only;
+            // debug keeps every ABI for x86_64 emulator CI. ChromeOS (x86_64) is not a supported
+            // device (BC-D02), hence the narrow lint suppression.
+            //noinspection ChromeOsAbiSupport
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -239,6 +245,8 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.5")
     ksp("androidx.room:room-compiler:2.8.5")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
+    // Bundled Latin model: recognition runs on the device without a model download (#100).
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("junit:junit:4.13.2")
@@ -253,4 +261,46 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestUtil("androidx.test:orchestrator:1.6.1")
     androidTestUtil("androidx.test.services:test-services:1.6.0")
+}
+
+/**
+ * Fails when the merged manifest still declares a Google datatransport or Firebase component.
+ * ML Kit (#100) brings datatransport, which would upload SDK usage metrics; the app manifest
+ * removes those components, and this check keeps them removed in every variant.
+ */
+abstract class VerifyNoTelemetryComponents : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val mergedManifest: RegularFileProperty
+
+    @get:OutputFile
+    abstract val report: RegularFileProperty
+
+    @TaskAction
+    fun verify() {
+        val manifest = mergedManifest.get().asFile.readText()
+        val banned = "com\\.google\\.android\\.datatransport\\.|com\\.google\\.firebase\\."
+        val component = Regex(
+            "<(service|receiver|provider|activity)\\b[^>]*android:name=\"((?:$banned)[^\"]+)\""
+        )
+        val found = component.findAll(manifest)
+            .map { "${it.groupValues[1]} ${it.groupValues[2]}" }
+            .toList()
+        check(found.isEmpty()) {
+            "Telemetry components in the merged manifest: ${found.joinToString()}"
+        }
+        report.get().asFile.writeText("No datatransport or Firebase components.\n")
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        val name = variant.name.replaceFirstChar { it.uppercase() }
+        val verify = tasks.register<VerifyNoTelemetryComponents>("verify${name}NoTelemetry") {
+            mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
+            report.set(layout.buildDirectory.file("reports/telemetry/${variant.name}.txt"))
+        }
+        tasks.matching { it.name == "assemble$name" }.configureEach { dependsOn(verify) }
+        tasks.matching { it.name == "check" }.configureEach { dependsOn(verify) }
+    }
 }
