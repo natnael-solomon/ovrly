@@ -126,6 +126,26 @@ class VoiceSessionTest {
         fixture.assertReleased()
     }
 
+    @Test fun stoppingForCaptureOrBackgroundEndsPendingVoiceActionsWithoutReconnecting() {
+        val fixture = Fixture()
+        val answers = mutableListOf<(VoiceCommandOutcome) -> Unit>()
+        var ended = 0
+        fixture.session.commands = VoiceCommands(
+            executor = { _, done -> answers += done },
+            ended = { ended++ }
+        )
+        fixture.started()
+        fixture.tool("cancel", "queue_cancel", """{"id":"job_1"}""")
+        assertEquals(1, answers.size)
+        fixture.session.stop("Voice stopped before playback capture.")
+        answers.single()(VoiceCommandOutcome(true, "Cancelled."))
+        assertEquals(1, ended)
+        assertTrue(fixture.transport.sent.isEmpty())
+        assertEquals(1, fixture.transportCreations)
+        assertFalse(fixture.session.state.value.active)
+        fixture.assertReleased()
+    }
+
     @Test fun stopRejectsLateMessagesAudioAndFailureCallbacks() {
         val fixture = Fixture().started()
         fixture.session.stop("App moved to background.")

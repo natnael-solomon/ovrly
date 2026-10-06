@@ -443,10 +443,10 @@ key; never use a secret key or distribute a live-configured APK casually.
 There is no local attempt cap: whoever runs live tests tracks provider usage
 against the dashboard.
 
-Live voice sends microphone audio for tab switching only and never
-reconnects automatically. Native authorization, device compatibility and
-billing semantics remain unverified; one connection was charged as one session
-in device testing. Product voice actions remain separate work (#33, #35).
+Live voice sends microphone audio for tab switching and the voice actions
+below, and never reconnects automatically. Native authorization, device
+compatibility and billing semantics remain unverified; one connection was
+charged as one session in device testing.
 
 ### Session policy
 
@@ -497,42 +497,81 @@ Diagnostics use the `OvrlyVoice` log tag and contain only setup stages, status
 codes, event categories, counts and byte measurements: no keys, URLs,
 transcripts, audio or target IDs. Socket and TLS cleanup run off the UI thread.
 
-### Planned voice command contract
+### Voice actions
 
-The offline contract defines these exact, case-sensitive names. Every command
-takes only `{"id":"target-id"}`; extra arguments (including `confirmed` or
-`owner`) are rejected. The tool-call envelope's `id` identifies the call and is
-separate from `args.id`, which identifies the target.
+AN-09 (#35) wires the BC-D04 allowlist to `POST /v1/voice/actions` (BE-10, #33)
+through `data/VoiceApi.kt` on the shared `ApiClient` and guest credential. The
+manifest advertises `open_tab` and these five actions, each taking exactly
+`{"id":"..."}`; extra arguments (including `confirmed` or `owner`) are refused
+on the device and never sent. The tool-call envelope's `id` identifies the call
+and is separate from `args.id`, which identifies the target.
 
-| Command | Target | On-screen confirmation |
-| --- | --- | --- |
-| `open_check` | Investigation/check | No |
-| `save_report` | Report | No |
-| `queue_cancel` | Job | Required |
-| `queue_retry` | Job | No |
-| `queue_continue` | Job | No |
+| Action | Target | On-screen confirmation | After the server accepts |
+| --- | --- | --- | --- |
+| `open_check` | Investigation | No | The voice panel opens the check (status and claim count; a development fixture report is labelled as a fixture) until the report screens (#34) exist. |
+| `save_report` | Report | No | Nothing else; the server saved it. |
+| `queue_cancel` | Job | Required | Stored checks are reconciled. |
+| `queue_retry` | Job | No | Stored checks are reconciled. |
+| `queue_continue` | Job | No | Stored checks are reconciled. |
 
-The current client ID syntax is 1-128 ASCII characters, starting with a letter
-or digit and otherwise containing letters, digits, `_` or `-`. IDs are opaque
-and case-sensitive: no trimming, coercion, URL interpretation or guessing a
-missing ID from the selected screen. Reconcile this syntax with the shared
-schemas in #15 before wiring #33/#35; it is not an implemented backend schema.
-Valid syntax does not prove the target exists or belongs to the caller.
+The assistant cannot see the app, so every tool result carries the state key
+`checks`: the five most recent checks from the Room store, each with
+`investigation_id`, `report_id`, `job_id`, `status` and `source` (`link` or
+`video`); no URL, title or transcript. An id may also be the word `latest`,
+which the device resolves to the most recent check's investigation, report or
+job before anything is sent; with no check, report or job it answers without a
+request. Any other id is opaque and case-sensitive (1-128 ASCII letters, digits,
+`_` or `-`, starting with a letter or digit) and is sent as given.
 
-Only cancellation requires confirmation. Future integration must bind approval
-to the exact call and target, reject a remote `confirmed` flag, and discard
-pending approval on stop/backgrounding. Retry and continue remain subject to
-backend job-state and resource limits even without a confirmation dialog.
-None of these confirmations or product handlers is wired yet.
+Each command is one request with a new `request_id`. A retried tool call (same
+call id and arguments) replays its first result instead of running again, and
+client retries inside one request (cold start, a refreshed credential) resend
+the same `request_id`, so the server replays rather than acting twice. A
+response whose `request_id` does not echo the request is never used.
 
-The active manifest advertises only `open_tab`, which takes exactly
-`{"tab":"space"}` or `{"tab":"explore"}`. Settings is not a voice target. If
-that tab is already showing, the result says so and nothing changes; otherwise
-the app switches tabs (closing the gallery or an open report). Product requests
-return `status: error` with
-`VOICE_ACTION_UNAVAILABLE` when valid or `VOICE_ACTION_INVALID_ARGUMENTS` when
-invalid. All other actions, including delete/publish/settings, return
-`VOICE_ACTION_UNSUPPORTED`. No unfinished action returns success. Exact duplicate
-call IDs replay their prior result; changing a target under the same call ID
-stops the session as a protocol error. Malformed JSON fails protocol parsing.
-Tests exercise these paths with fakes and consume no provider sessions.
+| Server answer | What the user sees and the assistant is told |
+| --- | --- |
+| 200 `accepted` | Success with the server's message. |
+| 200 `denied` with `VOICE_TARGET_NOT_FOUND` (missing or another owner's target; the server never sends `VOICE_TARGET_NOT_OWNED`), `VOICE_ACTION_INVALID_STATE` (retry or continue on a finished job) or `VOICE_ACTION_UNSUPPORTED` | Error with the server's message and code. |
+| 200 with a `result` this version does not know | Error; nothing is assumed to have happened. |
+| 422 `VALIDATION_FAILED`, 409 `IDEMPOTENCY_KEY_REUSED`, any other error shape | Error with its code. |
+| No response, or a body outside the contract | "Cannot reach ovrly" or "update needed". |
+
+Cancellation waits for an on-screen dialog bound to that exact request and
+target; it is declined after 30 seconds, and every pending approval is
+discarded when voice stops, fails or the app leaves the foreground, including
+cancellations queued behind the dialog or still resolving their target. A remote
+`confirmed` flag is never read. Retry and continue never change a job on this
+server: they are accepted while the job is in progress and denied once it has
+finished.
+
+The voice panel above the tabs shows what the user said (`text_user`, joined
+per turn), the last result and the opened check. It appears while voice is
+live, after any result, and when the microphone is denied or voice ended with
+an error. Recognized text stays in memory for the screen: it is never logged,
+stored or uploaded, and a new session starts with an empty panel. The panel's
+typed alternative takes `open`, `save`, `cancel`, `retry` or `continue`,
+optionally followed by an id (default `latest`), and runs the same command path
+without a voice session, so it works with a denied microphone, after a
+disconnect and in the offline simulation; it never starts or reconnects voice.
+
+`open_tab` is unchanged: it takes exactly `{"tab":"space"}` or
+`{"tab":"explore"}`, Settings is not a voice target, and an already showing tab
+is reported without changes. Everything else, including delete, publish and
+settings, is refused on the device with `VOICE_ACTION_UNSUPPORTED`, shown on
+screen and never sent. Builds without an ovrly service address refuse the five
+actions with `VOICE_ACTION_UNAVAILABLE`. Changing a target under the same call
+id stops the session as a protocol error; malformed JSON fails protocol
+parsing. The offline simulation never issues tool calls.
+
+All unit and CI tests use fakes: `MockVoiceTransport`, a fake transport, MockWebServer on
+loopback or an OkHttp interceptor. `NoLiveSessionsTest` checks that test
+builds have no live opt-in or key and that every test constructing
+`VoxideTransport` points it at a fake. No test opens a provider session.
+
+| Test | What it proves |
+| --- | --- |
+| `VoiceApiTest` | Every shared voice-actions fixture with a valid request, sent and parsed through the client with its outcome; 422, 409 and network failures; a mismatched `request_id`; the same `request_id` on a cold-start retry. |
+| `VoiceBackendTest` | `latest` per target kind, explicit ids, no request without a target, the `checks` state without URLs, cancellation approved, declined, mis-answered, timed out and discarded, effects only after acceptance, the fixture allowlist and the unsupported-action denial. |
+| `VoiceCommandSessionTest` | Allowlisted calls reach the executor and others are refused, late answers carry the state and are shown, denials are visible, a repeated call runs once, an answer after stop is dropped with the approval discarded and no reconnect, and user speech is shown while assistant text is not. |
+| `VoiceCommandContractTest`, `VoiceProtocolTest` | The advertised manifest and `checks` state schema, refused-command results, typed-command parsing and the text events. |

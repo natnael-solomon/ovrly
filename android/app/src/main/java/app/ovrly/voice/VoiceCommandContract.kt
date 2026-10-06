@@ -9,14 +9,29 @@ internal enum class VoiceCommandAction(val wireName: String) {
     QUEUE_RETRY("queue_retry"),
     QUEUE_CONTINUE("queue_continue");
 
+    /** How the action is named on screen. */
+    val label: String
+        get() = when (this) {
+            OPEN_CHECK -> "Open check"
+            SAVE_REPORT -> "Save report"
+            QUEUE_CANCEL -> "Cancel check"
+            QUEUE_RETRY -> "Retry check"
+            QUEUE_CONTINUE -> "Continue check"
+        }
+
     val requiresConfirmation: Boolean
         get() = this == QUEUE_CANCEL
 }
 
 internal enum class VoiceCommandError(val message: String) {
-    VOICE_ACTION_UNSUPPORTED("This voice action is not supported."),
+    VOICE_ACTION_UNSUPPORTED(
+        "Voice can open a check, save a report, or cancel, retry or continue a check. " +
+            "It cannot do that."
+    ),
     VOICE_ACTION_INVALID_ARGUMENTS("This action requires exactly one valid string id."),
-    VOICE_ACTION_UNAVAILABLE("This voice action is not connected to the app yet.")
+    VOICE_ACTION_UNAVAILABLE(
+        "This build has no ovrly service address, so voice actions cannot run."
+    )
 }
 
 internal sealed interface VoiceCommandValidation {
@@ -26,13 +41,32 @@ internal sealed interface VoiceCommandValidation {
     data class Rejected(val error: VoiceCommandError) : VoiceCommandValidation
 }
 
+/** A validated product command; [target] is an opaque id or [VoiceCommandContract.LATEST]. */
+internal data class VoiceCommand(val action: VoiceCommandAction, val target: String)
+
 /**
- * Planned product commands, separate from the advertised open_tab action.
- * Validation establishes syntax only, never target existence, ownership or job eligibility.
+ * The BC-D04 allowlist the client accepts from the provider or from a typed command.
+ * Validation establishes syntax only, never target existence, ownership or job eligibility:
+ * the server decides those through `POST /v1/voice/actions`.
  */
 internal object VoiceCommandContract {
+    /** Target alias resolved on the device to the most recent check; never sent to the server. */
+    const val LATEST = "latest"
     private const val MAX_ID_LENGTH = 128
     private val idPattern = Regex("[A-Za-z0-9][A-Za-z0-9_-]*")
+
+    /** Typed verbs, so the same actions work without a voice session. */
+    private val verbs = mapOf(
+        "open" to VoiceCommandAction.OPEN_CHECK,
+        "save" to VoiceCommandAction.SAVE_REPORT,
+        "cancel" to VoiceCommandAction.QUEUE_CANCEL,
+        "retry" to VoiceCommandAction.QUEUE_RETRY,
+        "continue" to VoiceCommandAction.QUEUE_CONTINUE
+    )
+
+    const val TYPED_HINT =
+        "Type open, save, cancel, retry or continue, optionally followed by an id. " +
+            "Without an id it uses your latest check."
 
     fun validate(name: String, arguments: String?): VoiceCommandValidation {
         val action = VoiceCommandAction.entries.singleOrNull { it.wireName == name }
@@ -52,16 +86,29 @@ internal object VoiceCommandContract {
         }
     }
 
+    /**
+     * Parses a typed command: a verb, then an optional id or `latest`. Verbs are matched
+     * without case; ids are opaque and case-sensitive, so they are never normalized.
+     */
+    fun parseTyped(text: String): VoiceCommand? {
+        val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val action = words.firstOrNull()?.lowercase()?.let(verbs::get)
+        val target = when (words.size) {
+            1 -> LATEST
+            2 -> words[1].takeUnless { it.equals(LATEST, ignoreCase = true) } ?: LATEST
+            else -> null
+        }
+        return if (action != null && target != null && validId(target)) {
+            VoiceCommand(action, target)
+        } else {
+            null
+        }
+    }
+
     private fun validId(id: String): Boolean =
         id.length in 1..MAX_ID_LENGTH && idPattern.matches(id)
 
-    fun rejectForCurrentBuild(tool: VoiceEvent.Tool): String {
-        val error = when (val command = validate(tool.name, tool.arguments)) {
-            is VoiceCommandValidation.Accepted -> VoiceCommandError.VOICE_ACTION_UNAVAILABLE
-            is VoiceCommandValidation.Rejected -> command.error
-        }
-        val envelope = JSONObject(VoiceProtocol.toolResult(tool, false, error.message))
-        envelope.getJSONObject("result").put("code", error.name)
-        return envelope.toString()
-    }
+    /** The tool result for a command the client refuses before any request is made. */
+    fun reject(tool: VoiceEvent.Tool, error: VoiceCommandError, state: JSONObject): String =
+        VoiceProtocol.toolResult(tool, false, error.message, error.name, state)
 }
