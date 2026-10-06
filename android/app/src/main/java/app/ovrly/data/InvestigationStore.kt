@@ -236,7 +236,10 @@ internal abstract class OvrlyDatabase : RoomDatabase() {
                 "PRIMARY KEY(`report_id`))"
         )
 
-        val MIGRATION_2_3 = object : Migration(2, 3) {
+        /** Schema version that added `saved_reports`. */
+        private const val SAVED_REPORTS_VERSION = 3
+
+        val MIGRATION_2_3 = object : Migration(2, SAVED_REPORTS_VERSION) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 MIGRATION_2_3_SQL.forEach(db::execSQL)
             }

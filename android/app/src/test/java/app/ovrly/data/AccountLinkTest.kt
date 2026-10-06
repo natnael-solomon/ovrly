@@ -79,7 +79,7 @@ class AccountLinkTest {
 
         assertEquals(LinkOutcome.Linked(switched = true, merged = 2, stored = true), outcome)
         assertEquals("account-token", server.credentials.read())
-        assertTrue(api.isLinked())
+        assertTrue(api.linked)
         runBlocking { SavedReports(api, MemorySavedReportDao()).sync() }
         server.take()
         assertEquals("Bearer account-token", server.take().getHeader("Authorization"))
@@ -151,7 +151,7 @@ class AccountLinkTest {
         val account = MemoryAccountStore(linked = true)
         val api = OvrlyApi(server.client, server.credentials, account)
         assertNull(runBlocking { SavedReports(api, MemorySavedReportDao()).sync() })
-        assertFalse(api.isLinked())
+        assertFalse(api.linked)
         assertEquals("synthetic-token-2", server.credentials.read())
     }
 

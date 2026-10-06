@@ -283,7 +283,7 @@ internal class ChecksViewModel(application: Application) : AndroidViewModel(appl
         val now = System.currentTimeMillis()
         stored = service.stored()
         storedSaves = saves?.stored().orEmpty()
-        val linked = services?.api?.let { api -> withContext(Dispatchers.IO) { api.isLinked() } }
+        val linked = services?.api?.let { api -> withContext(Dispatchers.IO) { api.linked } }
         val items = stored.map { inboxItem(it.record, it.investigation, now) }
             .sortedByDescending { it.createdAt }
         mutableState.update {

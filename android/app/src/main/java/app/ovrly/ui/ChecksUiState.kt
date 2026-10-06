@@ -21,6 +21,14 @@ internal data class ChecksUiState(
     val account: AccountUiState = AccountUiState()
 )
 
+/** What the account section shows (#36). */
+internal data class AccountUiState(
+    /** False when this build has no way to get a Google ID token. */
+    val available: Boolean = false,
+    val linked: Boolean = false,
+    val busy: Boolean = false,
+    val notice: String? = null
+)
 /** One published version in the picker. */
 internal data class VersionChoice(val version: Int, val label: String, val fixture: Boolean)
 

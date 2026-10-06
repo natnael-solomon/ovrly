@@ -193,4 +193,25 @@ internal class SavedReports(
         json = encoded(saved.report),
         storedAt = clock()
     )
+
+    private companion object {
+        val EMPTY_BODY = ByteArray(0).toRequestBody()
+
+        val NEWEST_FIRST: Comparator<SavedReportEntry> =
+            compareByDescending<SavedReportEntry> { savedInstant(it.savedAt) }
+                .thenBy { it.reportId }
+
+        fun savedInstant(value: String): Instant = try {
+            OffsetDateTime.parse(value).toInstant()
+        } catch (_: DateTimeParseException) {
+            Instant.EPOCH
+        }
+
+        /** A version with values this app does not know has no wire form; it reads as unknown. */
+        fun encoded(report: ReportVersion): String = try {
+            InvestigationCodec.encodeReportVersion(report)
+        } catch (_: IllegalArgumentException) {
+            ""
+        }
+    }
 }

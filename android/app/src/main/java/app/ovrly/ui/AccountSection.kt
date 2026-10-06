@@ -23,14 +23,6 @@ import app.ovrly.data.SIGN_IN_UNAVAILABLE
  * that a saved report cannot yet be restored on another device.
  */
 
-/** What the account section shows. */
-internal data class AccountUiState(
-    /** False when this build has no way to get a Google ID token. */
-    val available: Boolean = false,
-    val linked: Boolean = false,
-    val busy: Boolean = false,
-    val notice: String? = null
-)
 
 @Composable
 internal fun AccountSection(

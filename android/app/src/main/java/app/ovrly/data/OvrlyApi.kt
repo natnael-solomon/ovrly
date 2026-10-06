@@ -135,7 +135,7 @@ internal class OvrlyApi(
     }
 
     /** True when the stored credential belongs to a linked account (BC-D07). Reads a file. */
-    fun isLinked(): Boolean = account.linked()
+    val linked: Boolean get() = account.linked()
 
     /**
      * Links this device's principal to the Google account of [idToken] (BC-D07). Sent once
@@ -148,34 +148,33 @@ internal class OvrlyApi(
      * only one kept. Concurrent calls wait for the swap.
      */
     suspend fun linkAccount(idToken: String): ApiResult<LinkOutcome.Linked> {
-        val token = when (val current = credential()) {
-            is ApiResult.Failure -> return current
-            is ApiResult.Success -> current.value
+        val bearer = when (val token = credential()) {
+            is ApiResult.Failure -> return token
+            is ApiResult.Success -> token.value
         }
         val body = jsonBody(
             AccountLinkCodec.encodeRequest(
                 AccountLinkRequest(AccountLinkRequest.GOOGLE, idToken)
             )
         )
-        val call = ApiCall("principals.link", "POST", "v1/principals/link", body, token)
+        val call = ApiCall("principals.link", "POST", "v1/principals/link", body, bearer)
         return when (val result = client.send(call, AccountLinkCodec::parseResponse)) {
             is ApiResult.Failure -> result
-            is ApiResult.Success -> ApiResult.Success(adopt(result.value), result.requestId)
+
+            is ApiResult.Success -> minting.withLock {
+                val next = result.value.credential?.token
+                val stored = next == null || credentials.write(next)
+                if (next != null) cached = next
+                account.setLinked(true)
+                val outcome = LinkOutcome.Linked(
+                    switched = next != null,
+                    merged = result.value.mergedSavedReports,
+                    stored = stored
+                )
+                ApiResult.Success(outcome, result.requestId)
+            }
         }
     }
-
-    private suspend fun adopt(response: AccountLinkResponse): LinkOutcome.Linked =
-        minting.withLock {
-            val next = response.credential?.token
-            val stored = next == null || credentials.write(next)
-            if (next != null) cached = next
-            account.setLinked(true)
-            LinkOutcome.Linked(
-                switched = next != null,
-                merged = response.mergedSavedReports,
-                stored = stored
-            )
-        }
 
     private class FileBody(
         private val file: File,
