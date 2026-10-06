@@ -37,6 +37,11 @@ _MESSAGES = frozenset(
         "Retention completed (%d principals, %d uploads, %d jobs, %d purged)",
         "Stub reports enabled; fixture reports will be published",
         "Voice action %s %s",
+        "Provider %s request %s returned %d",
+        "Provider %s request %s failed in transport",
+        "Provider %s request %s body too large",
+        "Router reply needed hygiene (%d attempt)",
+        "Evidence assessment published version %d (%d of %d claims assessed)",
     }
 )
 _CODES = frozenset(
@@ -49,6 +54,11 @@ _CODES = frozenset(
         "unsupported",
         "accepted",
         "denied",
+        "scholarxiv_papers",
+        "scholarxiv_router",
+        "crossref",
+        "arxiv",
+        "europepmc",
         "transient",
         "rate_limited",
         "schema_repair",

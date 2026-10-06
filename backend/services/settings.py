@@ -44,6 +44,27 @@ class Settings(BaseSettings):
     # clients have report data before the assessment pipeline (#27) exists. Never enable it
     # for real users; every such report is marked ``fixture: true``.
     stub_reports: bool = False
+    # Evidence stages (BE-09, #27). The Scholarxiv key is server-only; without it the
+    # retrieval, assessment and reanalysis stages are not registered and their jobs wait.
+    scholarxiv_api_key: SecretStr | None = None
+    scholarxiv_base_url: str = Field(default="https://www.scholarxiv.com", max_length=200)
+    # Papers and Router calls share one account limit (1 200 requests per hour on Free);
+    # the default leaves 200 requests of headroom for other users of the account.
+    scholarxiv_requests_per_hour: int = Field(default=1000, ge=1, le=1200)
+    # Federated search needs the Go plan or above; Free keys get 403 and fall back.
+    scholarxiv_federated: bool = False
+    evidence_query_route: str = Field(default="auto:cheap", min_length=1, max_length=100)
+    evidence_relation_route: str = Field(default="auto:quality", min_length=1, max_length=100)
+    evidence_max_claims: int = Field(default=20, ge=1, le=100)
+    evidence_max_queries_per_claim: int = Field(default=3, ge=1, le=6)
+    evidence_results_per_query: int = Field(default=10, ge=1, le=50)
+    evidence_max_candidates_per_claim: int = Field(default=20, ge=1, le=100)
+    evidence_max_passages_per_claim: int = Field(default=4, ge=1, le=10)
+    evidence_max_full_text_per_claim: int = Field(default=2, ge=0, le=5)
+    evidence_max_llm_calls_per_claim: int = Field(default=4, ge=2, le=10)
+    evidence_provider_timeout_seconds: float = Field(default=20, gt=0, le=120)
+    # Optional contact address for the Crossref polite pool; never required.
+    crossref_mailto: str = Field(default="", max_length=200)
 
     @model_validator(mode="after")
     def backoff_bounds(self) -> Self:
