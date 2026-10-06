@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.ovrly.R
@@ -208,7 +209,13 @@ internal fun ExaminingPill(
         ) {
             PillReadout(state, onExpand, frame.animate)
             if (onStop != null) {
-                PillDivider()
+                Spacer(
+                    Modifier.width(
+                        1.dp
+                    ).height(
+                        20.dp
+                    ).background(LocalOvrlyPalette.current.ink.copy(alpha = DIVIDER_ALPHA))
+                )
                 PanelIconButton(Glyph.Stop, "Stop examining", onStop)
                 Spacer(Modifier.width(2.dp))
             }
@@ -256,7 +263,11 @@ private fun PillReadout(state: PillState, onExpand: (() -> Unit)?, animate: Bool
             softWrap = false
         )
         Spacer(Modifier.width(10.dp))
-        PillDivider()
+        Spacer(
+            Modifier.width(
+                1.dp
+            ).height(20.dp).background(LocalOvrlyPalette.current.ink.copy(alpha = DIVIDER_ALPHA))
+        )
         Spacer(Modifier.width(10.dp))
         Text(claimLabel(state.claims), style = MaterialTheme.typography.labelLarge)
         UpdateDot(state.unseen, animate, Modifier.padding(start = 6.dp))
@@ -297,22 +308,46 @@ internal fun IdleBubble(
         ) {
             OverlayMark(Modifier.size(26.dp))
         }
+        // One marker only: the claim count, which pulses when a result changed.
         if (claims > 0) {
-            Text(
-                claims.toString(),
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .sizeIn(minWidth = 20.dp)
-                    .background(p.accent, CircleShape)
-                    .padding(horizontal = 5.dp, vertical = 1.dp)
-                    .clearAndSetSemantics { },
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = p.accentInk,
-                fontWeight = FontWeight.SemiBold
+            CountBadge(
+                claims,
+                pulse = unseen && frame.animate,
+                Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 2.dp)
             )
         }
-        UpdateDot(unseen, frame.animate, Modifier.align(Alignment.BottomEnd).padding(6.dp))
     }
+}
+
+/** The bubble's claim count; it pulses twice when [pulse] turns on. */
+@Composable
+private fun CountBadge(count: Int, pulse: Boolean, modifier: Modifier = Modifier) {
+    val p = LocalOvrlyPalette.current
+    val scale = remember { Animatable(1f) }
+    LaunchedEffect(pulse) {
+        if (pulse) {
+            repeat(2) {
+                scale.animateTo(BADGE_PULSE_SCALE, tween(PULSE_MS))
+                scale.animateTo(1f, tween(PULSE_MS))
+            }
+        }
+    }
+    Text(
+        count.toString(),
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale.value
+                scaleY = scale.value
+            }
+            .sizeIn(minWidth = 18.dp)
+            .background(p.accent, CircleShape)
+            .padding(horizontal = 5.dp, vertical = 1.dp)
+            .clearAndSetSemantics { },
+        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+        color = p.accentInk,
+        fontWeight = FontWeight.SemiBold,
+        textAlign = TextAlign.Center
+    )
 }
 
 /** After Stop keeping only available results, shown briefly before the overlay closes. */
@@ -363,19 +398,13 @@ private fun UpdateDot(visible: Boolean, animate: Boolean, modifier: Modifier = M
     ) { drawCircle(color) }
 }
 
-@Composable
-private fun PillDivider() {
-    Spacer(
-        Modifier.width(1.dp).height(20.dp)
-            .background(LocalOvrlyPalette.current.ink.copy(alpha = 0.12f))
-    )
-}
-
 private const val EXPAND_LABEL = "Expand live results"
 internal const val BUBBLE_DP = 64
 private const val BUBBLE_INSET_DP = 4
 private const val FORM_MS = 250
 private const val PULSE_MS = 220
 private const val PULSE_SCALE = 1.6f
+private const val BADGE_PULSE_SCALE = 1.25f
+private const val DIVIDER_ALPHA = 0.12f
 private const val MS_PER_SECOND = 1000L
 private const val SECONDS_PER_MINUTE = 60

@@ -11,7 +11,7 @@
   style through a shared scaffold, opens where the pill is, follows Light and Dark, grows with
   its content up to half the screen, keeps the right 72 dp free for short-video apps' buttons and fades to 55% after
   4 s without a touch. After Stop with "Continue research" the overlay becomes a small
-  draggable bubble that snaps to the edge and is dismissed by a long-press drag onto a target
+  draggable bubble with one claim-count badge that snaps to the edge and is dismissed by a long-press drag onto a target
   (or a TalkBack action); "Keep only available results" shows "Saved to Inbox" for 3 s, then
   closes. A silent "Results ready" notification opens the capture's report when research that
   continued after Stop settles. "Keep recording" now reads "Keep examining".
