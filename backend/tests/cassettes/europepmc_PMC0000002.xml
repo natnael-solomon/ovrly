@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE article [<!ENTITY bomb "an entity that must never be expanded by the parser used here">]>
+<!-- Synthetic Europe PMC full text XML for PMC0000002. Invented content; not a recording. -->
+<article>
+  <front><article-meta><title-group><article-title>Diesel buses remain in service</article-title></title-group></article-meta></front>
+  <body>
+    <sec>
+      <p>Fleet records show 37 diesel buses still in regular service in the city at the end of 2024, so the fleet was not free of diesel vehicles by 2024. &bomb;</p>
+      <p>Replacement orders cover the remaining diesel buses, with deliveries planned through 2026 according to the operator.</p>
+    </sec>
+  </body>
+  <back><ref-list><p>A reference list paragraph that should be ignored by the paragraph extractor entirely.</p></ref-list></back>
+</article>

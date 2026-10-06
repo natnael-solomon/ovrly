@@ -16,6 +16,24 @@
   accepted, denied or failed result and the opened check, and offers a typed
   command alternative that works without a microphone or connection to Voxide.
   Recognized text is never logged or stored.
+
+- Evidence stages (BE-09, #27): `retrieval` and `assessment` queue stages turn a
+  published version with claims into the next version with evidence and assessments.
+  Router-written neutral and disconfirming queries search Scholarxiv Papers; hits are
+  deduplicated by DOI and arXiv id, ranked with in-house BM25 and read as abstracts or
+  open-access full text from arXiv or Europe PMC, with the inspection level recorded;
+  Crossref flags retracted, withdrawn or corrected sources and unknown stays unknown.
+  The router labels each passage, retracted sources are never counted, the overall label
+  is computed and abstains when evidence is missing, and every version is
+  citation-checked before it is published. Budgets per claim keep unreached claims
+  visible but unassessed. Papers and Router calls share a PostgreSQL token bucket under
+  the account limit (migration `0010_provider_buckets`); calls wait for a token and a
+  provider 429 holds the bucket for its `Retry-After`. Long stages heartbeat in the
+  background, and assessment is enqueued with the fenced retrieval publish. The
+  production `reanalysis` handler reruns corrected claims, searches deeper, or brings in
+  the confirmed full video once it has a report, re-checking with backoff. Registered
+  only with the server-side `OVRLY_SCHOLARXIV_API_KEY`; tests replay synthetic
+  cassettes and never call a provider.
 - Android instrumented tests in CI (REPO-05 part 1, #76): a new **Android
   instrumented checks** workflow runs AndroidX Test, Espresso and Compose tests
   on API 29 and API 34 emulators for every PR that touches Android, with the

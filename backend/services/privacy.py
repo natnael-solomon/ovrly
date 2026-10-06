@@ -15,7 +15,14 @@ from services.database import Database
 from services.jobs.handlers import JobContext
 from services.jobs.models import jobs
 from services.jobs.queue import ClaimedJob, JobQueue, StageKey
-from services.models import capture_chunks, capture_sessions, investigations, principals, uploads
+from services.models import (
+    capture_chunks,
+    capture_sessions,
+    investigations,
+    principals,
+    reanalysis_requests,
+    uploads,
+)
 from services.settings import Settings
 from services.storage import UploadStore
 
@@ -137,6 +144,14 @@ class Retention:
                 )
                 for storage_key in captured:
                     await self.store.delete(storage_key)
+                # Reanalysis requests before jobs: the lock order of a forwarded cancel and
+                # of an evidence publish, so the cascade below never waits behind them.
+                await connection.execute(
+                    select(reanalysis_requests.c.id)
+                    .where(reanalysis_requests.c.owner_id == owner_id)
+                    .order_by(reanalysis_requests.c.id)
+                    .with_for_update()
+                )
                 counts["jobs"] += await self._delete_jobs(connection, owner_id)
                 # Idempotency responses cascade with investigations; credentials with owners.
                 await connection.execute(
