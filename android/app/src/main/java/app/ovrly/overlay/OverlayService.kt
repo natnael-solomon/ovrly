@@ -93,6 +93,9 @@ object OverlayStore {
      * adapter over the #18 client is installed; never a fixture.
      */
     internal val liveSource = MutableStateFlow<LiveResultsSource>(NotConnectedLiveResultsSource)
+
+    /** Survives the overlay service, so re-showing the overlay mid-capture never re-expands. */
+    internal val autoExpand = AutoExpandMemory()
 }
 
 class OverlayService :
@@ -110,20 +113,22 @@ class OverlayService :
     private var panelHeaderHeight = 0
     private val fixture = MutableStateFlow<FixtureLiveResultsSource?>(null)
     private var fixtureJob: Job? = null
-    private val livePanel = LivePanelController { continueResearch ->
-        val preview = fixture.value
-        if (preview != null) {
-            preview.close(continueResearch)
-        } else {
-            CaptureServiceStopChoice(this).onStopChoice(continueResearch)
-        }
-    }
+    private val livePanel = LivePanelController(
+        { continueResearch ->
+            val preview = fixture.value
+            if (preview != null) {
+                preview.close(continueResearch)
+            } else {
+                CaptureServiceStopChoice(this).onStopChoice(continueResearch)
+            }
+        },
+        OverlayStore.autoExpand
+    )
 
     /** The live form on screen; null for the demo and the idle controls. */
     private var form: LiveOverlayForm? = null
     private var compactPosition = 24 to 180
     private var pendingCompactPosition: Pair<Int, Int>? = null
-    private var pendingSnap = false
 
     /**
      * Where the expanded panel's top edge wants to be: the pill's top when it expanded, or
@@ -186,7 +191,10 @@ class OverlayService :
         }
         lifecycleScope.launch {
             combine(fixture, OverlayStore.liveSource) { preview, live -> preview ?: live }
-                .collectLatest { source -> source.results.collect(livePanel::onResults) }
+                .collectLatest { source ->
+                    val key = (source as? PollingLiveResultsSource)?.sessionId
+                    source.results.collect { livePanel.onResults(it, key) }
+                }
         }
         lifecycleScope.launch {
             runAutoCollapse(livePanel, touchExploration = { touchExploration.value })
@@ -293,10 +301,7 @@ class OverlayService :
                 params.y = y
                 pendingCompactPosition = null
             }
-            if (pendingSnap) {
-                pendingSnap = false
-                params.x = snapToEdge(params.x, frame.width, usableSize.width, edgeMargin())
-            }
+
             configureWindow()
         }
         configureWindow(resetPosition = true)
@@ -514,13 +519,25 @@ class OverlayService :
                 configureWindow()
             }
 
-            previous == LiveOverlayForm.EXPANDED -> {
-                pendingCompactPosition = compactPosition.first to panelTop
-                pendingSnap = next == LiveOverlayForm.BUBBLE
+            // The bubble's size is known, so its edge is computed now rather than from a
+            // window that may still have the panel's or the pill's width.
+            next == LiveOverlayForm.BUBBLE -> {
+                val x = if (previous ==
+                    LiveOverlayForm.EXPANDED
+                ) {
+                    compactPosition.first
+                } else {
+                    params.x
+                }
+                val y = if (previous == LiveOverlayForm.EXPANDED) panelTop else params.y
+                pendingCompactPosition = bubbleSnapX(x, usableSize.width, density()) to y
                 configureWindow()
             }
 
-            next == LiveOverlayForm.BUBBLE -> pendingSnap = true
+            previous == LiveOverlayForm.EXPANDED -> {
+                pendingCompactPosition = compactPosition.first to panelTop
+                configureWindow()
+            }
 
             else -> configureWindow()
         }
@@ -568,10 +585,8 @@ class OverlayService :
             when {
                 dismiss -> stopSelf()
 
-                form == LiveOverlayForm.BUBBLE -> {
-                    val width = root?.width ?: 0
-                    moveTo(snapToEdge(params.x, width, usableSize.width, edgeMargin()), params.y)
-                }
+                form == LiveOverlayForm.BUBBLE ->
+                    moveTo(bubbleSnapX(params.x, usableSize.width, density()), params.y)
             }
         }
     }
@@ -582,7 +597,7 @@ class OverlayService :
             true
     }
 
-    private fun edgeMargin() = (EDGE_MARGIN_DP * resources.displayMetrics.density).roundToInt()
+    private fun density() = resources.displayMetrics.density
 
     private fun notificationTitle() = when {
         OverlayStore.demo.value -> "ovrly demo / simulated content"
@@ -665,7 +680,11 @@ class OverlayService :
         val geometry = panelGeometry()
         val demo = OverlayStore.demo.value
         val margin = geometry?.margin ?: 0
-        val width = geometry?.width ?: view?.width ?: 0
+        val width = when {
+            geometry != null -> geometry.width
+            form == LiveOverlayForm.BUBBLE -> bubbleWidth(density())
+            else -> view?.width ?: 0
+        }
         // The demo is always its full height; the live panel is as tall as its content.
         val height = if (demo && geometry != null) geometry.height else view?.height ?: 0
         val newX = if (geometry !=
@@ -793,7 +812,6 @@ class OverlayService :
         internal const val SAVED_MS = 3_000L
         private const val FADE_MS = 300
         private const val FADED_ALPHA = 0.55f
-        private const val EDGE_MARGIN_DP = 8
         private const val MS_PER_SECOND = 1000
         private const val DEMO_NOTIFICATION_TEXT =
             "No recording, research or microphone. Tap Close demo to dismiss."

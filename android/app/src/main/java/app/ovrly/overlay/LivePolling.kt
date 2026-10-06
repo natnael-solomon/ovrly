@@ -97,6 +97,10 @@ internal class PollingLiveResultsSource(
 
     private var job: Job? = null
 
+    /** The capture session being polled; keys the overlay's once-per-session expand. */
+    @Volatile var sessionId: String? = null
+        private set
+
     /** The capture's investigation, once the first status read named it. */
     @Volatile var investigationId: String? = null
         private set
@@ -105,6 +109,7 @@ internal class PollingLiveResultsSource(
         stop()
         fixtureReport = false
         investigationId = null
+        this.sessionId = sessionId
         mutable.value = LiveResults.NotConnected
         job = scope.launch { poll(sessionId) }
     }

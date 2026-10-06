@@ -57,6 +57,18 @@ class DemoPanelGeometryTest {
         assertEquals(8, snapToEdge(x = 0, viewWidth = 64, availableWidth = 40, margin = 8))
     }
 
+    @Test fun theBubbleSnapsFromItsOwnWidthNotThePanels() {
+        val density = 1.875f
+        val width = 720
+        val bubble = bubbleWidth(density)
+        val margin = (EDGE_MARGIN_DP * density).roundToInt()
+        // A pill on the right that expanded and collapsed: the window still measures the
+        // panel's 600 px, but the bubble rests at the right edge with its own 120 px.
+        assertEquals(width - bubble - margin, bubbleSnapX(x = 560, availableWidth = width, density))
+        assertEquals(margin, bubbleSnapX(x = 30, availableWidth = width, density))
+        assertEquals(120, bubble)
+    }
+
     @Test fun onlyADropOnTheTargetDismisses() {
         assertTrue(overDismissTarget(360, 1300, targetX = 360, targetY = 1300, radius = 96))
         assertTrue(overDismissTarget(420, 1360, targetX = 360, targetY = 1300, radius = 96))

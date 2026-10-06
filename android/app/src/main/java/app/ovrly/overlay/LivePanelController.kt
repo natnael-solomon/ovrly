@@ -100,14 +100,35 @@ internal fun researchSettled(results: LiveResults): Boolean =
         }
 
 /**
+ * Which capture session already had its automatic expand (or a user expand or collapse). It
+ * outlives the overlay service, so hiding and showing the overlay mid-capture does not
+ * expand the panel again.
+ */
+internal class AutoExpandMemory {
+    @Volatile var spentFor: String? = null
+
+    /** [state] with its automatic expand spent, remembered for [session] when there is one. */
+    fun spend(state: LivePanelState, session: String?): LivePanelState {
+        session?.let { spentFor = it }
+        return state.copy(autoExpandSpent = true)
+    }
+}
+
+/**
  * Panel interaction state for the live overlay. It never stops capture except through
  * [StopChoiceHandler], and only after the user picked one of the two Stop choices.
  */
-internal class LivePanelController(private val stopChoice: StopChoiceHandler) {
+internal class LivePanelController(
+    private val stopChoice: StopChoiceHandler,
+    private val memory: AutoExpandMemory = AutoExpandMemory()
+) {
     private val mutable = MutableStateFlow(LivePanelState())
     val state: StateFlow<LivePanelState> = mutable.asStateFlow()
     private var last: LiveResults? = null
     private var captureRunning = false
+
+    /** The live session the results belong to; null for the fixture. */
+    private var session: String? = null
 
     /** Forgets notices, choices and the last results, for example when the source changes. */
     fun reset() {
@@ -118,9 +139,14 @@ internal class LivePanelController(private val stopChoice: StopChoiceHandler) {
     /**
      * Records new assessment notices. The first claims of a capture expand the panel once,
      * unless the user already expanded or collapsed it or the Stop choice is open; anything
-     * new while collapsed lights the update dot.
+     * new while collapsed lights the update dot. [sessionKey] names the live session, so a
+     * session that already expanded once does not expand again in a new overlay.
      */
-    fun onResults(results: LiveResults) {
+    fun onResults(results: LiveResults, sessionKey: String? = null) {
+        session = sessionKey
+        if (sessionKey != null && memory.spentFor == sessionKey) {
+            mutable.update { if (it.autoExpandSpent) it else it.copy(autoExpandSpent = true) }
+        }
         val before = last?.claims?.size ?: 0
         val fresh = newAssessmentUpdates(last, results).map { it.id }
         last = results
@@ -129,7 +155,10 @@ internal class LivePanelController(private val stopChoice: StopChoiceHandler) {
             val notices = if (fresh.isEmpty()) it.notices else (it.notices - fresh.toSet()) + fresh
             val firstClaims = before == 0 && grew && results.phase == LiveSessionPhase.CAPTURING
             when {
-                firstClaims && !it.autoExpandSpent && !it.stopPrompt -> it.copy(
+                firstClaims && !it.autoExpandSpent && !it.stopPrompt -> memory.spend(
+                    it,
+                    session
+                ).copy(
                     notices = notices,
                     expanded = true,
                     autoExpandSpent = true,
@@ -150,7 +179,7 @@ internal class LivePanelController(private val stopChoice: StopChoiceHandler) {
      * wanted. Closing returns to the pill or bubble and never touches capture.
      */
     fun setExpanded(expanded: Boolean) = mutable.update {
-        it.copy(
+        memory.spend(it, session).copy(
             expanded = expanded,
             unseen = if (expanded) false else it.unseen,
             detailClaimId = if (expanded) it.detailClaimId else null,
@@ -212,7 +241,7 @@ internal class LivePanelController(private val stopChoice: StopChoiceHandler) {
                 started -> it.copy(
                     stopChoice = null,
                     expanded = false,
-                    autoExpandSpent = false,
+                    autoExpandSpent = session != null && memory.spentFor == session,
                     autoCollapsePending = false,
                     unseen = false
                 )

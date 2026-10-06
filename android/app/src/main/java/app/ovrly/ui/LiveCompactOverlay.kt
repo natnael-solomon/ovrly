@@ -49,6 +49,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.ovrly.R
@@ -207,7 +208,7 @@ internal fun ExaminingPill(
             modifier.mockGlass(frame.higherOpacity).sizeIn(minHeight = 52.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            PillReadout(state, onExpand, frame.animate)
+            PillReadout(state, onExpand, frame.animate, Modifier.weight(1f, fill = false))
             if (onStop != null) {
                 Spacer(
                     Modifier.width(
@@ -223,9 +224,18 @@ internal fun ExaminingPill(
     }
 }
 
-/** The pill's tappable readout; TalkBack reads it as one sentence. */
+/**
+ * The pill's tappable readout; TalkBack reads it as one sentence on focus. It is not a live
+ * region: the timer would be announced every second.
+ * It takes the width left after Stop, so Stop stays reachable at any text size.
+ */
 @Composable
-private fun PillReadout(state: PillState, onExpand: (() -> Unit)?, animate: Boolean) {
+private fun PillReadout(
+    state: PillState,
+    onExpand: (() -> Unit)?,
+    animate: Boolean,
+    modifier: Modifier = Modifier
+) {
     val p = LocalOvrlyPalette.current
     val description = pillDescription(state.seconds, state.claims, state.unseen)
     val tap = if (onExpand != null) {
@@ -234,12 +244,11 @@ private fun PillReadout(state: PillState, onExpand: (() -> Unit)?, animate: Bool
         Modifier
     }
     Row(
-        Modifier
+        modifier
             .sizeIn(minHeight = 52.dp)
             .then(tap)
             .clearAndSetSemantics {
                 contentDescription = description
-                liveRegion = LiveRegionMode.Polite
                 if (onExpand != null) {
                     onClick(EXPAND_LABEL) {
                         onExpand()
@@ -252,7 +261,13 @@ private fun PillReadout(state: PillState, onExpand: (() -> Unit)?, animate: Bool
     ) {
         OverlayMark(Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
-        Text("Examining", style = MaterialTheme.typography.labelMedium, color = p.muted)
+        Text(
+            "Examining",
+            style = MaterialTheme.typography.labelMedium,
+            color = p.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
         Spacer(Modifier.width(6.dp))
         Text(
             examiningLabel(state.seconds).removePrefix("Examining "),
@@ -269,7 +284,13 @@ private fun PillReadout(state: PillState, onExpand: (() -> Unit)?, animate: Bool
             ).height(20.dp).background(LocalOvrlyPalette.current.ink.copy(alpha = DIVIDER_ALPHA))
         )
         Spacer(Modifier.width(10.dp))
-        Text(claimLabel(state.claims), style = MaterialTheme.typography.labelLarge)
+        Text(
+            claimLabel(state.claims),
+            modifier = Modifier.weight(1f, fill = false),
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
         UpdateDot(state.unseen, animate, Modifier.padding(start = 6.dp))
     }
 }

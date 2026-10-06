@@ -1,11 +1,13 @@
 package app.ovrly.ui
 
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
@@ -15,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -45,6 +48,7 @@ class LiveOverlayFormsTest {
     private val results = mutableStateOf(steps()[2])
     private val examining = mutableStateOf(true)
     private var dismissed = 0
+    private var stopped = 0
 
     private fun steps(): List<LiveResults> {
         val source = FixtureLiveResultsSource()
@@ -174,7 +178,39 @@ class LiveOverlayFormsTest {
         compose.runOnIdle { assertEquals(listOf(false), choices) }
     }
 
+    @Test fun stopStaysReachableInANarrowWindowAtDoubleTextSize() {
+        compose.setContent {
+            val base = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(base.density, fontScale = 2f)) {
+                OvrlyTheme(dark = true) {
+                    CompositionLocalProvider(
+                        LocalWindowBlur provides WindowGlass(overlay = true, plain = true)
+                    ) {
+                        ExaminingPill(
+                            PillState(seconds = 125, claims = 12, unseen = true),
+                            onExpand = {},
+                            onStop = { stopped += 1 },
+                            modifier = Modifier.widthIn(max = NARROW).testTag(TAG),
+                            frame = LivePanelFrame(animate = false)
+                        )
+                    }
+                }
+            }
+        }
+        val stop = compose.onNodeWithContentDescription("Stop examining")
+        stop.assertIsDisplayed()
+        val bounds = stop.getUnclippedBoundsInRoot()
+        assertTrue("Stop keeps its 48 dp target: $bounds", bounds.right - bounds.left >= 48.dp)
+        assertTrue(
+            "Stop fits inside the pill",
+            bounds.right <= compose.onNodeWithTag(TAG).getUnclippedBoundsInRoot().right
+        )
+        stop.performClick()
+        compose.runOnIdle { assertEquals(1, stopped) }
+    }
+
     private companion object {
+        val NARROW = 336.dp
         const val TAG = "liveOverlay"
         const val MANY = 24
         val CAP = 400.dp

@@ -1,5 +1,6 @@
 package app.ovrly.overlay
 
+import app.ovrly.ui.BUBBLE_DP
 import kotlin.math.roundToInt
 
 internal data class DemoPanelGeometry(val width: Int, val height: Int, val margin: Int) {
@@ -27,6 +28,16 @@ internal fun livePanelGeometry(width: Int, height: Int, density: Float): DemoPan
     return demo.copy(width = (demo.width - gutter).coerceAtLeast(1))
 }
 
+/** The idle bubble's window width: [BUBBLE_DP] at [density]. */
+internal fun bubbleWidth(density: Float): Int = (BUBBLE_DP * density).roundToInt()
+
+/**
+ * Where the bubble rests: the nearer side edge to [x], [EDGE_MARGIN_DP] inside it, using the
+ * bubble's own width whatever the window measured before it (the panel or the pill).
+ */
+internal fun bubbleSnapX(x: Int, availableWidth: Int, density: Float): Int =
+    snapToEdge(x, bubbleWidth(density), availableWidth, (EDGE_MARGIN_DP * density).roundToInt())
+
 /** The idle bubble snaps to the nearer side edge when released, [margin] inside it. */
 internal fun snapToEdge(x: Int, viewWidth: Int, availableWidth: Int, margin: Int): Int {
     val right = (availableWidth - viewWidth - margin).coerceAtLeast(margin)
@@ -50,6 +61,9 @@ internal fun overDismissTarget(
 }
 
 internal const val LIVE_GUTTER_DP = 72
+
+/** The bubble's distance from the side edge it snaps to. */
+internal const val EDGE_MARGIN_DP = 8
 
 /** The gutter never takes more than a third of the panel on very narrow windows. */
 private const val MAX_GUTTER_SHARE = 3
