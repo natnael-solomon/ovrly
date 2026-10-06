@@ -58,8 +58,11 @@ observations on provider clips, temperature and battery over three minutes, no
 network traffic to Google logging); #14 for the final sampling values.
 
 **Rejected alternatives and why:** Unbundled model: needs Play services and a
-model download. Tesseract on the device: not evaluated on the phone; #103
-compares it with ML Kit on the same images.
+model download. Tesseract on the device: not evaluated on the phone. On identical
+bundle bytes (#103, 0004's 6 October revision), bundled ML Kit's selected-region
+disagreement was 0.187 to 0.207 against Tesseract fast/best's 0.502/0.532. The
+shipped sampler's per-minute cap dropped one brief card in that replay
+([#110](https://github.com/natnael-solomon/ovrly/issues/110)).
 No OCR: violates decision 0001's readable-text requirement. Leaving
 `datatransport` active: sends data outside the allowlist.
 

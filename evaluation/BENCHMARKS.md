@@ -413,6 +413,43 @@ retains its frame ID, actual presentation time and box. A track's first/last
 sample is not a measured continuous visibility interval; no duration is
 inferred across unsampled gaps. Inspect the original frames for that evidence.
 
+## Device harness and results (RES-02b, #103)
+
+[#103](https://github.com/natnael-solomon/ovrly/issues/103) adds the phone
+measurements. Results and the accepted RFC-D27 selection are in the
+[6 October revision of 0004](../docs/decisions/0004-asr-ocr-benchmarks.md#6-october-2026-revision-device-evidence-and-proposal-res-02b-103).
+All raw outputs stay in controlled storage, and new outputs never go into the
+immutable handoff bundle.
+
+| Piece | Purpose |
+| --- | --- |
+| [`device-harness/`](device-harness/README.md) | Native arm64 replay drivers for whisper.cpp and Vosk, NDK build script, pins, run commands and JSON-lines export format. |
+| `device_benchmark.py` | Host side. `asr-list`/`asr-score` (paired v1 scoring that reuses each bundle input, plus raw timestamp faults), `groq-baseline`, `ocr-stage`/`ocr-score` (`--mode full-image` or `production-crop`), `ocr-video-report` (fixed against shipped change-triggered sampling, card windows, dedup input), `verify-capture` (real AN-04 `capture.json` and chunk ZIPs; `--in-progress` for a snapshot taken while recording), `align-capture`, `quota-ledger`, `device-info` and the resource sampler/summarizer. `tesseract-run` needs optional tesserocr and Pillow. |
+| `asr_policy.py` | Reference chunk transcription policy for BE-07 (#20): explicit `ASR_UNAVAILABLE` reasons, single fallback attempt, `no_speech`, unclamped invalid timestamps, local duplicate-send ledger. |
+| `android/app/src/androidTest/.../ScreenTextReplayTest.kt` | Debug-only instrumentation. It replays exact image bytes through bundled ML Kit and the shipped `ScreenTextReader`, and decoded clip frames through the shipped `FrameSampler`. Skipped unless `-e res02Mode images|video` is given, so CI only reports it as skipped. |
+
+Run the image and video replay with the debug and androidTest APKs installed and
+the inputs pushed to `/sdcard/Android/data/app.ovrly/files/res02/{images,video}`:
+
+```text
+adb shell am instrument -w -e class app.ovrly.capture.ScreenTextReplayTest -e res02Mode images -e res02Reps 3 -e res02Label a21s app.ovrly.test/androidx.test.runner.AndroidJUnitRunner
+adb shell am instrument -w -e class app.ovrly.capture.ScreenTextReplayTest -e res02Mode video -e res02Label a21s app.ovrly.test/androidx.test.runner.AndroidJUnitRunner
+python evaluation/device_benchmark.py ocr-stage --bundle <bundle> --out <images> --mapping <map.json>
+python evaluation/device_benchmark.py ocr-score --bundle <bundle> --run images-a21s.jsonl --mode production-crop --model-revision <pins> --hardware <device> --provenance <notes> --label mlkit-crop --out <dir>
+python evaluation/device_benchmark.py ocr-video-report --bundle <bundle> --run video-a21s.jsonl --model-revision <pins> --hardware <device> --provenance <notes> --out <dir>
+```
+
+Each converter was checked against the bundle before it was used on phone data.
+Feeding the stored Groq responses through `asr-score` and the stored Tesseract words
+through `ocr-score` reproduces the #92 WER, timing audit, region WER and every
+per-clip dedup track count exactly.
+
+Phone-side conventions:
+- Whole whisper.cpp segments such as `[BLANK_AUDIO]` are excluded from lexical
+  scoring and counted.
+- ML Kit element boxes that reach past the image are intersected with it for
+  scoring and counted.
+
 ## Device resources and outstanding evidence
 
 `resources` is null until measured. Otherwise record the exact interval,
@@ -422,14 +459,14 @@ temperature sensor source and repetitions in provenance. A three-minute run
 on the weakest authorized phone is required by #14; shorter readings and
 workstation timing do not replace it.
 
-| Work | Gate, not a blanket wait |
+| Work | Status after #103 |
 | --- | --- |
-| Offline input validation, scoring, timestamp-offset tests, synthetic failure tests and run protocol | Implemented without #9. CI performs only these offline checks and metadata planning. |
-| Real dev ASR comparison | Hosted trials, selected critical-span review, cue-envelope diagnostics and actual three-minute request-prefix audits completed locally; phone candidates and capture-clock timing remain separate. |
-| Final 10/15-second chunk choice | Real AN-04 capture output and compatibility evidence; proposals alone do not decide it. |
-| ML Kit comparison, fixed/change sampling measurements | Local Tesseract comparison and supplied-window source-video sampling completed. ML Kit and actual device-trigger behavior remain unmeasured; limited windows are not full-screen gold. |
-| On-device latency, battery, heat and offline model viability | Authorized physical phone evidence, including the weakest test phone; mocks do not substitute. |
-| Production integration and failure fallback | BE-07 / AN-06 after reviewed decisions. This scorer implements no production adapter or fallback transport. |
+| Offline input validation, scoring, timestamp-offset tests, synthetic failure tests and run protocol | Implemented. CI performs only these offline checks and metadata planning. |
+| Real dev ASR comparison | Hosted (#92) and phone Vosk, whisper.cpp tiny.en and base.en (#103) on identical bytes. Independent speech-timing review remains undone. |
+| Final 10/15-second chunk choice | Real AN-04 chunks verified; 10 s accepted with RFC-D27 in 0004. |
+| ML Kit comparison, fixed/change sampling measurements | ML Kit vs Tesseract on identical bundle bytes, and shipped-sampler replay (#103). Tesseract on newly captured frames not run; cap issue #110. |
+| On-device latency, battery, heat and offline model viability | Latency, memory, thermal status and offline ASR measured. Battery drain and repeated resource runs not measured (charging, owner time decision). |
+| Production integration and failure fallback | BE-07 (#20) uses `asr_policy.py` as the reference; this repository change implements no production adapter. |
 
 #9's main-branch evidence records the Samsung Galaxy A21s (SM-A217F), Android
 12, readable captures for YouTube Shorts/TikTok/Instagram, and a three-minute
@@ -437,6 +474,7 @@ TikTok capture. That establishes capture feasibility, not on-device ASR/OCR
 speed, comparative accuracy or battery/thermal cost. Those measurements remain
 necessary; #9 is no longer a blanket blocker.
 
-No final adapter or chunk-size selection is made here. Private model
+No final adapter or chunk-size selection is made by these tools; RFC-D27 is
+accepted in 0004's 6 October revision. Private model
 measurements must retain their reference and device limitations. #8's recorded
 rights/coverage limitations are preserved, and #14 is not closed by offline tests.
