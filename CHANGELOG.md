@@ -4,6 +4,17 @@
 
 ### Added
 
+- On-device screen text for live capture (AN-06, #100): frames are probed once a second and
+  kept on a visible change or a 5-second heartbeat, at most 20 per minute; likely text regions
+  are cropped and read on the phone by bundled ML Kit Text Recognition Latin 16.0.1. Chunks now
+  carry `{text, box, frame_pts}` observations, per-frame status and recognition time, the
+  sampling policy and the recognizer version, and declare `text` or `both` coverage. Frames
+  still never leave the device. ML Kit's Google datatransport upload components are removed
+  from the manifest, and a build check fails if any datatransport or Firebase component is
+  left in a merged manifest (decision 0005). Stop no longer waits for recognition. A frame's
+  text stays in the chunk of its probe time even when recognition runs past the chunk's end
+  (the chunk is held until it is in); frames still being read at Stop are counted.
+
 - Report versions carry `fixture` (true only for development stub versions) in every
   report read, including the `report` of an investigation, so clients can label stub
   claims as a fixture rather than live results. Additive to `0.2.0-draft`; the

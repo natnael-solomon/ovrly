@@ -272,9 +272,9 @@ stored or sent.
 | Rule | Behavior |
 | --- | --- |
 | Chunk grid | `CaptureLimits.CHUNK_MS` = 10000. Chunk `seq` covers `[seq * 10000, min((seq + 1) * 10000, 180000))` ms from the start of capture, the grid BE-06 enforces. Only the final chunk may be shorter; the 3-minute stop seals seq 17 at exactly 180000 ms. RES-02 may tune the length within the contract's 1000..30000. |
-| Package | One ZIP per chunk (`application/zip`): `chunk.json` (seq, `start_ms`, `end_ms`, `timebase: capture`, modality, audio format, `frames_uploaded: false`, the capture times of the frames sampled in the interval, an empty `text_observations` list, the sampling policy and `recognizer: null`) and `audio-16000-mono-s16le.pcm`. ZIP entry times are fixed to the ZIP epoch. Only audio is uploaded, so a chunk declares `speech`; a chunk without audio is skipped and recorded as such. |
-| Frames | Fixed sampling: one JPEG (720 px long edge, quality 72) about every 5 s, as before. Frames stay in `capture/frames/` on the device and are never uploaded; no text is recognized on the device. On-device OCR (AN-06) is deferred by user decision. Local frames are deleted first when space is needed. |
-| Local manifest | `no_backup/capture/capture.json` (version 2) lists every chunk with size, SHA-256 and frame times, chunks skipped because they held no audio, gaps, chunks deleted after upload, kept and late-dropped frames, the fixed sampling policy, duration and stop reason. A gap of kind `interrupted` is recorded when playback audio stops arriving for at least 1 s. Screen lock still ends the capture (see [compatibility](../docs/compatibility.md)), so the final chunk ends at the lock. There is no pause control. |
+| Package | One ZIP per chunk (`application/zip`): `chunk.json` (seq, `start_ms`, `end_ms`, `timebase: capture`, modality, audio format, `frames_uploaded: false`, each frame read in the interval with its `frame_pts`, status, `recognition_ms` and `failed_regions`, `text_observations` as `{text, box, frame_pts}` with the box normalized to 0..10000 of the frame, the sampling policy and the recognizer name and version) and, when there was audio, `audio-16000-mono-s16le.pcm`. Frame images are never packaged. ZIP entry times are fixed to the ZIP epoch. Modality is `speech` when the chunk has audio, `text` when at least one frame in it was read (even if it held no text), `both` for both; a chunk with neither is skipped and recorded as such. |
+| Screen text (AN-06, #100) | The screen is probed once a second at a 720 px long edge. A probe is kept when its 64x64 grayscale thumbnail differs from the last kept one by a mean absolute difference of at least 12, or 5 s after the last kept frame (heartbeat), and at most 20 frames are kept in any 60 s; refused frames are counted as capped. Probe rate, threshold and heartbeat are the RES-02 workstation values (#14). Each kept frame is cropped to likely text regions (rows with many sharp brightness steps, padded; the whole frame when they cover most of it; none when no row qualifies, status `no_text_regions`) and read on the device by ML Kit Text Recognition Latin 16.0.1 with the bundled model ([0005](../docs/decisions/0005-on-device-screen-text.md)). Regions are grown to at least 32 px on each edge and read one at a time. Each line becomes an observation; a region whose read errors or times out (5 s) is counted in `failed_regions`, and the frame is `failed` only when every region failed. After a timeout the frame's remaining regions are skipped (counted as failed), and the timed-out bitmap is left to the garbage collector because ML Kit does not cancel the task. A frame's text always goes into the chunk of its probe time: the probe is registered when its time is taken, and when it is still being copied or read at the chunk's 10 s boundary, that chunk (and any after it, so chunks stay in order) is held and sealed as soon as the text is in, while audio continues into the next chunk. A frame still being read 45 s after its probe time (every region timing out, plus a margin) is given up on and counted as unfinished, so a held chunk always seals. Frames still being read at Stop or 3:00 are counted as unfinished. A card shorter than the 1 s probe interval can still be missed. Recognition runs on the frame thread after the frame is copied out of the reader, never under the lock that Stop takes, so Stop does not wait for it. The kept frame JPEG (quality 72) stays in `capture/frames/` and is deleted first when space is needed. |
+| Local manifest | `no_backup/capture/capture.json` (version 2) lists every chunk with size, SHA-256, frame times and observation count, chunks skipped because they held neither audio nor a read frame, gaps, chunks deleted after upload, kept, late-dropped, capped, failed and unfinished (still being read at Stop) frames, the sampling policy, the recognizer version, duration and stop reason. A gap of kind `interrupted` is recorded when playback audio stops arriving for at least 1 s. Screen lock still ends the capture (see [compatibility](../docs/compatibility.md)), so the final chunk ends at the lock. There is no pause control. |
 | Storage | The 32 MiB cap applies to what is on the device. When a write would exceed it, local frames are deleted first, then chunks the server already holds, oldest first. Unsent chunks are never deleted: if they alone fill the budget, capture stops with "N chunks are saved on device, not yet sent". A new capture refuses to replace one whose chunks are still waiting to be sent or whose continuation choice has not been closed on the server; it replaces it only after that upload stopped for good (closed, not continued or permanently failed) and says how many unsent chunks were deleted. A capture interrupted by process death keeps its sealed chunks. A single-file capture left by an app version from before chunking is deleted when the app opens, with a message saying so. |
 | Upload | Each sealed chunk schedules the WorkManager chain `capture-upload-<local session id>` (`APPEND_OR_REPLACE`, network required, exponential backoff from 10 s). A capture that sealed no chunk schedules nothing and never opens a server session. `CaptureUploader` opens the server session with the local session id as `Idempotency-Key`, sends each unsent chunk with `PUT /v1/captures/{id}/chunks/{seq}` and marks it sent only after the server reports it stored, so retries and lost acknowledgements are idempotent by `(session_id, seq)`. Transport and retryable errors retry; any other contract error stops the upload and keeps the chunks. Upload bookkeeping is bound to the local session id, so a worker that outlives its capture cannot mark a newer capture sent, closed or failed. |
 | Status | `CaptureState.upload` reports sending, sent, closed or "Saved on device, not yet sent: N of M chunks". The foreground notification shows elapsed time, upload progress and Stop. |
@@ -292,13 +292,40 @@ with the new constraint, and pending chunks read "Waiting for Wi-Fi".
 
 Tests: `CaptureModelTest` (grid, 3-minute boundary, upload text, continuation
 prompt), `CaptureFilesTest` (sequencing, contiguous offsets, package contents,
-local-only frames, late frames, gaps, skipped chunks, the 180000 ms stop,
+text frames and observations, local-only frame images, late frames, gaps, skipped
+chunks, the 180000 ms stop,
 rolling deletion, local frame eviction, replacement refusal, restore after
 process death), `CaptureUploaderTest` (idempotent re-upload, offline retention,
 retry, close with both choices, no server session without chunks, a pending
 close blocking replacement, a stale worker unable to write into a new capture,
-unconfigured server) and `CaptureStopLogTest` (a normal stop is not logged as
-an interruption).
+unconfigured server), `CaptureTextTest` (probe rate, change and heartbeat
+decisions, the per-minute cap, a brief synthetic title card caught by the change
+trigger and missed by fixed 5 s sampling, text-region crops, box normalization,
+the bundled recognizer version) and `CaptureStopLogTest` (a normal stop is not
+logged as an interruption). Recognition itself runs only on a device.
+
+### Telemetry
+
+ML Kit brings Google's `datatransport` libraries, which would upload SDK usage
+metrics. `app/src/main/AndroidManifest.xml` removes their upload components
+(`JobInfoSchedulerService`, `AlarmManagerSchedulerBroadcastReceiver`,
+`TransportBackendDiscovery`) with `tools:node="remove"`, and
+`verify<Variant>NoTelemetry` fails `assemble` and `check` if any
+`com.google.android.datatransport` or `com.google.firebase` component is left in
+the merged manifest of any variant. Nothing recognized or sampled goes to Google;
+the text observations go to the ovrly backend in the chunks.
+
+### APK size
+
+The bundled recognizer adds native libraries for each ABI (about 10.6 MB for
+arm64-v8a and 6.5 MB for armeabi-v7a, compressed) and a 1.2 MB model. Release
+builds keep only `arm64-v8a` and `armeabi-v7a` (`ndk.abiFilters` on the release
+build type); debug builds keep every ABI so x86_64 emulator CI can run them.
+Measured on 6 October 2026: the unsigned release APK is 24.1 MB, of which the
+native libraries are 17.0 MB (arm64-v8a 10.6 MB, armeabi-v7a 6.5 MB), the model
+1.2 MB and the minified code 3.8 MB; the debug APK with every ABI is 83.9 MB. A
+ChromeOS (x86_64) release is not built; `ChromeOsAbiSupport` is suppressed on that
+line only, since ChromeOS is not a supported device (BC-D02).
 
 ## Live overlay results
 

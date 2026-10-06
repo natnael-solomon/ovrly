@@ -13,7 +13,133 @@ internal class OpenChunk(val seq: Int, val dir: File) {
     val audio = FileOutputStream(audioFile)
     var audioBytes = 0L
     var rawBytes = 0L
-    val frameOffsetsMs = mutableListOf<Long>()
+
+    /** Frames kept in this interval with the text read from them; images are stored apart. */
+    val frames = mutableListOf<FrameText>()
+}
+
+/**
+ * The open chunk on the capture timeline and the chunks held for frames still being read. A
+ * chunk whose interval ends while one of its frames is being read is held: it takes no more
+ * audio and is sealed once that frame is written. Later chunks queue behind it, so chunks are
+ * still sealed in order.
+ */
+internal class ChunkCursor(private val storage: ChunkStorage) {
+    var open: OpenChunk? = null
+        private set
+
+    /** Capture times of kept frames whose text is still being read. */
+    private val reading = mutableListOf<Long>()
+
+    /** Frames given up on by [expireStale]; a late result for them is ignored. */
+    private val expired = mutableSetOf<Long>()
+    private val held = ArrayDeque<OpenChunk>()
+
+    fun begin() {
+        open = storage.open(0)
+    }
+
+    /** Registers a frame being read; false when no capture is open or past 3:00. */
+    fun frameStarted(elapsedMs: Long): Boolean {
+        if (open == null || elapsedMs >= CaptureLimits.LIVE_MS) return false
+        reading += elapsedMs
+        return true
+    }
+
+    /** Forgets the frame at [elapsedMs] without writing it and seals what it held. */
+    fun release(elapsedMs: Long) {
+        expired.remove(elapsedMs)
+        if (reading.remove(elapsedMs)) sealReleased()
+    }
+
+    /**
+     * The open chunk for [elapsedMs], sealing or holding the chunks before it. Audio that
+     * arrives just after its chunk ended goes into the open chunk ([acceptLate]); a frame does
+     * not, because its offset would fall outside the open chunk. Null past the 3-minute limit.
+     */
+    fun chunkFor(elapsedMs: Long, acceptLate: Boolean): OpenChunk? {
+        var chunk = open ?: throw IOException("Capture output is closed.")
+        expireStale(elapsedMs)
+        val seq = ChunkGrid.seqAt(elapsedMs)
+        while (elapsedMs < CaptureLimits.LIVE_MS && chunk.seq < seq) {
+            if (held.isNotEmpty() || waitsForFrame(chunk)) {
+                chunk.audio.close()
+                held.addLast(chunk)
+            } else {
+                storage.seal(chunk, ChunkGrid.endOf(chunk.seq))
+            }
+            chunk = storage.open(chunk.seq + 1)
+            open = chunk
+        }
+        return chunk.takeIf {
+            elapsedMs < CaptureLimits.LIVE_MS && (acceptLate || it.seq == seq)
+        }
+    }
+
+    /**
+     * Passes [write] the chunk the frame at [elapsedMs] belongs to (held or open), or null when
+     * that chunk was already sealed; then seals the held chunks no longer waiting for a frame.
+     * A frame that was already given up on is ignored; it was counted as unfinished.
+     */
+    fun frameDone(elapsedMs: Long, write: (OpenChunk?) -> Unit) {
+        if (expired.remove(elapsedMs)) return
+        val registered = reading.remove(elapsedMs)
+        val seq = ChunkGrid.seqAt(elapsedMs)
+        write(held.firstOrNull { it.seq == seq } ?: chunkFor(elapsedMs, acceptLate = false))
+        if (registered) sealReleased()
+    }
+
+    /**
+     * Seals every held chunk and the open chunk up to [durationMs]. Frames still being read
+     * are counted as unfinished; their text is lost.
+     */
+    fun finish(durationMs: Long) {
+        storage.unfinishedFrames += reading.size
+        reading.clear()
+        sealReleased()
+        if (durationMs > 0) chunkFor(durationMs - 1, acceptLate = true)
+        open?.let { storage.seal(it, maxOf(durationMs, ChunkGrid.startOf(it.seq))) }
+        open = null
+    }
+
+    fun clear() {
+        open?.audio?.close()
+        open = null
+        held.clear()
+        reading.clear()
+        expired.clear()
+    }
+
+    private fun waitsForFrame(chunk: OpenChunk): Boolean =
+        reading.any { ChunkGrid.seqAt(it) == chunk.seq }
+
+    /**
+     * Hard bound on holding: a frame still being read [HOLD_LIMIT_MS] after its probe time
+     * (ML Kit hung past every timeout, or the reader closed mid-task) is given up on and
+     * counted as unfinished, so its chunk seals and uploads do not stall.
+     */
+    private fun expireStale(nowMs: Long) {
+        val stale = reading.filter { nowMs - it > HOLD_LIMIT_MS }
+        if (stale.isEmpty()) return
+        reading.removeAll(stale)
+        expired += stale
+        storage.unfinishedFrames += stale.size
+        sealReleased()
+    }
+
+    /** Seals held chunks, oldest first, until one still waits for a frame. */
+    private fun sealReleased() {
+        while (held.isNotEmpty() && !waitsForFrame(held.first())) {
+            val chunk = held.removeFirst()
+            storage.seal(chunk, ChunkGrid.endOf(chunk.seq))
+        }
+    }
+
+    companion object {
+        /** The longest a frame can take: every region timing out, plus a margin. */
+        const val HOLD_LIMIT_MS =
+            Recognizer.TIMEOUT_MS * TextRegions.MAX_REGIONS + Recognizer.TIMEOUT_MS
+    }
 }
 
 /**
@@ -30,6 +156,9 @@ internal class ChunkStorage(private val root: File, private val ledger: CaptureL
     @Volatile var sealed = 0
     var mediaBytes = 0L
     var droppedFrames = 0
+    var cappedFrames = 0
+    var failedFrames = 0
+    var unfinishedFrames = 0
     private val localFrames = ArrayDeque<File>()
 
     fun reset() {
@@ -39,6 +168,9 @@ internal class ChunkStorage(private val root: File, private val ledger: CaptureL
         sealed = 0
         mediaBytes = 0
         droppedFrames = 0
+        cappedFrames = 0
+        failedFrames = 0
+        unfinishedFrames = 0
         localFrames.clear()
     }
 
@@ -53,11 +185,17 @@ internal class ChunkStorage(private val root: File, private val ledger: CaptureL
         bytes += jpeg.size
     }
 
+    /** A chunk's working directory; a held chunk keeps its own until it is sealed. */
     fun open(seq: Int): OpenChunk {
-        val dir = File(root, OPEN_DIR)
+        val dir = File(File(root, OPEN_DIR), seq.toString())
         dir.deleteRecursively()
         if (!dir.mkdirs()) throw IOException("Cannot create private chunk storage.")
         return OpenChunk(seq, dir)
+    }
+
+    /** Removes the working directories once no chunk is open or held. */
+    fun closeOpenDirs() {
+        File(root, OPEN_DIR).deleteRecursively()
     }
 
     /** Packages [chunk] up to [endMs]; a chunk without media is recorded as skipped. */
@@ -65,7 +203,8 @@ internal class ChunkStorage(private val root: File, private val ledger: CaptureL
         chunk.audio.close()
         val current = requireNotNull(manifest)
         val start = ChunkGrid.startOf(chunk.seq)
-        val modality = ChunkPackage.modality(chunk.audioBytes)
+        val read = chunk.frames.count { it.status != FrameStatus.FAILED }
+        val modality = ChunkPackage.modality(chunk.audioBytes, read)
         manifest = if (endMs <= start) {
             current
         } else if (modality == null) {
@@ -73,7 +212,7 @@ internal class ChunkStorage(private val root: File, private val ledger: CaptureL
         } else {
             val audio = chunk.audioFile.takeIf { chunk.audioBytes > 0 }
             val packaged =
-                ChunkPackage.build(chunk.seq, endMs, audio, chunk.frameOffsetsMs, modality)
+                ChunkPackage.build(chunk.seq, endMs, audio, chunk.frames, modality)
             // The raw files are deleted right after, so only the difference must fit.
             ensureRoom((packaged.size - chunk.rawBytes).coerceAtLeast(0))
             File(root, SealedChunk.fileName(chunk.seq)).writeBytesAtomically(packaged)
@@ -89,7 +228,8 @@ internal class ChunkStorage(private val root: File, private val ledger: CaptureL
                         sizeBytes = packaged.size.toLong(),
                         sha256 = ChunkPackage.sha256(packaged),
                         audioBytes = chunk.audioBytes,
-                        frameOffsetsMs = chunk.frameOffsetsMs.toList()
+                        frameOffsetsMs = chunk.frames.map { frame -> frame.framePtsMs },
+                        observations = chunk.frames.sumOf { frame -> frame.observations.size }
                     )
                 )
             }
@@ -129,7 +269,10 @@ internal class ChunkStorage(private val root: File, private val ledger: CaptureL
             current.copy(
                 mediaBytes = mediaBytes,
                 frames = frames,
-                droppedFrames = droppedFrames
+                droppedFrames = droppedFrames,
+                cappedFrames = cappedFrames,
+                failedFrames = failedFrames,
+                unfinishedFrames = unfinishedFrames
             ).toJson()
         )
     }

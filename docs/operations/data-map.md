@@ -54,6 +54,21 @@ a user-data column requires updating this map.
 | PostgreSQL volume, WAL, host snapshots/backups | Physical copies of database rows | Infrastructure operator | SQL deletion removes live rows, not guaranteed physical overwrite/WAL erasure. No backup service is implemented. Before deployment, record provider retention, access and expiry; restore only into an isolated environment and run approved retention before exposing it. |
 | Provider copies, object storage, pipeline artifacts | Not implemented in this checkout | Future integration owner | No erasure claim. Each integration must supply a real deletion path, retention/region evidence and failure tests before adding personal data. Synthetic harness artifact stores are not production storage. |
 
+### Android capture data on the device
+
+Live capture (#97, #100) keeps its working data in the app's private, no-backup
+storage (`no_backup/capture`): sealed chunk ZIPs, the local manifest, upload
+markers and the sampled frame JPEGs (`frames/`). Frames and on-device text
+recognition never leave the phone. ML Kit reads the frames on the device with
+its bundled model; its Google `datatransport` upload components are removed
+from the app manifest, and a build check fails if any reappear, so no OCR data
+or SDK metrics go to Google (decision
+[0005](../decisions/0005-on-device-screen-text.md); device verification is
+pending). Only the recognized lines, as `{text, box, frame_pts}` observations
+inside each chunk, and the PCM audio are sent to the ovrly backend, where they
+are the `capture_chunks` bytes above. The SDK may keep unsent metrics in a local
+database in the same private storage; uninstalling or clearing app data deletes
+it. Local captures expire after 24 hours and a new capture replaces a sent one.
 Alembic's version table is schema metadata, not user data. Git and CI artifacts
 must contain synthetic fixtures and test reports only: no database dumps,
 tokens, user media or private references.

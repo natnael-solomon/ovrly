@@ -5,5 +5,7 @@
          AndroidVoiceAudio.start: MissingPermission; runtime permission checked before capture.
          OverlayService.params: RtlHardcoded; dragging uses physical screen coordinates.
          DragSurface: ViewConstructor, ClickableViewAccessibility; service-only construction,
-         with Compose children owning taps and accessibility actions. -->
+         with Compose children owning taps and accessibility actions.
+         app/build.gradle.kts release ndk.abiFilters: ChromeOsAbiSupport; release ships phone ABIs
+         only (#100) and ChromeOS is not a supported device (BC-D02). -->
 </lint>
