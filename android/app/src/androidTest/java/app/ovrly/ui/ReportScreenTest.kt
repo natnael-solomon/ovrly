@@ -94,7 +94,7 @@ class ReportScreenTest {
         show(OpenReport(reportView(complete)))
         reveal("Correct the meaning").performClick()
 
-        compose.onNodeWithText("Original wording (kept as it was)").assertIsDisplayed()
+        compose.awaitDisplayed("Original wording (kept as it was)")
         compose.onNodeWithText("Save correction").assertIsNotEnabled()
         compose.onNodeWithText("This is the same meaning as now.").assertIsDisplayed()
         compose.onNode(hasSetTextAction()).performTextReplacement("   ")
@@ -136,7 +136,7 @@ class ReportScreenTest {
         val before = compose.idsWithText("Check the full video")
         compose.onNodeWithText("Check the full video").performClick()
 
-        compose.onNodeWithText("Is this the same video?").assertIsDisplayed()
+        compose.awaitDisplayed("Is this the same video?")
         val confirm = compose.newNodeWithText("Check the full video", before)
         confirm.assertIsNotEnabled()
         compose.onNodeWithText(candidate.title).performClick()

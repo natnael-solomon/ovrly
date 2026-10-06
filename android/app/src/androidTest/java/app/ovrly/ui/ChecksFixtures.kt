@@ -3,8 +3,10 @@ package app.ovrly.ui
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
+import androidx.compose.ui.test.onNodeWithText
 import app.ovrly.contract.ContractJson
 import app.ovrly.contract.Investigation
 import app.ovrly.contract.InvestigationCodec
@@ -67,6 +69,21 @@ internal object ChecksFixtures {
             )
 
             else -> error("cannot descend into $element with $head")
+        }
+    }
+}
+
+/**
+ * Waits until [text] is on screen. A modal bottom sheet is composed before it has slid in,
+ * so asserting at once can see it present but not yet displayed.
+ */
+internal fun ComposeContentTestRule.awaitDisplayed(text: String, timeoutMillis: Long = 5_000) {
+    waitUntil(timeoutMillis) {
+        try {
+            onNodeWithText(text).assertIsDisplayed()
+            true
+        } catch (_: AssertionError) {
+            false
         }
     }
 }

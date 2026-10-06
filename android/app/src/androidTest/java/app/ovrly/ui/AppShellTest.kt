@@ -35,12 +35,13 @@ class AppShellTest {
     private fun show(
         checks: ChecksUiState? = null,
         report: OpenReport? = null,
-        activeSession: String? = null,
-        dark: Boolean = false
+        activeSession: String? = null
     ) {
         compose.setContent {
             var destination by remember { mutableStateOf(AppDestination.SPACE) }
-            OvrlyTheme(dark) {
+            // Liquid Chrome, the app's default. The paper header blurs its wordmark, a
+            // RenderEffect that the CI emulators' software GPU (swiftshader) fails on API 34.
+            OvrlyTheme(dark = true) {
                 AppShell(
                     destination = destination,
                     onDestination = {
@@ -101,7 +102,7 @@ class AppShellTest {
     }
 
     @Test fun exploreFiltersByTopicAndSearch() {
-        show(dark = true)
+        show()
         tab("Explore").performClick()
 
         compose.onNodeWithText("Technology").performClick()
