@@ -44,7 +44,13 @@ from services.providers.fulltext import FullTextClient
 from services.providers.http import ProviderRejected
 from services.providers.papers import PapersClient
 from services.providers.router import RouterClient
-from services.reports import REANALYSIS_STAGE, NextVersion, publish_report_version, report_from_row
+from services.reports import (
+    REANALYSIS_STAGE,
+    NextVersion,
+    publish_report_version,
+    reanalysis_request_of,
+    report_from_row,
+)
 from services.settings import Settings
 
 RETRIEVAL_STAGE: Final = "retrieval"
@@ -150,19 +156,41 @@ async def publish_evidence_stage(
     queue: JobQueue, job: ClaimedJob, result: dict[str, Any]
 ) -> PublishedResult:
     """Publish an evidence stage and enqueue its successor in the same fenced transaction,
-    so a lost lease or a cancelled job never leaves an orphan successor behind."""
+    so a lost lease or a cancelled job never leaves an orphan successor behind. A job that
+    works for a reanalysis request repoints the request at its successor, so cancelling
+    the request's receipt job reaches the work still running (see ``cancel_owned_job``)."""
+    request_id = reanalysis_request_of(job.key.stage, job.payload)
     async with queue.database.engine.begin() as connection:
+        if request_id is not None:
+            # Same lock order as a forwarded cancel: the request row, then its jobs.
+            await connection.execute(
+                select(reanalysis_requests.c.id)
+                .where(reanalysis_requests.c.id == request_id)
+                .with_for_update()
+            )
+        successor: uuid.UUID | None = None
+        if job.key.stage == REANALYSIS_STAGE and "retrieval" in result:
+            planned = StagePayload.model_validate(result["retrieval"])
+            enqueued = await queue.enqueue(
+                connection,
+                retrieval_key(planned),
+                planned.model_dump(mode="json"),
+                owner_id=planned.owner_id,
+            )
+            successor = enqueued.job_id
+            result = {**result, "retrieval_job_id": str(enqueued.job_id)}
         published = await queue.publish(job.lease, result, connection=connection)
         if job.key.stage == RETRIEVAL_STAGE:
             artifact = RetrievalArtifact.model_validate(result)
             if artifact.claims and not artifact.superseded:
                 payload = StagePayload.model_validate(job.payload)
-                await queue.enqueue(
+                enqueued = await queue.enqueue(
                     connection,
                     assessment_key(job.id),
                     payload.model_copy(update={"retrieval_job_id": job.id}).model_dump(mode="json"),
                     owner_id=payload.owner_id,
                 )
+                successor = enqueued.job_id
         elif job.key.stage == REANALYSIS_STAGE and result.get("waiting_for_source"):
             poll = int(result["poll"]) + 1
             follow_up = await queue.enqueue(
@@ -182,12 +210,14 @@ async def publish_evidence_stage(
                     .where(jobs.c.id == follow_up.job_id)
                     .values(available_at=func.now() + delay)
                 )
+            successor = follow_up.job_id
+        if request_id is not None and successor is not None:
             # The request now points at the job that will finish it, so it stays visible
             # and cancellable.
             await connection.execute(
                 update(reanalysis_requests)
-                .where(reanalysis_requests.c.id == uuid.UUID(str(job.payload["request_id"])))
-                .values(job_id=follow_up.job_id)
+                .where(reanalysis_requests.c.id == request_id)
+                .values(job_id=successor)
             )
         return published
 
@@ -453,20 +483,20 @@ class EvidenceStages:
             )
         if reason not in {"correction", "deeper"}:
             raise NonRetriableInput("unknown reanalysis reason")
-        async with self.database.engine.begin() as connection:
-            if not await _owned(connection, investigation_id, owner_id, True):
+        async with self.database.engine.connect() as connection:
+            if not await _owned(connection, investigation_id, owner_id, False):
                 raise NonRetriableInput("investigation is missing or not owned by the job owner")
-            enqueued = await enqueue_retrieval(
-                connection,
-                context.queue,
-                investigation_id=investigation_id,
-                owner_id=owner_id,
-                base_version=base_version,
-                claim_ids=claim_ids if reason == "correction" else None,
-                depth="deeper" if reason == "deeper" else "standard",
-                reanalysis_request_id=request_id,
-            )
-        return {"retrieval_job_id": str(enqueued.job_id)}
+        # Retrieval is enqueued by the fenced publish of this job, never before it, so a
+        # cancel that lands first leaves no retrieval behind.
+        planned = StagePayload(
+            investigation_id=investigation_id,
+            owner_id=owner_id,
+            base_version=base_version,
+            claim_ids=claim_ids if reason == "correction" else None,
+            depth="deeper" if reason == "deeper" else "standard",
+            reanalysis_request_id=request_id,
+        )
+        return {"retrieval": planned.model_dump(mode="json")}
 
     async def _expand(
         self,

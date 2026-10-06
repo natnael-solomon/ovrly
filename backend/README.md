@@ -729,7 +729,11 @@ or a provider replay; the tests use a synthetic one.
 A `deeper` reanalysis doubles the search breadth within the hard caps above. An
 `expansion` whose full video has no report yet publishes a waiting result and schedules
 another check (30 s, doubling, capped at 10 minutes; the request points at the new job,
-so it stays visible and cancellable) and fails after 12 checks. Tests
+so it stays visible and cancellable) and fails after 12 checks. A correction or
+deeper reanalysis enqueues its retrieval only in its own fenced publish. The request
+always points at the job currently doing its work, and cancelling the receipt job of a
+reanalysis that has already handed on (`POST /v1/jobs/{id}/cancel` or `queue_cancel`)
+cancels that job instead. Tests
 (`tests/test_evidence_units.py`, `tests/test_evidence_stages.py`) replay synthetic
 cassettes for every provider (`tests/cassettes/`, `tests/evidence_cassettes.py`)
 through an `httpx` mock transport; no test or CI job calls a real provider. The

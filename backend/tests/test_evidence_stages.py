@@ -152,8 +152,29 @@ async def run(app, handler, stage, investigation_id, *, publish=True, on_error="
         raise
     if publish:
         # The worker's publish path: fenced, with successors in the same transaction.
-        await publish_stage(queue, claim, result)
+        published = await publish_stage(queue, claim, result)
+        assert published is not None
+        result = published.result
     return claim, result
+
+
+async def queued_jobs(app, stage, investigation_id):
+    async with app.state.database.engine.connect() as connection:
+        return (
+            await connection.execute(
+                select(jobs).where(
+                    jobs.c.stage == stage,
+                    jobs.c.payload["investigation_id"].astext == investigation_id,
+                )
+            )
+        ).all()
+
+
+async def request_job(app, request_id):
+    async with app.state.database.engine.connect() as connection:
+        return await connection.scalar(
+            select(reanalysis_requests.c.job_id).where(reanalysis_requests.c.id == request_id)
+        )
 
 
 async def queued_assessments(app, investigation_id):
@@ -478,6 +499,99 @@ async def test_reanalysis_expansion_merges_the_full_video(client, app, providers
             )
         )
     assert stored == result["version"]
+
+
+async def test_cancelling_a_reanalysis_reaches_the_work_it_started(client, app, providers):
+    headers = await guest(client)
+    investigation_id = await create_investigation(client, headers, "cancel-reanalysis")
+    base = await publish_claims(app, investigation_id)
+    evidence = stages(app, providers)
+    queue = JobQueue(app.state.database)
+
+    async def deeper(key):
+        receipt = await client.post(
+            f"/v1/investigations/{investigation_id}/reanalyze",
+            json={"reason": "deeper", "base_version": base.version},
+            headers={**headers, "Idempotency-Key": key},
+        )
+        assert receipt.status_code == 202, receipt.text
+        return uuid.UUID(receipt.json()["id"]), receipt.json()["job"]["id"]
+
+    # A cancel between the handler and its publish: the fenced publish is refused and no
+    # retrieval is ever enqueued for the cancelled request.
+    request_id, job_id = await deeper("gap")
+    reanalysis, result = await run(
+        app, evidence.reanalysis, REANALYSIS_STAGE, investigation_id, publish=False
+    )
+    assert "retrieval" in result and "retrieval_job_id" not in result
+    cancelled = await client.post(f"/v1/jobs/{job_id}/cancel", headers=headers)
+    assert cancelled.status_code == 202, cancelled.text
+    with pytest.raises(PublishRejected):
+        await publish_stage(queue, reanalysis, result)
+    assert await queued_jobs(app, RETRIEVAL_STAGE, investigation_id) == []
+    assert str(await request_job(app, request_id)) == job_id
+    # Once published, the request points at its retrieval, and cancelling the receipt job
+    # cancels that retrieval instead of answering "not cancellable".
+    request_id, job_id = await deeper("forward")
+    _, published = await run(app, evidence.reanalysis, REANALYSIS_STAGE, investigation_id)
+    retrieval_id = uuid.UUID(published["retrieval_job_id"])
+    assert await request_job(app, request_id) == retrieval_id
+    cancelled = await client.post(f"/v1/jobs/{job_id}/cancel", headers=headers)
+    assert cancelled.status_code == 200 and cancelled.json()["cancellation"] == "effective"
+    [retrieval] = await queued_jobs(app, RETRIEVAL_STAGE, investigation_id)
+    assert retrieval.id == retrieval_id and retrieval.state == "cancelled"
+    replay = await client.post(f"/v1/jobs/{job_id}/cancel", headers=headers)
+    assert replay.json()["cancellation"] == "effective"
+    # Another owner still gets 404 for the receipt job.
+    stranger = await guest(client)
+    assert (await client.post(f"/v1/jobs/{job_id}/cancel", headers=stranger)).status_code == 404
+
+
+async def test_cancelling_an_expansion_stops_its_polling(client, app, providers):
+    headers = await guest(client)
+    clip = await create_investigation(client, headers, "clip-cancel")
+    full = await create_investigation(client, headers, "full-cancel")
+    clip_base = await publish_claims(app, clip)
+    receipt = await client.post(
+        f"/v1/investigations/{clip}/reanalyze",
+        json={
+            "reason": "expansion",
+            "base_version": clip_base.version,
+            "match_confirmed": True,
+            "source_investigation_id": full,
+        },
+        headers={**headers, "Idempotency-Key": "stop"},
+    )
+    assert receipt.status_code == 202, receipt.text
+    evidence = stages(app, providers)
+    _, waiting = await run(app, evidence.reanalysis, REANALYSIS_STAGE, clip)
+    assert waiting["waiting_for_source"] is True
+    job_id = receipt.json()["job"]["id"]
+    cancelled = await client.post(f"/v1/jobs/{job_id}/cancel", headers=headers)
+    assert cancelled.status_code == 200 and cancelled.json()["cancellation"] == "effective"
+    states = {str(j.id): j.state for j in await queued_jobs(app, REANALYSIS_STAGE, clip)}
+    assert states.pop(job_id) == "published" and set(states.values()) == {"cancelled"}
+    # The full video publishing later changes nothing: no check is left to run.
+    await publish_claims(app, full)
+    async with app.state.database.engine.begin() as connection:
+        # Leftover reanalysis jobs of other tests share the database; park them first.
+        await connection.execute(
+            update(jobs)
+            .where(
+                jobs.c.stage == REANALYSIS_STAGE,
+                jobs.c.state == "queued",
+                jobs.c.payload["investigation_id"].astext != clip,
+            )
+            .values(available_at=func.now() + timedelta(days=1))
+        )
+        await connection.execute(
+            update(jobs)
+            .where(jobs.c.payload["investigation_id"].astext == clip)
+            .values(available_at=func.now())
+        )
+    assert await JobQueue(app.state.database).claim("evidence-test", [REANALYSIS_STAGE], 30) is None
+    listing = await client.get(f"/v1/investigations/{clip}/reports", headers=headers)
+    assert [item["version"] for item in listing.json()["items"]] == [clip_base.version]
 
 
 async def test_stages_are_registered_only_with_the_key(app, database_url, tmp_path):
