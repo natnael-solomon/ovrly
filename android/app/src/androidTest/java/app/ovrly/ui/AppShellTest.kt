@@ -1,5 +1,6 @@
 package app.ovrly.ui
 
+import android.os.Build
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,6 +21,8 @@ import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,6 +35,17 @@ class AppShellTest {
     private val commands = mutableListOf<CheckCommand>()
     private val destinations = mutableListOf<AppDestination>()
 
+    /**
+     * Your space and Explore draw the chrome wordmark, its glare and the sample artwork. On
+     * API 31+ the CI emulators' software GPU (`-gpu swiftshader_indirect`) loses colour
+     * buffers on these screens ("bad color buffer handle") and the emulator goes offline,
+     * aborting the whole run, while API 29 renders them. These tests run on API 29 until the
+     * emulator GPU can render them; the Inbox and Report screens are tested on both.
+     */
+    @Before fun onlyWhereTheEmulatorCanDrawTheChrome() {
+        assumeTrue(Build.VERSION.SDK_INT < Build.VERSION_CODES.S)
+    }
+
     private fun show(
         checks: ChecksUiState? = null,
         report: OpenReport? = null,
@@ -39,8 +53,7 @@ class AppShellTest {
     ) {
         compose.setContent {
             var destination by remember { mutableStateOf(AppDestination.SPACE) }
-            // Liquid Chrome, the app's default. The paper header blurs its wordmark, a
-            // RenderEffect that the CI emulators' software GPU (swiftshader) fails on API 34.
+            // Liquid Chrome, the app's default appearance.
             OvrlyTheme(dark = true) {
                 AppShell(
                     destination = destination,
