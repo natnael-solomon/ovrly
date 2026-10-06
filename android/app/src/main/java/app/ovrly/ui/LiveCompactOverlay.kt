@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -108,10 +109,18 @@ internal fun LiveOverlay(
     AnimatedContent(
         targetState = form,
         modifier = modifier,
+        contentAlignment = Alignment.TopStart,
         transitionSpec = {
+            // Forms grow from and shrink into the pill's corner, where the window stays.
             if (frame.animate) {
-                (fadeIn(tween(FORM_MS)) + scaleIn(tween(FORM_MS), initialScale = 0.92f))
-                    .togetherWith(fadeOut(tween(FORM_MS / 2)) + scaleOut(tween(FORM_MS / 2)))
+                val corner = TransformOrigin(0f, 0f)
+                (
+                    fadeIn(tween(FORM_MS)) +
+                        scaleIn(tween(FORM_MS), initialScale = 0.6f, transformOrigin = corner)
+                    ).togetherWith(
+                    fadeOut(tween(FORM_MS / 2)) +
+                        scaleOut(tween(FORM_MS / 2), targetScale = 0.6f, transformOrigin = corner)
+                )
             } else {
                 fadeIn(snap()).togetherWith(fadeOut(snap()))
             }

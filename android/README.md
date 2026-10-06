@@ -366,7 +366,7 @@ forms from the panel state, the live results and whether a capture is running:
 | Form | When | What it shows |
 | --- | --- | --- |
 | Pill | While examining (a capture runs) | The ovrly mark, "Examining m:ss", the claim count, an update dot and Stop. Tapping anywhere but Stop expands it once live results are connected; a drag that moves past the touch slop moves the window instead. Stop opens the choice in a card under the pill: "Continue research in queue", "Keep only available results" or "Keep examining". |
-| Expanded | After a tap, or once automatically | The demo panel's frame and style through the shared `OverlayPanelScaffold`: the demo's width minus a 72 dp gutter on the right (kept free for the like, comment and share buttons of short-video apps), docked at the bottom margin, growing with its content up to the demo's half-screen height and scrolling inside. The header (the only drag area) has the mark, "Examining m:ss" or the session state after Stop, the fixture label, Stop while examining or Dismiss after it, and Collapse. The body has the captured-segment line, the newest "Assessment updated" notice, then the claims or one claim's detail; the Stop choice opens here when Stop is tapped in the panel. The footer reads "Drag header to move". |
+| Expanded | After a tap, or once automatically | The demo panel's frame and style through the shared `OverlayPanelScaffold`: the demo's width minus a 72 dp gutter on the right (kept free for the like, comment and share buttons of short-video apps), opening where the pill is (its top stays at the pill's top and it moves up only as far as needed to stay on screen), growing with its content up to the demo's half-screen height and scrolling inside. The header (the only drag area) has the mark, "Examining m:ss" or the session state after Stop, the fixture label, Stop while examining or Dismiss after it, and Collapse. The body has the captured-segment line, the newest "Assessment updated" notice, then the claims or one claim's detail; the Stop choice opens here when Stop is tapped in the panel. The footer reads "Drag header to move". |
 | Bubble | After Stop with "Continue research in queue" | A round mark with the claim count and the update dot. It drags anywhere and snaps to the nearer side edge; tapping it expands the panel. A long press then a drag onto the round target near the bottom dismisses the overlay; TalkBack offers a "Dismiss overlay" action, and the expanded panel has Dismiss in its header. Dismissing only hides the overlay; research and the results in the app continue. |
 | Saved | After Stop with "Keep only available results" | "Saved to Inbox · N claims" for 3 s, then the overlay closes. |
 
@@ -375,8 +375,9 @@ collapsed it or the Stop choice is open; that automatic expand collapses after 8
 a touch, and never while TalkBack is on. Later claims and updates only change the count and
 light the dot, which pulses twice. The expanded panel fades to 55% after 4 s without a touch
 or a new result, and returns on the next touch or result; there is no fade under TalkBack.
-Moving between forms takes about 250 ms (fade and scale), and is instant when the phone's
-animations are off. Collapse returns the pill to where it was. When research that continued
+Moving between forms takes about 250 ms, growing from and shrinking into the pill's corner,
+and is instant when the phone's animations are off. Collapse puts the pill back at the
+panel's top. When research that continued
 after Stop has settled, `CaptureLive` posts a silent, low-priority "Results ready · N claims"
 notification that opens the capture's report (`MainActivity.ACTION_OPEN_CHECK`), whether or
 not the overlay is still shown. The claim list keeps working at 200% text: everything below

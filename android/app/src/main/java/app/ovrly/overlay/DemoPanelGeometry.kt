@@ -16,7 +16,7 @@ internal fun demoPanelGeometry(width: Int, height: Int, density: Float): DemoPan
 }
 
 /**
- * The expanded live panel: the demo panel's frame (left margin, half-height cap, bottom dock),
+ * The expanded live panel: the demo panel's frame (left margin, half-height cap),
  * narrowed so the right [LIVE_GUTTER_DP] stays free for the like, comment and share buttons
  * that short-video apps put on the right edge. [DemoPanelGeometry.height] is a cap here: the
  * live panel grows with its content.

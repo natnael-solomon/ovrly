@@ -8,8 +8,8 @@
   ovrly mark, the claim count, an update dot and Stop, and grows into the large panel only
   when tapped, or once automatically when a capture's first claims arrive (it collapses after
   8 s untouched, never under TalkBack). The expanded panel uses the demo panel's frame and
-  style through a shared scaffold, follows Light and Dark, grows with its content up to half
-  the screen, keeps the right 72 dp free for short-video apps' buttons and fades to 55% after
+  style through a shared scaffold, opens where the pill is, follows Light and Dark, grows with
+  its content up to half the screen, keeps the right 72 dp free for short-video apps' buttons and fades to 55% after
   4 s without a touch. After Stop with "Continue research" the overlay becomes a small
   draggable bubble that snaps to the edge and is dismissed by a long-press drag onto a target
   (or a TalkBack action); "Keep only available results" shows "Saved to Inbox" for 3 s, then

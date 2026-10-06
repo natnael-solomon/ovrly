@@ -125,8 +125,12 @@ class OverlayService :
     private var pendingCompactPosition: Pair<Int, Int>? = null
     private var pendingSnap = false
 
-    /** Distance from the expanded panel's bottom edge to the screen's, kept as it grows. */
-    private var panelBottomGap = 0
+    /**
+     * Where the expanded panel's top edge wants to be: the pill's top when it expanded, or
+     * where the user dragged the panel. The panel opens there and moves up only as far as
+     * it must to stay on screen.
+     */
+    private var panelTop = 0
     private var savedJob: Job? = null
     private val touches = MutableStateFlow(0)
     private val touchExploration = MutableStateFlow(false)
@@ -495,7 +499,10 @@ class OverlayService :
         }
     )
 
-    /** Window placement for a new live form: the panel docks; the pill and bubble come back. */
+    /**
+     * Window placement for a new live form: the panel opens where the pill is, and the pill
+     * comes back at the panel's top when it collapses.
+     */
     private fun onForm(next: LiveOverlayForm?) {
         val previous = form
         if (next == previous) return
@@ -503,16 +510,12 @@ class OverlayService :
         when {
             next == LiveOverlayForm.EXPANDED -> {
                 if (previous != null) compactPosition = params.x to params.y
-                panelBottomGap = livePanelGeometry(
-                    usableSize.width,
-                    usableSize.height,
-                    resources.displayMetrics.density
-                ).margin
-                configureWindow(resetPosition = true)
+                panelTop = compactPosition.second
+                configureWindow()
             }
 
             previous == LiveOverlayForm.EXPANDED -> {
-                pendingCompactPosition = compactPosition
+                pendingCompactPosition = compactPosition.first to panelTop
                 pendingSnap = next == LiveOverlayForm.BUBBLE
                 configureWindow()
             }
@@ -542,6 +545,7 @@ class OverlayService :
 
         override fun onMove(x: Int, y: Int) {
             moveTo(x, y)
+            if (form == LiveOverlayForm.EXPANDED) panelTop = params.y
             dismissTarget?.highlight(bubbleOverTarget())
         }
 
@@ -674,7 +678,7 @@ class OverlayService :
         val newY = y.coerceIn(margin, (usableSize.height - height - margin).coerceAtLeast(margin))
         params.x = newX
         params.y = newY
-        if (!demo && geometry != null) panelBottomGap = usableSize.height - newY - height
+
         if (view?.isAttachedToWindow == true) {
             try {
                 overlayWindow?.layout(params.width, params.height, newX, newY)
@@ -693,7 +697,6 @@ class OverlayService :
     private fun configureWindow(resetPosition: Boolean = false) {
         val geometry = panelGeometry()
         val demo = OverlayStore.demo.value
-        val viewHeight = root?.height ?: 0
         params.width = geometry?.width ?: WindowManager.LayoutParams.WRAP_CONTENT
         when {
             geometry != null && demo && resetPosition -> {
@@ -701,10 +704,10 @@ class OverlayService :
                 params.y = geometry.bottomY(usableSize.height)
             }
 
-            // The live panel stays docked at its bottom edge while it grows or shrinks.
+            // The live panel keeps its top where the pill was; moveTo lifts it to stay on screen.
             geometry != null && !demo -> {
                 params.x = geometry.margin
-                params.y = usableSize.height - panelBottomGap - viewHeight
+                params.y = panelTop
             }
 
             resetPosition -> {
