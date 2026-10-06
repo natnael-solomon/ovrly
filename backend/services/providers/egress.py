@@ -29,7 +29,7 @@ from typing import Final
 import httpcore
 import httpx
 
-from services.providers.http import MAX_BODY_BYTES, ProviderError, send
+from services.providers.http import ProviderError, send
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +257,7 @@ async def fetch(
     *,
     params: dict[str, str | int] | None = None,
     max_redirects: int = MAX_REDIRECTS,
-    max_bytes: int = MAX_BODY_BYTES,
+    max_bytes: int | None = None,
 ) -> tuple[httpx.Response, bytes]:
     """GET ``url`` following at most ``max_redirects`` checked redirects."""
     try:

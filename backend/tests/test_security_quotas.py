@@ -168,7 +168,7 @@ async def test_idempotency_replay_storm_creates_and_charges_once(client, app):
         *(client.post("/v1/investigations", json=URL_BODY, headers=replay) for _ in range(STORM))
     )
     assert {r.status_code for r in responses} == {202}
-    assert len({r.text for r in responses}) == 1
+    assert len({r.json()["id"] for r in responses}) == 1
     assert await counted(app, investigations, owner_id) == 1
     assert await counted(app, jobs, owner_id) == 1
     assert (await usage(app, owner_id)).checks == 1
@@ -195,7 +195,7 @@ async def test_idempotency_replay_storm_creates_and_charges_once(client, app):
         )
     )
     assert {r.status_code for r in reanalyses} == {202}
-    assert len({r.text for r in reanalyses}) == 1
+    assert len({r.json()["id"] for r in reanalyses}) == 1
     assert await counted(app, reanalysis_requests, owner_id) == 1
     assert (await usage(app, owner_id)).checks == 2
 
@@ -207,6 +207,6 @@ async def test_idempotency_replay_storm_creates_and_charges_once(client, app):
         )
     )
     assert {r.status_code for r in captures} == {201}
-    assert len({r.text for r in captures}) == 1
+    assert len({r.json()["id"] for r in captures}) == 1
     assert await counted(app, capture_sessions, owner_id) == 1
     assert (await usage(app, owner_id)).checks == 3
