@@ -41,6 +41,65 @@ class LocalStoreTest {
         )
 
     @Test
+    fun aShareAcceptedAfterTheListImportedItKeepsOneRowAndItsOwn() = runBlocking {
+        val partial = result("partial")
+        jobs.startShare(record("share-1", LocalJobState.UPLOADING))
+        // The create answer was slow or lost; a server list read the investigation first.
+        jobs.recordListed(partial, import = true)
+        assertEquals(2, dao.all().size)
+        val stored = jobs.accepted("share-1", partial)!!
+        val rows = dao.all()
+        assertEquals(listOf("share-1"), rows.map { it.localId })
+        assertEquals(partial.id, rows.single().serverId)
+        assertEquals("key-share-1", rows.single().idempotencyKey)
+        assertEquals(LocalJobState.PARTIAL, stored.jobState)
+        // Later reads and accepts of the same id stay on the share's row.
+        jobs.recordRead(partial)
+        jobs.accepted("share-1", partial)
+        assertEquals(listOf("share-1"), dao.all().map { it.localId })
+    }
+
+    @Test
+    fun theMergeRunsInOneTransactionAndOnlyWhenAnImportExists() = runBlocking {
+        var transactions = 0
+        val merged = LocalJobs(
+            dao,
+            { clock.get() },
+            transaction = { block ->
+                transactions++
+                block()
+            }
+        )
+        val partial = result("partial")
+        merged.startShare(record("share-1", LocalJobState.UPLOADING))
+        merged.startShare(record("share-2", LocalJobState.UPLOADING))
+        merged.accepted("share-2", result("complete"))
+        assertEquals(0, transactions)
+        merged.recordListed(partial, import = true)
+        merged.accepted("share-1", partial)
+        assertEquals(1, transactions)
+        assertEquals(listOf("share-1", "share-2"), dao.all().map { it.localId }.sorted())
+    }
+
+    @Test
+    fun aListedIdIsNotImportedWhileAShareWaitsForItsAnswer() = runBlocking {
+        val partial = result("partial")
+        jobs.startShare(record("share-1", LocalJobState.LOCAL_PENDING))
+        assertTrue(jobs.hasUnacceptedShares())
+        jobs.recordListed(partial, import = !jobs.hasUnacceptedShares())
+        assertEquals(listOf("share-1"), dao.all().map { it.localId })
+        jobs.accepted("share-1", partial)
+        assertFalse(jobs.hasUnacceptedShares())
+        // A known id is still updated while another share is pending; nothing new is imported.
+        jobs.startShare(record("share-2", LocalJobState.LOCAL_PENDING))
+        clock.addAndGet(1_000)
+        jobs.recordListed(partial, import = false)
+        jobs.recordListed(result("complete"), import = false)
+        assertEquals(listOf("share-1", "share-2"), dao.all().map { it.localId })
+        assertEquals(clock.get(), dao.get("share-1")!!.syncedAt)
+    }
+
+    @Test
     fun everyTransitionFollowsTheStateTable() {
         val waiting = JobEvent.Accepted(ProcessingStatus.WAITING)
         val unknownAccept = JobEvent.Accepted(ProcessingStatus.UNKNOWN)
@@ -221,5 +280,20 @@ class LocalStoreTest {
             assertTrue(it, "\"tableName\": \"$it\"" in text)
         }
         assertTrue("\"version\": 1" in text)
+    }
+
+    @Test
+    fun versionTwoAddsTheRetryColumnsWithAMigrationMatchingTheExport() {
+        val schema = File("schemas/app.ovrly.data.OvrlyDatabase/2.json")
+        assertTrue("run a build to export the Room schema, then commit it", schema.isFile)
+        val text = schema.readText()
+        assertTrue("\"version\": 2" in text)
+        assertEquals(1, OvrlyDatabase.MIGRATION_1_2.startVersion)
+        assertEquals(2, OvrlyDatabase.MIGRATION_1_2.endVersion)
+        listOf("retry_key", "retried_as").forEach { column ->
+            assertTrue(column, "\"columnName\": \"$column\"" in text)
+            val statement = "ALTER TABLE investigations ADD COLUMN $column TEXT"
+            assertTrue(column, statement in OvrlyDatabase.MIGRATION_1_2_SQL)
+        }
     }
 }

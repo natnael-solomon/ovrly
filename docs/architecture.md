@@ -16,7 +16,7 @@
 
 Android owns permissions and media access. Hiding controls does not stop capture. Stopping capture releases media access; research cancellation is a separate, future action.
 
-`AppShell` provides Your space, Explore and Settings. The activity owns the selected tab; external capture intents open Settings; shares open the separate ShareIntakeActivity sheet over the source app. Capture and voice keep their existing state stores. Capture keeps an active-session shortcut across tabs; voice shows its state on the header orb. Sample saves use restored UI state, not capture storage or a provider. Tab and report scroll positions have separate saveable scopes.
+`AppShell` provides Your space, Explore and Settings ([RFC-D22](decisions/RFC-D22-companion-navigation.md)). Your space shows the Inbox and Library of real checks from the Room store, then labeled saved samples; Explore is the sample gallery. The activity owns the selected tab; external capture intents open Settings; shares open the separate ShareIntakeActivity sheet over the source app. Capture and voice keep their existing state stores. Capture keeps an active-session shortcut across tabs; voice shows its state on the header orb. Sample saves use restored UI state, not capture storage or a provider. Tab and report scroll positions have separate saveable scopes.
 
 See the [Android README](../android/README.md) for builds and [UI maintenance](android-ui.md) for appearance, artwork and splash behavior.
 

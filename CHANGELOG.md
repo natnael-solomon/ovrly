@@ -13,6 +13,20 @@
   `api.local.properties` keeps the labelled in-memory test server for offline demonstrations.
   The live panel labels stub report versions (`fixture`) as "Fixture / not live".
 
+- Android Inbox and Report screens (AN-08, #34): Your space now shows an Inbox of
+  checks with stage and age (never a queue position), Cancel with confirmation,
+  Try again and Continue checking, offline and update-needed notes, and a Library
+  of finished reports; samples stay labeled ([RFC-D22](docs/decisions/RFC-D22-companion-navigation.md)).
+  Reports separate work state from coverage, show the version with a picker and
+  per-claim changes, the original wording, normalized meaning, interval with its
+  timebase and modality of each claim, and evidence cards with relation and
+  rationale, access level, retraction warnings and the passage read, contradicting
+  evidence first. Users can correct a claim's meaning (a new version marked
+  "Corrected by you"; earlier versions kept) and, for a captured clip, confirm a
+  later shared video as its full video before an expansion names it. "Try again"
+  reuses one stored key per check so a lost answer cannot create a duplicate
+  check (Room schema version 2). Unknown contract values read neutrally.
+
 - On-device screen text for live capture (AN-06, #100): frames are probed once a second and
   kept on a visible change or a 5-second heartbeat, at most 20 per minute; likely text regions
   are cropped and read on the phone by bundled ML Kit Text Recognition Latin 16.0.1. Chunks now
