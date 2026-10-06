@@ -2,6 +2,7 @@ package app.ovrly.share
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.AssetFileDescriptor
 import android.media.MediaMetadataRetriever
 import android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
 import android.media.MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO
@@ -161,15 +162,7 @@ internal class ShareInputReader(private val context: Context, private val limits
         val resolver = context.contentResolver
         val facts = resolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
             MediaMetadataRetriever().use { retriever ->
-                if (descriptor.declaredLength < 0) {
-                    retriever.setDataSource(descriptor.fileDescriptor)
-                } else {
-                    retriever.setDataSource(
-                        descriptor.fileDescriptor,
-                        descriptor.startOffset,
-                        descriptor.declaredLength
-                    )
-                }
+                retriever.open(descriptor)
                 VideoFacts(
                     providerType = resolver.getType(uri),
                     containerType = retriever.metadata(METADATA_KEY_MIMETYPE),
@@ -189,6 +182,32 @@ internal class ShareInputReader(private val context: Context, private val limits
                     resolver.openInputStream(uri) ?: throw FileNotFoundException("No stream")
                 }
             )
+        }
+    }
+
+    /**
+     * The platform reports a container it cannot parse only as a bare [RuntimeException];
+     * it becomes [IllegalArgumentException], which [readVideo] maps to `NOT_VIDEO`.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun MediaMetadataRetriever.open(descriptor: AssetFileDescriptor) {
+        try {
+            if (descriptor.declaredLength < 0) {
+                setDataSource(descriptor.fileDescriptor)
+            } else {
+                setDataSource(
+                    descriptor.fileDescriptor,
+                    descriptor.startOffset,
+                    descriptor.declaredLength
+                )
+            }
+        } catch (error: RuntimeException) {
+            // Typed failures keep their meaning; only the bare platform exception is mapped.
+            throw if (error.javaClass == RuntimeException::class.java) {
+                IllegalArgumentException("Not a readable media container", error)
+            } else {
+                error
+            }
         }
     }
 

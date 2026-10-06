@@ -1,0 +1,65 @@
+{
+  "synthetic": true,
+  "description": "Synthetic Scholarxiv Papers advanced-search reply shaped per the public docs (POST /api/v1/papers/search). No real paper is described; every identifier is invented. Not a recording of a live call.",
+  "data": [
+    {
+      "id": "http://arxiv.org/abs/2601.00001v2",
+      "extractedID": "2601.00001v2",
+      "title": "Electric bus adoption in city fleets: a synthetic survey",
+      "summary": "We survey city bus fleets and find that nearly two thirds of the buses in the surveyed city are electric, with the remainder diesel hybrids.",
+      "authors": ["A. Synthetic", "B. Example"],
+      "published": "2026-01-05T00:00:00Z",
+      "primaryCategory": "physics.soc-ph",
+      "category": ["physics.soc-ph"],
+      "pdfLink": "https://arxiv.org/pdf/2601.00001v2"
+    },
+    {
+      "id": "http://arxiv.org/abs/2601.00001v1",
+      "extractedID": "2601.00001v1",
+      "title": "Electric bus adoption in city fleets: a synthetic survey",
+      "summary": "An earlier version of the synthetic survey of electric buses in city fleets.",
+      "authors": ["A. Synthetic"],
+      "published": "2025-12-20T00:00:00Z",
+      "primaryCategory": "physics.soc-ph",
+      "category": ["physics.soc-ph"],
+      "pdfLink": "https://arxiv.org/pdf/2601.00001v1"
+    },
+    {
+      "id": "http://arxiv.org/abs/2601.00002v1",
+      "extractedID": "2601.00002v1",
+      "title": "Diesel buses remain in service: fleet records 2020 to 2025",
+      "summary": "Fleet records show diesel buses still operating in the city fleet through 2025, contradicting reports of a fully electric fleet.",
+      "authors": ["C. Placeholder"],
+      "published": "2026-02-10T00:00:00Z",
+      "primaryCategory": "physics.soc-ph",
+      "category": ["physics.soc-ph"],
+      "pdfLink": "https://arxiv.org/pdf/2601.00002v1",
+      "doi": "10.5555/synthetic.0002",
+      "journalRef": "Journal of Synthetic Transport 12 (2026) 1-9"
+    },
+    {
+      "id": "http://arxiv.org/abs/2601.00003v1",
+      "extractedID": "2601.00003v1",
+      "title": "A retracted synthetic study of electric bus counts",
+      "summary": "This synthetic study claimed every city bus was electric by 2024; it was later retracted.",
+      "authors": ["D. Retracted"],
+      "published": "2025-06-01T00:00:00Z",
+      "primaryCategory": "physics.soc-ph",
+      "category": ["physics.soc-ph"],
+      "pdfLink": "https://arxiv.org/pdf/2601.00003v1",
+      "doi": "10.5555/synthetic.0003"
+    },
+    {
+      "id": "http://arxiv.org/abs/2601.00004v1",
+      "extractedID": "2601.00004v1",
+      "title": "Unrelated synthetic note on protein folding",
+      "summary": "A synthetic note on protein folding kinetics with no bearing on transport.",
+      "authors": ["E. Offtopic"],
+      "published": "2026-03-01T00:00:00Z",
+      "primaryCategory": "q-bio.BM",
+      "category": ["q-bio.BM"],
+      "pdfLink": "https://arxiv.org/pdf/2601.00004v1"
+    }
+  ],
+  "pagination": { "page": 0, "limit": 10, "hasMore": false, "nextPage": null }
+}

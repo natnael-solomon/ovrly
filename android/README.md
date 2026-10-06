@@ -377,6 +377,62 @@ Not yet wired: a `LiveResultsFetcher` over `CaptureSessionApi.status` and
 session opens. The production `ServerCaptureSessionApi` still answers
 `CAPTURE_API_NOT_CONFIGURED`, so live polling has nothing to read yet.
 
+## Instrumented tests and coverage
+
+REPO-05 part 1 (#76) adds `app/src/androidTest` with AndroidX Test (runner, core,
+rules, ext-junit), Espresso and the Compose test rule (`ui-test-junit4`, with
+`ui-test-manifest` as a debug dependency). The **Android instrumented checks**
+workflow runs them on emulators; do not run an emulator on a shared low-memory
+machine, but compile the tests locally with:
+
+```bash
+sh gradlew --no-daemon --console=plain :app:assembleDebugAndroidTest
+```
+
+| Test | What it proves |
+| --- | --- |
+| `ShareInputReaderTest` | `ShareInputReader` against a provider in another app with real `content://` grants: a granted video is accepted and streamed (size from `OpenableColumns.SIZE`, from the descriptor length, or unknown and capped while staging), an ungranted or revoked URI is private, a revoked grant stops the copy, a deleted file is expired, oversize and overlong videos, a provider type that is not video, a sniffed container winning over the provider, an audio-only file and a text file called `video/mp4`, a non-`content` URI and the share intent shapes. |
+| `SharePolicyDeviceTest` | Link and video rules on ART's `java.net.URI`. |
+| `ShareIntakeSheetTest` | The sheet's oversize and malformed rejections, the file alternative and Close. |
+| `CaptureServiceTest` | `CaptureService` with a real MediaProjection: start and Stop, Stop with a continuation choice (the first choice wins), the 3-minute limit, playback-audio permission denied, consent not granted, and the projection stopped by the system mid-capture. After every stop the playback recorder, notification and service are gone, the platform lists no projection for the app (`dumpsys media_projection`, checked positive while recording) and every capture display, in any state, is removed, which only the app's `VirtualDisplay.release()` can do. One accommodation: on Android 10 (API 29) the platform keeps the display of a projection it stopped until the app's process dies, and `release()` can no longer remove it, so for that one path the display check runs only from API 30 and the test asserts the stop reported no cleanup issue; counts are taken against the value before start, so the kept display does not affect later tests. |
+| `CaptureUploadsTest` | The Wi-Fi-only preference is saved and reschedules the upload chain on unmetered networks, and `CaptureUploadWorker` under WorkManager sends every chunk to the in-memory server and closes it with either choice. |
+| `OverlayServiceTest` | `OverlayService` show, hide, repeated show and demo/fixture/reset modes leave exactly one window, then none; a refused or mid-display revoked overlay permission leaves none; `OverlayWindow` shows and closes one window. Windows are counted from `dumpsys window`. |
+
+The fixture provider (`ShareFixtureProvider`) is declared in the androidTest
+manifest, so it runs in the test package's own process and uid; it is plain Java
+because that process does not load the app's Kotlin or AndroidX classes. The
+shell grants and revokes its URIs for `app.ovrly`. Videos are generated on the
+emulator with `MediaCodec`; no media is committed. Screen-capture consent comes
+from `appops set app.ovrly PROJECT_MEDIA allow`, which makes the system consent
+screen answer without a dialog, and the overlay permission from the
+`SYSTEM_ALERT_WINDOW` app op. Revoking `RECORD_AUDIO` kills the app process, so
+the mid-capture audio revocation path cannot run in-process; the
+projection-stopped case covers revocation during capture instead.
+
+Coverage is off by default. `-Povrly.coverage=true` turns on JaCoCo 0.8.14 for
+unit and instrumented tests of the debug variant and registers
+`:app:jacocoDebugReport`, which reads whatever execution data exists (unit
+tests, connected runs and retried attempts) without running tests. Excluded,
+and listed in `app/build.gradle.kts`: generated code (`R`, `BuildConfig`,
+`Manifest`, Room `_Impl`, serializers, `ComposableSingletons`), the Compose
+preview files (`GalleryPreviews`, `AppearancePreviews`, `LiveResultsPreviews`)
+and the gallery fixtures. Previews inside production files (`GlassOverlay.kt`,
+`DemoOverlayPanel.kt`) stay counted. The API 34 job enforces at least 90% of
+lines in `capture/`, `share/` and `contract/`, and at most a one-point drop in
+overall lines against the last `main` measurement; API 29 is reported only.
+
+Tests run under Android Test Orchestrator, so each test has its own process and a
+crash fails only that test. `.github/scripts/android_instrumented.py` also
+requires every `@Test` declared in `src/androidTest` to appear in the first
+attempt's results; missing or undeclared tests fail the job without a retry, so
+an aborted run cannot pass on a retry of the one test it reported.
+
+Flake policy: `.github/scripts/android_instrumented.py` retries each failed test
+once, in its own run, in the same job and names flakes in the job summary and as warnings. A
+test that flakes twice in 48 hours, or twice on one PR, is quarantined with
+`@Ignore` and an issue on the same day. Never re-run a job to get a green
+result.
+
 ## Gallery and demo
 
 Open `app/src/main/java/app/ovrly/ui/GalleryPreviews.kt` in Studio's Design or Split view. `GlassOverlay.kt` contains the live-control previews. Gallery selection does not change the live overlay.
