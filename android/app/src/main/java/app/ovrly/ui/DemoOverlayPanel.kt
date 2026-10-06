@@ -142,13 +142,16 @@ internal fun OverlayPanelScaffold(
     val p = LocalOvrlyPalette.current
     val headerPadding = with(LocalDensity.current) { 12.dp.roundToPx() }
     val fixedHeight = spec.fixedHeight
-    val size = if (fixedHeight) Modifier.height(spec.height) else Modifier.heightIn(max = spec.height)
+    val size =
+        if (fixedHeight) Modifier.height(spec.height) else Modifier.heightIn(max = spec.height)
     CompositionLocalProvider(LocalContentColor provides p.ink) {
         Column(
             modifier.width(spec.width).then(size).mockGlass(spec.higherOpacity).padding(12.dp)
         ) {
             Row(
-                Modifier.fillMaxWidth().onSizeChanged { spec.onHeaderHeight(it.height + headerPadding) },
+                Modifier.fillMaxWidth().onSizeChanged {
+                    spec.onHeaderHeight(it.height + headerPadding)
+                },
                 verticalAlignment = Alignment.CenterVertically,
                 content = header
             )
