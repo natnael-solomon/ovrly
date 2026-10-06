@@ -371,10 +371,12 @@ forms from the panel state, the live results and whether a capture is running:
 | Saved | After Stop with "Keep only available results" | "Saved to Inbox · N claims" for 3 s, then the overlay closes. |
 
 The first claims of a capture expand the panel once, unless the user already expanded or
-collapsed it or the Stop choice is open; that automatic expand collapses after 8 s without
-a touch, and never while TalkBack is on. Later claims and updates only change the count and
-light the dot, which pulses twice. The expanded panel fades to 55% after 4 s without a touch
-or a new result, and returns on the next touch or result; there is no fade under TalkBack.
+collapsed it or the Stop choice is open. Any expanded panel, opened automatically or by a tap,
+collapses back to the pill (or bubble) after 8 s without a touch or a new result; never while
+the Stop choice is open or TalkBack is on. Later claims and updates only change the count and
+light the dot, which pulses twice. The expanded panel never fades; the pill and bubble fade to
+70% after 4 s without a touch or a new result, and return on the next touch or result; there
+is no fade under TalkBack.
 Moving between forms takes about 250 ms, growing from and shrinking into the pill's corner,
 and is instant when the phone's animations are off. Collapse puts the pill back at the
 panel's top. When research that continued

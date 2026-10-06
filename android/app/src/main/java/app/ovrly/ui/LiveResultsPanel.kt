@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -33,7 +32,11 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.ovrly.overlay.LiveClaim
@@ -105,11 +108,18 @@ private fun RowScope.LiveHeader(
         Text(
             liveStatusLabel(model.results),
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            style = MaterialTheme.typography.labelMedium,
-            color = p.muted
+            style = MaterialTheme.typography.labelSmall,
+            color = p.muted,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
         )
         model.sourceLabel?.let {
-            Text(it.uppercase(), style = MaterialTheme.typography.labelMedium, color = p.error)
+            Text(
+                it.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = p.error,
+                maxLines = 1
+            )
         }
     }
     if (examining != null) {
@@ -141,14 +151,19 @@ internal fun ColumnScope.LiveResultsBody(model: LiveOverlayModel, actions: LiveP
 @Composable
 private fun CapturedSegment(coverage: LiveCoverage, modifier: Modifier = Modifier) {
     val p = LocalOvrlyPalette.current
-    Column(modifier.semantics(mergeDescendants = true) {}) {
-        Text(CAPTURED_SEGMENT_LABEL, style = MaterialTheme.typography.labelLarge)
-        Text(
-            capturedCoverageLabel(coverage),
-            style = MaterialTheme.typography.bodySmall,
-            color = p.muted
-        )
-    }
+    // One line: what was analyzed and how much of the video that is.
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = p.ink, fontWeight = FontWeight.Medium)) {
+                append(CAPTURED_SEGMENT_LABEL)
+            }
+            append(" · ")
+            append(capturedCoverageLabel(coverage))
+        },
+        modifier = modifier,
+        style = MaterialTheme.typography.labelMedium,
+        color = p.muted
+    )
 }
 
 @Composable
@@ -161,8 +176,8 @@ private fun UpdateNotice(
     Row(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(p.accent.copy(alpha = if (p.dark) 0.22f else 0.42f))
+            .clip(RoundedCornerShape(14.dp))
+            .background(p.accent.copy(alpha = if (p.dark) 0.18f else 0.36f))
             .semantics { liveRegion = LiveRegionMode.Polite },
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -175,13 +190,13 @@ private fun UpdateNotice(
                     onClickLabel = "Open claim detail",
                     onClick = { actions.onOpenClaim(claim.id) }
                 )
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
-            Text(UPDATE_NOTICE_LABEL, style = MaterialTheme.typography.labelLarge)
+            Text(UPDATE_NOTICE_LABEL, style = MaterialTheme.typography.labelMedium)
             Text(
                 claim.text ?: PENDING_CLAIM_TEXT,
                 style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
@@ -199,7 +214,7 @@ private fun ClaimList(
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (results.claims.isEmpty()) {
             Text(
                 emptyClaimsLabel(results.extraction, results.phase),
@@ -232,18 +247,21 @@ private fun ClaimRow(
                 contentDescription = claimDescription(claim, phase)
                 stateDescription = state
             }
-            .padding(horizontal = 6.dp, vertical = 8.dp),
+            .padding(horizontal = 4.dp, vertical = 6.dp),
         verticalAlignment = Alignment.Top
     ) {
-        Text(
-            claim.startMs?.let(::clockLabel) ?: "--:--",
-            modifier = Modifier.widthIn(min = 44.dp).padding(end = 4.dp),
-            softWrap = false,
-            style = MaterialTheme.typography.labelMedium,
-            color = p.muted
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            StateChip(claim.state, state)
+        // The time sits on the state line, so the claim text gets the panel's full width.
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    claim.startMs?.let(::clockLabel) ?: "--:--",
+                    softWrap = false,
+                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                    color = p.muted
+                )
+                Spacer(Modifier.width(8.dp))
+                StateChip(claim.state, state)
+            }
             Text(
                 claim.text ?: PENDING_CLAIM_TEXT,
                 style = MaterialTheme.typography.bodyMedium,

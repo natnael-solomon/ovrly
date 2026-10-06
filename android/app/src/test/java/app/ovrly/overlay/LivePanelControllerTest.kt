@@ -101,14 +101,28 @@ class LivePanelControllerTest {
         assertTrue("a new capture session expands once", next.state.value.expanded)
     }
 
-    @Test fun aTouchKeepsTheAutomaticExpandOpen() {
+    @Test fun aTouchRestartsTheCollapseTimer() {
         val steps = polls()
         controller.onResults(steps[0])
         controller.onResults(steps[1])
+        val before = controller.state.value.activity
         controller.touched()
-        assertFalse(controller.state.value.autoCollapsePending)
+        assertTrue(controller.state.value.autoCollapsePending)
+        assertTrue(controller.state.value.activity > before)
+    }
+
+    @Test fun anyOpenPanelCollapsesWhenIdleButNotWhileStopIsAsked() {
+        controller.setExpanded(true)
+        assertTrue("a tap-opened panel collapses too", controller.state.value.autoCollapsePending)
+        controller.setStopPrompt(true)
         controller.autoCollapse()
-        assertTrue(controller.state.value.expanded)
+        assertTrue("the Stop choice keeps it open", controller.state.value.expanded)
+        controller.setStopPrompt(false)
+        assertTrue("Keep examining arms it again", controller.state.value.autoCollapsePending)
+        controller.autoCollapse()
+        assertFalse(controller.state.value.expanded)
+        assertFalse(controller.state.value.autoCollapsePending)
+        assertTrue(choices.isEmpty())
     }
 
     @Test fun theAutomaticExpandIsSkippedAfterTheUserChoseOrWhileStopIsAsked() {

@@ -6,11 +6,12 @@
 
 - Live overlay forms (#31): the overlay now starts as a small "Examining m:ss" pill with the
   ovrly mark, the claim count, an update dot and Stop, and grows into the large panel only
-  when tapped, or once automatically when a capture's first claims arrive (it collapses after
-  8 s untouched, never under TalkBack). The expanded panel uses the demo panel's frame and
+  when tapped, or once automatically when a capture's first claims arrive. Any expanded panel
+  collapses back after 8 s without a touch or a new result (never under TalkBack or while the
+  Stop choice is open). The expanded panel uses the demo panel's frame and
   style through a shared scaffold, opens where the pill is, follows Light and Dark, grows with
-  its content up to half the screen, keeps the right 72 dp free for short-video apps'
-  buttons and fades to 55% after 4 s without a touch. After Stop with "Continue research" the overlay becomes a small
+  its content up to half the screen and keeps the right 72 dp free for short-video apps'
+  buttons; the pill and bubble fade to 70% after 4 s without a touch. After Stop with "Continue research" the overlay becomes a small
   draggable bubble with one claim-count badge that snaps to the edge and is dismissed by a
   long-press drag onto a target (or a TalkBack action); "Keep only available results" shows "Saved to Inbox" for 3 s, then
   closes. A silent "Results ready" notification opens the capture's report when research that

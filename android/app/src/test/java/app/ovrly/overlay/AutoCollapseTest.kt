@@ -16,19 +16,16 @@ class AutoCollapseTest {
     }
 
     /** Auto-expands [controller], runs the timer with a short delay, then waits it out. */
-    private fun autoExpandAndWait(
-        controller: LivePanelController,
-        touchExploration: Boolean,
-        touch: Boolean = false
-    ) = runBlocking {
-        val timer = launch { runAutoCollapse(controller, { touchExploration }, delayMs = DELAY) }
-        controller.onResults(steps[0])
-        controller.onResults(steps[1])
-        assertTrue(controller.state.value.expanded)
-        if (touch) controller.touched()
-        delay(DELAY * 4)
-        timer.cancel()
-    }
+    private fun autoExpandAndWait(controller: LivePanelController, touchExploration: Boolean) =
+        runBlocking {
+            val timer =
+                launch { runAutoCollapse(controller, { touchExploration }, delayMs = DELAY) }
+            controller.onResults(steps[0])
+            controller.onResults(steps[1])
+            assertTrue(controller.state.value.expanded)
+            delay(DELAY * 4)
+            timer.cancel()
+        }
 
     @Test fun theAutomaticExpandCollapsesWhenUntouched() {
         val controller = LivePanelController {}
@@ -42,13 +39,21 @@ class AutoCollapseTest {
         assertTrue(controller.state.value.expanded)
     }
 
-    @Test fun aTouchStopsTheTimer() {
+    @Test fun aTouchRestartsTheTimerAndAUserOpenedPanelCollapsesToo() = runBlocking {
         val controller = LivePanelController {}
-        autoExpandAndWait(controller, touchExploration = false, touch = true)
-        assertTrue(controller.state.value.expanded)
+        val timer = launch { runAutoCollapse(controller, { false }, delayMs = SLOW) }
+        controller.setExpanded(true)
+        delay(SLOW * 2 / 3)
+        controller.touched()
+        delay(SLOW * 2 / 3)
+        assertTrue("the touch restarted the timer", controller.state.value.expanded)
+        delay(SLOW * 2)
+        assertFalse(controller.state.value.expanded)
+        timer.cancel()
     }
 
     private companion object {
         const val DELAY = 50L
+        const val SLOW = 300L
     }
 }

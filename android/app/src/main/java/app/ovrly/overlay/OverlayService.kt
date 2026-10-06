@@ -409,9 +409,9 @@ class OverlayService :
     }
 
     /**
-     * The live overlay with its idle fade: the expanded panel fades to [FADED_ALPHA] after
+     * The live overlay with its idle fade: the pill or bubble fades to [FADED_ALPHA] after
      * [IDLE_FADE_MS] without a touch or a new result, unless TalkBack is on or the phone's
-     * animations are off.
+     * animations are off. The expanded panel never fades; it collapses to the pill first.
      */
     @Composable
     private fun LiveWindow(shown: LiveOverlayForm, model: LiveOverlayModel, frame: LivePanelFrame) {
@@ -419,8 +419,8 @@ class OverlayService :
         val reader by touchExploration.collectAsState()
         val animate = ValueAnimator.areAnimatorsEnabled()
         var faded by remember { mutableStateOf(false) }
-        val fadeAllowed = shown == LiveOverlayForm.EXPANDED && animate && !reader &&
-            !model.panel.stopPrompt
+        val compact = shown == LiveOverlayForm.PILL || shown == LiveOverlayForm.BUBBLE
+        val fadeAllowed = compact && animate && !reader && !model.panel.stopPrompt
         LaunchedEffect(shown, touchCount, model.results.claims, fadeAllowed) {
             faded = false
             if (fadeAllowed) {
@@ -808,7 +808,7 @@ class OverlayService :
         internal const val IDLE_FADE_MS = 4_000L
         internal const val SAVED_MS = 3_000L
         private const val FADE_MS = 300
-        private const val FADED_ALPHA = 0.55f
+        private const val FADED_ALPHA = 0.7f
         private const val MS_PER_SECOND = 1000
         private const val DEMO_NOTIFICATION_TEXT =
             "No recording, research or microphone. Tap Close demo to dismiss."

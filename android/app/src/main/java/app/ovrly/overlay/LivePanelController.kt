@@ -47,8 +47,13 @@ internal data class LivePanelState(
     val detailClaimId: String? = null,
     /** This capture's one automatic expand has happened or is no longer wanted. */
     val autoExpandSpent: Boolean = false,
-    /** The automatic expand collapses on its own unless the user touches the panel first. */
+    /**
+     * The expanded panel collapses on its own after [AUTO_COLLAPSE_MS] untouched. Off while
+     * collapsed and while the Stop choice is open.
+     */
     val autoCollapsePending: Boolean = false,
+    /** Counts touches and new results on the expanded panel; each restarts its collapse timer. */
+    val activity: Int = 0,
     /** Something changed while collapsed: the update dot on the pill or bubble. */
     val unseen: Boolean = false
 )
@@ -153,6 +158,7 @@ internal class LivePanelController(
         val fresh = newAssessmentUpdates(last, results).map { it.id }
         last = results
         val grew = results.claims.size > before
+        val changed = grew || fresh.isNotEmpty()
         mutable.update {
             val notices = if (fresh.isEmpty()) it.notices else (it.notices - fresh.toSet()) + fresh
             val firstClaims = before == 0 && grew && results.phase == LiveSessionPhase.CAPTURING
@@ -168,17 +174,20 @@ internal class LivePanelController(
                     unseen = false
                 )
 
-                !it.expanded && (grew || fresh.isNotEmpty()) ->
-                    it.copy(notices = notices, unseen = true)
+                !changed -> it.copy(notices = notices)
 
-                else -> it.copy(notices = notices)
+                // A change restarts the open panel's collapse timer, or lights the dot.
+                it.expanded -> it.copy(notices = notices, activity = it.activity + 1)
+
+                else -> it.copy(notices = notices, unseen = true)
             }
         }
     }
 
     /**
      * The user opened or closed the panel; either way the automatic expand is no longer
-     * wanted. Closing returns to the pill or bubble and never touches capture.
+     * wanted. Closing returns to the pill or bubble and never touches capture. An open panel
+     * collapses again when left untouched.
      */
     fun setExpanded(expanded: Boolean) = mutable.update {
         memory.spend(it, session).copy(
@@ -186,18 +195,19 @@ internal class LivePanelController(
             unseen = if (expanded) false else it.unseen,
             detailClaimId = if (expanded) it.detailClaimId else null,
             autoExpandSpent = true,
-            autoCollapsePending = false
+            autoCollapsePending = expanded && !it.stopPrompt,
+            activity = it.activity + 1
         )
     }
 
-    /** Any touch on the panel keeps an automatic expand open. */
+    /** Any touch on the expanded panel restarts its collapse timer. */
     fun touched() = mutable.update {
-        if (it.autoCollapsePending) it.copy(autoCollapsePending = false) else it
+        if (it.expanded) it.copy(activity = it.activity + 1) else it
     }
 
-    /** The automatic expand's timer ran out without a touch. */
+    /** The expanded panel's timer ran out without a touch or a new result. */
     fun autoCollapse() = mutable.update {
-        if (it.autoCollapsePending) {
+        if (it.autoCollapsePending && it.expanded && !it.stopPrompt) {
             it.copy(expanded = false, detailClaimId = null, autoCollapsePending = false)
         } else {
             it
@@ -207,8 +217,14 @@ internal class LivePanelController(
     /** Opens the Stop choice (only while no choice was sent yet) or closes it ("Keep examining"). */
     fun setStopPrompt(open: Boolean) = mutable.update {
         when {
-            !open -> it.copy(stopPrompt = false)
+            !open -> it.copy(
+                stopPrompt = false,
+                autoCollapsePending = it.expanded,
+                activity = it.activity + 1
+            )
+
             it.stopChoice == null -> it.copy(stopPrompt = true, autoCollapsePending = false)
+
             else -> it
         }
     }
@@ -256,14 +272,15 @@ internal class LivePanelController(
     /** Opens one claim's detail in the expanded panel, or closes it with null. */
     fun openClaim(claimId: String?) = mutable.update {
         if (claimId == null) {
-            it.copy(detailClaimId = null)
+            it.copy(detailClaimId = null, activity = it.activity + 1)
         } else {
             it.copy(
                 expanded = true,
                 detailClaimId = claimId,
                 notices = it.notices - claimId,
                 unseen = false,
-                autoCollapsePending = false
+                autoCollapsePending = !it.stopPrompt,
+                activity = it.activity + 1
             )
         }
     }
@@ -271,21 +288,24 @@ internal class LivePanelController(
 }
 
 /**
- * Runs the automatic expand's collapse timer for as long as the caller's scope lives: once an
- * automatic expand is pending, the panel collapses after [delayMs] unless a touch cancelled it
- * first, and never while [touchExploration] (TalkBack) is on.
+ * Runs the expanded panel's collapse timer for as long as the caller's scope lives: the panel
+ * collapses to the pill (or bubble) after [delayMs] without a touch or a new result, never
+ * while the Stop choice is open and never while [touchExploration] (TalkBack) is on.
  */
 internal suspend fun runAutoCollapse(
     controller: LivePanelController,
     touchExploration: () -> Boolean,
     delayMs: Long = AUTO_COLLAPSE_MS
 ) {
-    controller.state.map { it.autoCollapsePending }.distinctUntilChanged().collectLatest {
-        if (it) {
-            delay(delayMs)
-            if (!touchExploration()) controller.autoCollapse()
+    controller.state
+        .map { it.autoCollapsePending to it.activity }
+        .distinctUntilChanged()
+        .collectLatest {
+            if (it.first) {
+                delay(delayMs)
+                if (!touchExploration()) controller.autoCollapse()
+            }
         }
-    }
 }
 
 internal const val AUTO_COLLAPSE_MS = 8_000L
