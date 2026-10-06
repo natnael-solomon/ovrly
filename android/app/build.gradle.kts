@@ -55,6 +55,12 @@ check(apiBaseUrl.startsWith("http://") || apiBaseUrl.startsWith("https://")) {
 val uploadMaxBytes: Long = apiConfig.getProperty("uploadMaxBytes", "268435456").trim()
     .toLongOrNull()?.takeIf { it > 0 }
     ?: error("api.local.properties uploadMaxBytes must be a positive integer.")
+// Live capture uploads go to the server; captureApi=memory selects the labelled in-memory
+// test server for offline demonstrations (AN-04, #26).
+val captureApi: String = apiConfig.getProperty("captureApi", "server").trim()
+check(captureApi == "server" || captureApi == "memory") {
+    "api.local.properties captureApi must be server or memory."
+}
 
 // CI passes -Povrly.versionCode=<code> from the release ledger; local builds keep 1.
 // Google Play accepts 1..2100000000 inclusive, so anything else is a configuration error.
@@ -87,6 +93,7 @@ android {
         )
         buildConfigField("String", "OVRLY_API_BASE_URL", quoted(apiBaseUrl))
         buildConfigField("long", "OVRLY_UPLOAD_MAX_BYTES", "${uploadMaxBytes}L")
+        buildConfigField("String", "OVRLY_CAPTURE_API", quoted(captureApi))
     }
     buildFeatures {
         compose = true

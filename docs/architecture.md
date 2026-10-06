@@ -110,7 +110,7 @@ stored bytes before close; they do not yet transcribe or extract claims.
 Session row locks serialize byte commits, Stop and retention, while queue
 fencing prevents cancelled/deleted work from publishing. See the
 [capture API](../backend/README.md#incremental-capture-api) for transport,
-deadlines and replay semantics. Android packages and schedules chunk uploads through `CaptureSessionApi` (#26); the HTTP adapter waits for the AN-03 client.
+deadlines and replay semantics. Android packages chunks and uploads them while recording through `CaptureSessionApi` over the AN-03 client (`data/CaptureApi.kt`), and the live overlay polls the capture status and investigation (#26, #31).
 `CaptureApiCodec` handles the create/close bodies, multipart metadata and polling
 envelope; `CaptureCodec` retains the existing session/chunk parsers.
 

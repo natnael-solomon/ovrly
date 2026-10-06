@@ -85,11 +85,21 @@ internal class PollingLiveResultsSource(
 ) : LiveResultsSource {
     private val mutable = MutableStateFlow(LiveResults.NotConnected)
     override val results: StateFlow<LiveResults> = mutable.asStateFlow()
-    override val label: String? = null
+
+    /** Set before [results] changes, so a recomposition for new results reads the new label. */
+    @Volatile private var fixtureReport = false
+
+    /**
+     * `Fixture / not live` while the polled report is a development stub (`fixture` true,
+     * `OVRLY_STUB_REPORTS`), so synthetic claims are never shown as live research.
+     */
+    override val label: String? get() = if (fixtureReport) FixtureLiveResultsSource.LABEL else null
+
     private var job: Job? = null
 
     fun start(scope: CoroutineScope, sessionId: String) {
         stop()
+        fixtureReport = false
         mutable.value = LiveResults.NotConnected
         job = scope.launch { poll(sessionId) }
     }
@@ -111,6 +121,7 @@ internal class PollingLiveResultsSource(
             val keep = try {
                 val status = fetcher.captureStatus(sessionId)
                 val report = fetcher.investigation(status.session.investigationId).report
+                fixtureReport = report?.fixture == true
                 val next = reduceLiveResults(status, report, mutable.value)
                 failures = 0
                 if (!status.session.isOpen) closedPolls += 1

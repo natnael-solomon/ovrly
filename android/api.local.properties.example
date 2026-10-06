@@ -9,3 +9,6 @@
 baseUrl=http://10.0.2.2:8000/
 # Must not exceed the backend OVRLY_UPLOAD_MAX_BYTES (default 268435456, 256 MiB).
 uploadMaxBytes=268435456
+# Live capture uploads: server (default) or memory, the labelled in-memory test server
+# for offline demonstrations. Nothing leaves the device with memory.
+captureApi=server

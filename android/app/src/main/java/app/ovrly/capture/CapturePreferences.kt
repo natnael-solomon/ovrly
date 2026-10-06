@@ -26,7 +26,7 @@ object CapturePreferences {
             UploadProgress.of(
                 manifest,
                 ledger,
-                CaptureApis.current.isTestServer,
+                CaptureApis.isTestServer,
                 wifiOnly = wifiOnly
             )
         )

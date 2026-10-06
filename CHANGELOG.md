@@ -4,6 +4,15 @@
 
 ### Added
 
+- Live capture wiring (#31): capture chunks now go to the backend. `data/CaptureApi.kt`
+  sends `/v1/captures` create (with `Idempotency-Key`), multipart chunk `PUT`, close with
+  `continue_research` and status through the AN-03 API client and guest credential, and
+  `ServerCaptureSessionApi` maps its failures to retry or keep-on-device. The overlay's live
+  results panel polls the capture status and investigation once the server session exists,
+  and capture investigations are stored in the Room store like shares. `captureApi=memory` in
+  `api.local.properties` keeps the labelled in-memory test server for offline demonstrations.
+  The live panel labels stub report versions (`fixture`) as "Fixture / not live".
+
 - Report versions carry `fixture` (true only for development stub versions) in every
   report read, including the `report` of an investigation, so clients can label stub
   claims as a fixture rather than live results. Additive to `0.2.0-draft`; the

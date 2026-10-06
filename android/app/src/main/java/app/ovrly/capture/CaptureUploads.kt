@@ -30,7 +30,9 @@ import org.json.JSONException
 internal class CaptureUploader(
     private val api: CaptureSessionApi,
     private val root: File,
-    private val wifiOnly: Boolean = false
+    private val wifiOnly: Boolean = false,
+    /** Called with the server session id once it is known, on every run. */
+    private val onSession: (String) -> Unit = {}
 ) {
     enum class Outcome {
         /** Nothing left to do now; a later chunk or the choice schedules another run. */
@@ -72,7 +74,10 @@ internal class CaptureUploader(
             api.open(manifest.sessionId, CaptureCreateRequest(CaptureLimits.CHUNK_MS.toInt()))
                 .id.also(ledger::saveRemoteSessionId)
         }
-        remote?.let { send(manifest, it, onProgress) }
+        remote?.let {
+            onSession(it)
+            send(manifest, it, onProgress)
+        }
         if (manifest.finished && choice == true) close(manifest, continueResearch = true)
     }
 
@@ -146,10 +151,10 @@ class CaptureUploadWorker(context: Context, params: WorkerParameters) :
     override suspend fun doWork(): Result {
         val session = inputData.getString(CaptureUploads.KEY_SESSION) ?: return Result.failure()
         val uploader = CaptureUploader(
-            CaptureApis.current,
+            CaptureApis.current(applicationContext),
             CaptureFiles.rootOf(applicationContext),
             CapturePreferences.wifiOnly(applicationContext)
-        )
+        ) { CaptureLive.connect(applicationContext, it) }
         return when (uploader.sync(session, CaptureStore::upload)) {
             CaptureUploader.Outcome.RETRY -> Result.retry()
             CaptureUploader.Outcome.DONE, CaptureUploader.Outcome.STOPPED -> Result.success()

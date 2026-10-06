@@ -203,7 +203,7 @@ destructive fallback.
 | --- | --- |
 | `investigations` (`InvestigationRecord`) | One row per share: local id, server id, `LocalJobState`, source, idempotency key, duplicate key, staged copy and declared upload (while local), last `processing_status`, the last investigation read as contract JSON, error code and timestamps. |
 | `report_versions` (`ReportCacheEntry`) | Immutable report versions as contract JSON, with `provisional`, `fetched_at` and a `stale` flag. |
-| `pending_chunks` (`PendingChunk`) | Captured chunks waiting for their capture session, keyed by the contract's `(session_id, seq)`; the chunk uploader is AN-07 (#26). |
+| `pending_chunks` (`PendingChunk`) | Reserved for captured chunks keyed by the contract's `(session_id, seq)`; unused, because the capture uploader (#26) tracks chunks in the capture folder. |
 
 `LocalJobState` is the app's own state, not `JobState` or `ProcessingStatus`:
 `local_pending -> uploading -> accepted -> queued / running / partial /
@@ -281,12 +281,22 @@ stored or sent.
 | Stop | Notification and companion Stop end recording and release media access as before; the continuation choice stays open (`CaptureState.needsContinuationChoice`). `CaptureControl.stop(context, continueResearch)` records the choice (the first choice wins) and stops recording if needed. The overlay may instead send the `STOP` intent with the Boolean extra `CaptureService.EXTRA_CONTINUE_RESEARCH` (`app.ovrly.extra.CONTINUE_RESEARCH`), which records the choice the same way; without the extra Stop leaves the choice open. With `true` the remaining chunks are sent and the session is closed with `continue_research: true` and the actual duration; with `false` nothing more is sent and the session is closed with `continue_research: false`. Without a choice the server session expires as abandoned after its upload window. |
 
 `CaptureSessionApi` covers the four `/v1/captures` operations with the #94
-contract models. Debug builds use `InMemoryCaptureSessionApi`, an in-process
-server with the BE-06 chunk rules, and label upload messages "to the in-memory
-test server"; nothing leaves the device. Release builds use
-`ServerCaptureSessionApi`, which fails with `CAPTURE_API_NOT_CONFIGURED`, so
-chunks stay "saved on device, not yet sent" until it delegates to the AN-03
-(#18) API client. Settings has "Upload on Wi-Fi only" (`CapturePreferences`);
+contract models. Every build uses `ServerCaptureSessionApi` over
+`data/CaptureApi.kt`, which sends them through the AN-03 `ApiClient` with the
+guest credential, `X-Request-Id` and cold-start handling: create with the local
+session id as `Idempotency-Key`, `PUT .../chunks/{seq}` as multipart with a
+`metadata` JSON part and a `content` file part, close with `continue_research`
+and the duration, and the status read. A network failure is retried with
+backoff; an error in the shared shape keeps its code and `retryable` flag; an
+unreadable response is a permanent `INCOMPATIBLE_RESPONSE`; with no usable base
+URL every call fails with `CAPTURE_API_NOT_CONFIGURED`. In each permanent case
+the chunks stay "saved on device, not yet sent". `captureApi=memory` in
+`api.local.properties` switches a local build to `InMemoryCaptureSessionApi`,
+an in-process server with the BE-06 chunk rules whose messages say "to the
+in-memory test server"; nothing leaves the device then. Unit tests use it too.
+Chunks stay tracked in the capture folder's own files, not in the
+`pending_chunks` table: the files are written together with each chunk, and a
+second record could disagree with them. Settings has "Upload on Wi-Fi only" (`CapturePreferences`);
 when on, the chain requires an unmetered network, the current chain is replaced
 with the new constraint, and pending chunks read "Waiting for Wi-Fi".
 
@@ -297,8 +307,9 @@ rolling deletion, local frame eviction, replacement refusal, restore after
 process death), `CaptureUploaderTest` (idempotent re-upload, offline retention,
 retry, close with both choices, no server session without chunks, a pending
 close blocking replacement, a stale worker unable to write into a new capture,
-unconfigured server) and `CaptureStopLogTest` (a normal stop is not logged as
-an interruption).
+unconfigured server), `CaptureApiTest` (MockWebServer: idempotent create, multipart chunk and duplicate
+retry, close body, status fixture, error mapping, an end-to-end upload and close)
+`CaptureLiveResultsFetcherTest` (status and investigation reads, Room storage of the read,`npolling that ends on a closed session and reports a lost connection) and`n`CaptureStopLogTest` (a normal stop is not logged as an interruption).
 
 ## Live overlay results
 
@@ -345,10 +356,15 @@ The fixture advances every five seconds through waiting, checking evidence, prov
 updated; its Stop choice closes the fixture session instead of calling capture. Previews
 for both themes and 200% text are in `ui/LiveResultsPreviews.kt`.
 
-Not yet wired: a `LiveResultsFetcher` over `CaptureSessionApi.status` and
-`OvrlyApi.getInvestigation`, and the `LiveResultsConnection.start` call when a capture
-session opens. The production `ServerCaptureSessionApi` still answers
-`CAPTURE_API_NOT_CONFIGURED`, so live polling has nothing to read yet.
+Live wiring (#26): `capture/CaptureLive.kt` implements `LiveResultsFetcher` as
+`CaptureLiveResultsFetcher`, reading `GET /v1/captures/{id}` through `CaptureSessionApi`
+and the investigation through `InvestigationRepository.refresh`, which also stores the
+capture's investigation and report versions in Room. `CaptureLive.connect` calls
+`LiveResultsConnection.start` when the uploader learns the server session id (again after
+a lost connection), and `CaptureLive.disconnect` calls `stop` when a new capture starts.
+Polling keeps running after Stop until the session settles or the poll policy's bounds end
+it, so results that arrive after close still reach the panel. With `captureApi=memory` the
+panel stays "not connected": the in-memory server has no investigations to read. When the polled report version is a development stub (`fixture` true, `OVRLY_STUB_REPORTS`), `PollingLiveResultsSource` labels the panel "Fixture / not live", as the fixture source does, so synthetic claims are never shown as live research.
 
 ## Gallery and demo
 
