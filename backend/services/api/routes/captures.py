@@ -19,6 +19,7 @@ from services.api.auth import CurrentPrincipal, load_owned
 from services.api.capture_schemas import (
     MAX_CAPTURE_MS,
     CaptureChunk,
+    CaptureClaimState,
     CaptureCloseRequest,
     CaptureCreateRequest,
     CaptureMetadata,
@@ -33,6 +34,7 @@ from services.captures import gaps, interval, manifest, session_response, stage_
 from services.jobs.models import jobs
 from services.jobs.queue import JobQueue
 from services.models import capture_chunks, capture_sessions, investigations, principals
+from services.pipeline.stub_reports import stub_claim_progress, sync_capture_stub
 
 router = APIRouter(tags=["captures"])
 
@@ -374,6 +376,9 @@ async def close_capture(
                     updated_at=now,
                 )
             )
+            if body.continue_research and settings(request).stub_reports:
+                # Development-only fixture report (OVRLY_STUB_REPORTS); off by default.
+                await sync_capture_stub(connection, capture_id)
         return session_response(session, chunks, await database_time(connection))
 
 
@@ -419,11 +424,23 @@ async def capture_status(
                     error=safe_error("PROCESSING_FAILED" if status == "failed" else None),
                 )
             )
+        claims: list[CaptureClaimState] = []
+        extraction: Literal["not_started", "partial", "complete"] = "not_started"
+        if settings(request).stub_reports:
+            # Development-only: progress of the fixture report (OVRLY_STUB_REPORTS).
+            stub = await stub_claim_progress(connection, capture_id, session.continue_research)
+            if stub is not None:
+                progress, extraction = stub
+                claims = [
+                    CaptureClaimState(claim_id=claim_id, processing_status=state, error=None)
+                    for claim_id, state in progress
+                ]
         return CaptureStatus(
             session=session_response(session, chunks, await database_time(connection)),
             continue_research=session.continue_research,
             expires_at=session.expires_at,
             manifest=manifest(session, chunks),
             work=work,
-            claims=[],
+            claims=claims,
+            claim_extraction_status=extraction,
         )

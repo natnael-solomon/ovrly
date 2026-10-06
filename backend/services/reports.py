@@ -67,7 +67,7 @@ async def publish_report_version(
         supersedes=None if latest is None else str(latest.id),
         created_at=datetime.now(UTC),
     )
-    report = build(identity)
+    report = build(identity).model_copy(update={"fixture": fixture})
     if (report.id, report.investigation_id, report.version, report.supersedes) != (
         str(identity.id),
         identity.investigation_id,
@@ -104,6 +104,11 @@ def contract_stage(row: Row[Any]) -> str:
     return "media_validation" if payload.get("reason") == "expansion" else "retrieval"
 
 
+def report_from_row(payload: dict[str, Any], fixture: bool) -> ReportVersion:
+    """A stored version; the ``fixture`` column wins over payloads stored before the field."""
+    return ReportVersion.model_validate({**payload, "fixture": fixture})
+
+
 def summarize_job(row: Row[Any]) -> JobSummary:
     """Client-visible columns of a ``jobs`` row; leases and fencing stay server-side."""
     return JobSummary(
@@ -134,13 +139,17 @@ async def latest_reports(
         .subquery()
     )
     rows = await connection.execute(
-        select(report_versions.c.investigation_id, report_versions.c.payload).join(
+        select(
+            report_versions.c.investigation_id,
+            report_versions.c.payload,
+            report_versions.c.fixture,
+        ).join(
             newest,
             (report_versions.c.investigation_id == newest.c.investigation_id)
             & (report_versions.c.version == newest.c.version),
         )
     )
-    return {row.investigation_id: ReportVersion.model_validate(row.payload) for row in rows}
+    return {row.investigation_id: report_from_row(row.payload, row.fixture) for row in rows}
 
 
 def parse_canonical_uuid(value: str) -> uuid.UUID | None:

@@ -6,6 +6,8 @@
 
 package app.ovrly.contract
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
@@ -187,8 +189,12 @@ internal data class Assessment(
  * One immutable published report version. Evidence and assessments refer to claims of the
  * same version, relations refer to evidence of the same version, each claim is assessed at
  * most once and every assessment carries this version. Empty [claims] means no assessable
- * factual claim was found, not that the video is accurate.
+ * factual claim was found, not that the video is accurate. [fixture] is true only for a
+ * development stub the server built from the contract fixtures (`OVRLY_STUB_REPORTS`); such
+ * a version is never a check of the media and must be labelled as a fixture, never as live
+ * results. An absent value reads as false; the encoder always writes it, as the server does.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 internal data class ReportVersion(
     val id: String,
@@ -203,7 +209,9 @@ internal data class ReportVersion(
     val supersedes: String?,
     val claims: List<Claim>,
     val evidence: List<Evidence>,
-    val assessments: List<Assessment>
+    val assessments: List<Assessment>,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    val fixture: Boolean = false
 ) {
     /** True when every claim of this version has an assessment; vacuously true with no claims. */
     val assessesEveryClaim: Boolean

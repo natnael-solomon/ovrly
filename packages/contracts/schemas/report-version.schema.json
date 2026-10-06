@@ -52,6 +52,10 @@
       "type": "array",
       "description": "At most one per claim in this version. Fewer assessments than claims means those claims are still being assessed (provisional) or the investigation stopped before assessing them.",
       "items": { "$ref": "assessment.schema.json" }
+    },
+    "fixture": {
+      "type": "boolean",
+      "description": "True only for a development stub version built from fixtures/results/complete.json while the server runs with OVRLY_STUB_REPORTS=1 (until the assessment pipeline, #27, exists). Such a version is not a check of the media; clients must label its claims as a fixture, never as live results. Optional for compatibility: an absent value means false. The server always sends it."
     }
   }
 }
