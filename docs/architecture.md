@@ -97,7 +97,7 @@ removed from configured sinks. No production log retention provider is
 configured. The [PDP checklist](operations/pdp-checklist.md) keeps transfer
 and sovereignty obligations separate from successful retention tests.
 
-Backend CI checks the frozen environment, lint/types, PostgreSQL/migrations and service coverage. Known documentation-only changes skip execution but report the final check. Coverage is compared with remeasured `main`; a missing pre-bootstrap baseline is disclosed. Android coverage, future-module evidence and required-check activation remain #13.
+Backend CI checks the frozen environment, lint/types, PostgreSQL/migrations and service coverage. Known documentation-only changes skip execution but report the final check. The worker, job engine and auth modules each have a 90% line floor, and overall coverage may drop by at most one percentage point against remeasured `main`; a missing pre-bootstrap baseline is disclosed. Android coverage is tracked separately in #76. See the [coverage policy](../backend/README.md#ci-and-coverage) for exact aggregation and absent-module reporting.
 
 ## Future integration boundary
 
