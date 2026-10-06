@@ -39,7 +39,8 @@ internal class MemoryCredentialStore(private var token: String? = null) : Creden
  * Keeps the credential in app-private `no_backup` storage, encrypted with an AES-GCM key held
  * by the Android Keystore, so it is neither backed up, transferred to another device nor
  * readable from a file copy. An unreadable file is deleted and treated as absent: the next
- * call mints a new guest identity. AN-10 (#36) may replace this when accounts are linked.
+ * call mints a new guest identity. After an account link on a second device (AN-10, #36;
+ * BC-D07) the account's credential replaces the guest one in the same file, in one rename.
  */
 internal class KeystoreCredentialStore(private val file: File) : CredentialStore {
     constructor(context: Context) : this(File(context.noBackupFilesDir, "api-credential.bin"))

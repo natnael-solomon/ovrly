@@ -193,8 +193,13 @@ internal interface PendingChunkDao {
 }
 
 @Database(
-    entities = [InvestigationRecord::class, ReportCacheEntry::class, PendingChunk::class],
-    version = 2,
+    entities = [
+        InvestigationRecord::class,
+        ReportCacheEntry::class,
+        PendingChunk::class,
+        SavedReportEntry::class
+    ],
+    version = 3,
     exportSchema = true
 )
 internal abstract class OvrlyDatabase : RoomDatabase() {
@@ -202,11 +207,13 @@ internal abstract class OvrlyDatabase : RoomDatabase() {
 
     abstract fun pendingChunks(): PendingChunkDao
 
+    abstract fun savedReports(): SavedReportDao
+
     companion object {
         /** No destructive fallback: a missing migration fails loudly instead of losing data. */
         fun open(context: Context): OvrlyDatabase =
             Room.databaseBuilder(context, OvrlyDatabase::class.java, "ovrly.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
 
         /** Version 2 (#34): the retry key and the check a retry created. */
@@ -218,6 +225,20 @@ internal abstract class OvrlyDatabase : RoomDatabase() {
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 MIGRATION_1_2_SQL.forEach(db::execSQL)
+            }
+        }
+
+        /** Version 3 (#36): the device's copy of the owner's explicitly saved reports. */
+        val MIGRATION_2_3_SQL = listOf(
+            "CREATE TABLE IF NOT EXISTS `saved_reports` (`report_id` TEXT NOT NULL, " +
+                "`investigation_id` TEXT NOT NULL, `version` INTEGER NOT NULL, " +
+                "`saved_at` TEXT NOT NULL, `json` TEXT NOT NULL, `stored_at` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`report_id`))"
+        )
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                MIGRATION_2_3_SQL.forEach(db::execSQL)
             }
         }
     }

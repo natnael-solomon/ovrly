@@ -56,6 +56,17 @@ internal class ApiServices(
     /** For store writes that must outlive a screen, such as forgetting an abandoned share. */
     val background: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) {
+    /** Explicitly saved reports (#36); null where no store is wired, as in some tests. */
+    var saved: SavedReports? = null
+        internal set
+
+    /**
+     * Optional account link (BC-D07, #36), on the same [api] and credential. Its ID token
+     * source is [NoIdTokenSource] until a Google OAuth client is registered for this app.
+     */
+    var account: AccountLinker = AccountLinker(api, NoIdTokenSource)
+        internal set
+
     /** BE-10 report routes for the Inbox and Report screens (#34), on the same [api]. */
     val reports: ReportApi by lazy { ReportApi(api) }
 
@@ -73,7 +84,11 @@ internal class ApiServices(
 
         private fun create(context: Context): ApiServices? {
             val url = baseUrl(BuildConfig.OVRLY_API_BASE_URL) ?: return null
-            val api = OvrlyApi(ApiClient(url), KeystoreCredentialStore(context))
+            val api = OvrlyApi(
+                ApiClient(url),
+                KeystoreCredentialStore(context),
+                FileAccountStore(context)
+            )
             val database = OvrlyDatabase.open(context)
             val jobs = LocalJobs(
                 database.investigations(),
@@ -89,7 +104,9 @@ internal class ApiServices(
                 uploadMaxBytes,
                 live
             )
-            return ApiServices(api, jobs, investigations, reconciler, live)
+            return ApiServices(api, jobs, investigations, reconciler, live).also {
+                it.saved = SavedReports(api, database.savedReports())
+            }
         }
 
         /** Parses a base URL; the path always ends in `/` so `v1/...` resolves under it. */

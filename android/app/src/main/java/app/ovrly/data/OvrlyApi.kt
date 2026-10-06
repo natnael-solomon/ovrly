@@ -28,7 +28,11 @@ import okio.source
  * need. If the server refuses the stored credential (expired workspace, BC-D06), it is
  * dropped and the call is repeated once with a new guest identity.
  */
-internal class OvrlyApi(private val client: ApiClient, private val credentials: CredentialStore) {
+internal class OvrlyApi(
+    private val client: ApiClient,
+    private val credentials: CredentialStore,
+    private val account: AccountStore = MemoryAccountStore()
+) {
     private val minting = Mutex()
 
     @Volatile
@@ -126,7 +130,52 @@ internal class OvrlyApi(private val client: ApiClient, private val credentials: 
     private fun forgetCredential() {
         cached = null
         credentials.clear()
+        // A replacement guest is a new identity; it is not the linked account.
+        account.setLinked(false)
     }
+
+    /** True when the stored credential belongs to a linked account (BC-D07). Reads a file. */
+    fun isLinked(): Boolean = account.linked()
+
+    /**
+     * Links this device's principal to the Google account of [idToken] (BC-D07). Sent once
+     * with the current credential: a refused credential is reported, never replaced by a new
+     * guest, because a fresh guest would link without this device's saved reports.
+     *
+     * On a second device the server revokes this guest and returns the account's credential.
+     * It is written to the store, which replaces the guest one in a single file rename, before
+     * the in-memory copy changes, so there is no moment where the revoked credential is the
+     * only one kept. Concurrent calls wait for the swap.
+     */
+    suspend fun linkAccount(idToken: String): ApiResult<LinkOutcome.Linked> {
+        val token = when (val current = credential()) {
+            is ApiResult.Failure -> return current
+            is ApiResult.Success -> current.value
+        }
+        val body = jsonBody(
+            AccountLinkCodec.encodeRequest(
+                AccountLinkRequest(AccountLinkRequest.GOOGLE, idToken)
+            )
+        )
+        val call = ApiCall("principals.link", "POST", "v1/principals/link", body, token)
+        return when (val result = client.send(call, AccountLinkCodec::parseResponse)) {
+            is ApiResult.Failure -> result
+            is ApiResult.Success -> ApiResult.Success(adopt(result.value), result.requestId)
+        }
+    }
+
+    private suspend fun adopt(response: AccountLinkResponse): LinkOutcome.Linked =
+        minting.withLock {
+            val next = response.credential?.token
+            val stored = next == null || credentials.write(next)
+            if (next != null) cached = next
+            account.setLinked(true)
+            LinkOutcome.Linked(
+                switched = next != null,
+                merged = response.mergedSavedReports,
+                stored = stored
+            )
+        }
 
     private class FileBody(
         private val file: File,

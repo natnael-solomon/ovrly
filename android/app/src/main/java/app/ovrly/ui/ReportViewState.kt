@@ -45,7 +45,9 @@ internal data class ReportView(
     val empty: String?,
     val captured: Boolean,
     /** Corrections start from the latest published version only. */
-    val canCorrect: Boolean
+    val canCorrect: Boolean,
+    /** Id of the shown version, which an explicit save keeps (#36). */
+    val reportId: String? = null
 )
 
 /** Flags about the shown version that come from the store or the version list. */
@@ -80,11 +82,12 @@ internal fun reportView(
         claims = shown?.let(::claimViews).orEmpty(),
         empty = emptyMessage(status, shown),
         captured = investigation.isCaptured,
-        canCorrect = latest != null && shown?.version == latest.version
+        canCorrect = latest != null && shown?.version == latest.version,
+        reportId = shown?.id
     )
 }
 
-private fun claimViews(report: ReportVersion): List<ClaimView> = report.claims.map { claim ->
+internal fun claimViews(report: ReportVersion): List<ClaimView> = report.claims.map { claim ->
     claimView(claim, report.assessmentFor(claim.id), report.evidenceFor(claim.id))
 }
 

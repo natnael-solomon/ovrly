@@ -14,7 +14,11 @@ internal data class ChecksUiState(
     val waking: Boolean = false,
     val notice: String? = null,
     /** Local ids with an action in flight; their buttons are disabled. */
-    val busy: Set<String> = emptySet()
+    val busy: Set<String> = emptySet(),
+    /** The owner's explicitly saved reports, as last read from the service (#36). */
+    val saved: List<SavedItem> = emptyList(),
+    /** Guest identity and the optional account link (#36). */
+    val account: AccountUiState = AccountUiState()
 )
 
 /** One published version in the picker. */
@@ -33,7 +37,9 @@ internal data class OpenReport(
     /** Later shared checks that may be this captured clip's full video. */
     val candidates: List<InboxItem> = emptyList(),
     val busy: Boolean = false,
-    val notice: String? = null
+    val notice: String? = null,
+    /** Whether the shown version is saved (#36); null when there is nothing to save. */
+    val save: SaveState? = null
 )
 
 /** What Your space needs from the checks store; null in previews without a service. */
@@ -63,6 +69,18 @@ internal sealed interface CheckCommand {
     data class Expand(val fullVideoId: String) : CheckCommand
 
     data object DismissNotice : CheckCommand
+
+    /** Explicitly saves the shown version [reportId] for its owner (#36). */
+    data class Save(val reportId: String) : CheckCommand
+
+    /** Removes the owner's save of [reportId]; the report itself does not change. */
+    data class Unsave(val reportId: String) : CheckCommand
+
+    /** Opens a saved report: its check when it is on this device, otherwise the saved copy. */
+    data class OpenSaved(val reportId: String) : CheckCommand
+
+    /** Starts the optional Google account link (BC-D07); never needed for checking. */
+    data object LinkAccount : CheckCommand
 }
 
 /** Plain-language text for a failed call; never shown as a result. */

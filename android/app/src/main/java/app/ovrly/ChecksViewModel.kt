@@ -11,6 +11,7 @@ import app.ovrly.data.ChecksService
 import app.ovrly.data.ReanalysisKeys
 import app.ovrly.data.ReanalysisRequest
 import app.ovrly.data.StoredCheck
+import app.ovrly.data.StoredSave
 import app.ovrly.ui.CheckCommand
 import app.ovrly.ui.ChecksUiState
 import app.ovrly.ui.OpenReport
@@ -19,7 +20,12 @@ import app.ovrly.ui.ReportLoader
 import app.ovrly.ui.failureText
 import app.ovrly.ui.fullVideoCandidates
 import app.ovrly.ui.inboxItem
+import app.ovrly.ui.linkNotice
 import app.ovrly.ui.reportView
+import app.ovrly.ui.saveState
+import app.ovrly.ui.savedCopyView
+import app.ovrly.ui.savedItems
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +35,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * State of the Inbox, Library and open report (#34). Everything shown is rebuilt from the
@@ -46,6 +53,11 @@ internal class ChecksViewModel(application: Application) : AndroidViewModel(appl
     }
     private val refreshing = Mutex()
     private var stored: List<StoredCheck> = emptyList()
+    private val saves get() = services?.saved
+    private var storedSaves: List<StoredSave> = emptyList()
+
+    /** Report id of a save or removal in flight; the open report's controls wait for it. */
+    private var saving: String? = null
     private val keys = ReanalysisKeys { checks?.newKey().orEmpty() }
 
     val state: StateFlow<ChecksUiState> = mutableState.asStateFlow()
@@ -67,6 +79,7 @@ internal class ChecksViewModel(application: Application) : AndroidViewModel(appl
             while (true) {
                 reload()
                 val failure = service.sync()
+                saves?.sync()
                 mutableState.update {
                     it.copy(
                         offline = failure is ApiFailure.Network,
@@ -100,6 +113,29 @@ internal class ChecksViewModel(application: Application) : AndroidViewModel(appl
                 session.update { it.copy(notice = null) }
             }
 
+            is CheckCommand.OpenSaved -> openSaved(command.reportId)
+
+            is CheckCommand.Save -> changeSave(command.reportId, save = true)
+
+            is CheckCommand.Unsave -> changeSave(command.reportId, save = false)
+
+            CheckCommand.LinkAccount -> {
+                val account = services?.account ?: return
+                if (mutableState.value.account.busy) return
+                mutableState.update { it.copy(account = it.account.copy(busy = true)) }
+                viewModelScope.launch {
+                    val notice = try {
+                        linkNotice(account.link())
+                    } finally {
+                        mutableState.update { it.copy(account = it.account.copy(busy = false)) }
+                    }
+                    // A second-device link moves saves to the account; read them again.
+                    saves?.sync()
+                    reload()
+                    mutableState.update { it.copy(account = it.account.copy(notice = notice)) }
+                }
+            }
+
             else -> act(command)
         }
     }
@@ -121,6 +157,53 @@ internal class ChecksViewModel(application: Application) : AndroidViewModel(appl
             reload()
             mutableState.update { it.copy(notice = notice) }
             session.update { it.copy(notice = notice) }
+        }
+    }
+
+    /**
+     * Opens a saved report: its check, at the saved version, when the check is on this device;
+     * otherwise the saved copy, read-only.
+     */
+    private fun openSaved(reportId: String) {
+        val save = storedSaves.firstOrNull { it.entry.reportId == reportId } ?: return
+        val check = stored.firstOrNull { it.investigation?.id == save.entry.investigationId }
+        val investigation = check?.investigation
+        if (investigation != null) {
+            session.open(investigation.id)
+            if (save.entry.version != investigation.report?.version) {
+                session.show(save.entry.version)
+            }
+            loader?.invalidate()
+        } else {
+            val view = savedCopyView(save) ?: return
+            session.showCopy(OpenReport(view, save = saveState(view, storedSaves, copy = true)))
+        }
+        viewModelScope.launch { reload() }
+    }
+
+    /** Explicit save or removal of the shown version; never done without the user's tap. */
+    private fun changeSave(reportId: String, save: Boolean) {
+        val saved = saves ?: return
+        if (saving != null) return
+        saving = reportId
+        session.update { it.copy(busy = true) }
+        viewModelScope.launch {
+            val result = try {
+                if (save) saved.save(reportId) else saved.unsave(reportId)
+            } finally {
+                saving = null
+            }
+            val notice = when (result) {
+                is ApiResult.Failure -> failureText(result.failure)
+                is ApiResult.Success -> if (save) SAVED_NOTICE else UNSAVED_NOTICE
+            }
+            val copy = session.report.value?.save?.copy == true
+            if (!save && copy && result is ApiResult.Success) {
+                session.close()
+                mutableState.update { it.copy(notice = notice) }
+            }
+            reload()
+            session.update { it.copy(busy = false, notice = notice) }
         }
     }
 
@@ -199,13 +282,20 @@ internal class ChecksViewModel(application: Application) : AndroidViewModel(appl
         val service = checks ?: return@withLock
         val now = System.currentTimeMillis()
         stored = service.stored()
+        storedSaves = saves?.stored().orEmpty()
+        val linked = services?.api?.let { api -> withContext(Dispatchers.IO) { api.isLinked() } }
         val items = stored.map { inboxItem(it.record, it.investigation, now) }
             .sortedByDescending { it.createdAt }
         mutableState.update {
             it.copy(
                 loaded = true,
                 inbox = items.filterNot { item -> item.library },
-                library = items.filter { item -> item.library }
+                library = items.filter { item -> item.library },
+                saved = savedItems(storedSaves, stored, now),
+                account = it.account.copy(
+                    available = services?.account?.available == true,
+                    linked = linked == true
+                )
             )
         }
         val openId = session.openId
@@ -216,11 +306,18 @@ internal class ChecksViewModel(application: Application) : AndroidViewModel(appl
         } else {
             emptyList()
         }
-        session.refresh(open, candidates, busy = openItem?.localId in mutableState.value.busy)
+        val busy = openItem?.localId in mutableState.value.busy || saving != null
+        session.refresh(open, candidates, busy = busy)
+        session.update {
+            it.copy(save = saveState(it.view, storedSaves, copy = it.save?.copy == true))
+        }
     }
 
     private companion object {
         const val ACTIVE_POLL_MILLIS = 5_000L
         const val IDLE_POLL_MILLIS = 60_000L
+        const val SAVED_NOTICE =
+            "Saved. A copy of this version is kept for you on the ovrly service."
+        const val UNSAVED_NOTICE = "Removed from saved reports. The check itself is unchanged."
     }
 }
