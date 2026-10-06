@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
@@ -134,7 +135,8 @@ class ReportScreenTest {
         assertTrue(captureTimes.fetchSemanticsNodes().isNotEmpty())
         reveal("Shared the full video?").assertIsDisplayed()
         val before = compose.idsWithText("Check the full video")
-        compose.onNodeWithText("Check the full video").performClick()
+        // The card's title can be on screen while its button is still below the fold.
+        compose.onNodeWithText("Check the full video").performScrollTo().performClick()
 
         compose.awaitDisplayed("Is this the same video?")
         val confirm = compose.newNodeWithText("Check the full video", before)
