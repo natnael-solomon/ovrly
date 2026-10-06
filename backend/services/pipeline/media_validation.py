@@ -184,6 +184,69 @@ def _publish_audio(
     }
 
 
+def _decoded_video_duration(stdout: bytes) -> float | None:
+    times: list[int] = []
+    for line in stdout.splitlines():
+        if not line.startswith(b"out_time_us="):
+            continue
+        try:
+            times.append(int(line.split(b"=", 1)[1]))
+        except ValueError:
+            continue
+    if not times:
+        return None
+    return max(times) / 1000000
+
+
+def _packet_video_duration(stdout: bytes) -> float | None:
+    try:
+        data = json.loads(stdout)
+        packets = data["packets"]
+    except (ValueError, KeyError, TypeError, RecursionError):
+        raise InvalidMedia("Invalid video packet metadata") from None
+    duration = 0.0
+    for packet in packets:
+        if not isinstance(packet, dict):
+            raise InvalidMedia("Invalid video packet metadata")
+        try:
+            pts = float(packet["pts_time"])
+        except (ValueError, KeyError, TypeError, OverflowError):
+            continue
+        try:
+            packet_duration = float(packet.get("duration_time") or 0)
+        except (ValueError, TypeError, OverflowError):
+            packet_duration = 0.0
+        if math.isfinite(pts) and math.isfinite(packet_duration):
+            duration = max(duration, pts + max(packet_duration, 0))
+    return duration or None
+
+
+async def _probe_video_packets(
+    settings: Settings, limits: CommandLimits, snapshot: Path, interval: str
+) -> float | None:
+    packets = await _media_command(
+        [
+            settings.ffprobe_path,
+            "-v",
+            "error",
+            *_INPUT_OPTIONS,
+            "-read_intervals",
+            interval,
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "packet=pts_time,duration_time",
+            "-of",
+            "json",
+            str(snapshot),
+        ],
+        limits,
+    )
+    if packets.returncode != 0:
+        raise InvalidMedia("Video packets could not be probed")
+    return _packet_video_duration(packets.stdout)
+
+
 async def _prepare(
     job: ClaimedJob,
     context: JobContext,
@@ -274,15 +337,16 @@ async def _prepare(
             )
             if decoded.returncode != 0:
                 raise InvalidMedia("Video decoding failed")
-            try:
-                times = [
-                    int(line.split(b"=", 1)[1])
-                    for line in decoded.stdout.splitlines()
-                    if line.startswith(b"out_time_us=")
-                ]
-                video_duration = max(times) / 1000000
-            except ValueError:
+            video_duration = _decoded_video_duration(decoded.stdout)
+            if video_duration is None:
+                video_duration = await _probe_video_packets(settings, limits, snapshot, "%+2")
+            if video_duration is None:
                 raise InvalidMedia("Missing decoded video duration") from None
+            limit_duration = await _probe_video_packets(
+                settings, limits, snapshot, f"{settings.max_shared_duration_seconds}%+1"
+            )
+            if limit_duration is not None:
+                video_duration = max(video_duration, limit_duration)
             if video_duration <= 0:
                 raise InvalidMedia("Empty video")
             if video_duration > settings.max_shared_duration_seconds:
