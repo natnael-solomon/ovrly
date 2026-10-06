@@ -117,7 +117,8 @@
           "provisional": false,
           "summary": "No sound evidence was found for or against this claim; it remains unverified."
         }
-      ]
+      ],
+      "fixture": false
     }
   }
 }

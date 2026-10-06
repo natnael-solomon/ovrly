@@ -1,6 +1,8 @@
 package app.ovrly.contract
 
 import app.ovrly.contract.ContractFixtures.Fixture
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -243,6 +245,22 @@ class ContractResultFixturesTest {
         assertTrue(report.assessesEveryClaim)
         assertTrue(report.changeSummary.contains("not a statement that the content is accurate"))
         assertTrue(checkNotNull(investigation.job).isPublished)
+    }
+
+    @Test
+    fun reportFixtureFlagIsReadWrittenAndDefaultsToFalse() {
+        for (fixture in fixtures) {
+            val report = parse(fixture).report ?: continue
+            assertFalse("${fixture.name} is a real-shaped report, not a stub", report.fixture)
+        }
+        val report = checkNotNull(parse(fixture("complete")).report)
+        val encoded = ContractFixtures.element(InvestigationCodec.encodeReportVersion(report))
+        assertEquals("false", encoded.jsonObject.getValue("fixture").toString())
+        val stub = InvestigationCodec.encodeReportVersion(report.copy(fixture = true))
+        assertTrue(InvestigationCodec.parseReportVersion(stub).fixture)
+        val legacy = JsonObject(encoded.jsonObject - "fixture").toString()
+        val absent = InvestigationCodec.parseReportVersion(legacy)
+        assertFalse("an absent flag reads as false", absent.fixture)
     }
 
     @Test

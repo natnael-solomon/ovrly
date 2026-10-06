@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$comment": "Ovrly contracts 0.2.0-draft. Additive BE-06 polling contract; requires Android/backend review.",
   "title": "CaptureStatus",
-  "description": "Owner-scoped live-capture status. Receipt coverage is not analysis coverage. Open duration is the highest received end; close can declare a longer duration so a missing tail is explicit. Expired open sessions read abandoned with closed_at equal to expires_at. Currently media validation runs incrementally, but ASR/OCR/claim extraction are separate pipeline work: published validation jobs remain waiting, claims stays empty and claim_extraction_status is not_started. Empty claims is not a no-claims finding.",
+  "description": "Owner-scoped live-capture status. Receipt coverage is not analysis coverage. Open duration is the highest received end; close can declare a longer duration so a missing tail is explicit. Expired open sessions read abandoned with closed_at equal to expires_at. Currently media validation runs incrementally, but ASR/OCR/claim extraction are separate pipeline work: published validation jobs remain waiting, claims stays empty and claim_extraction_status is not_started. Empty claims is not a no-claims finding. Exception: a server running the development-only OVRLY_STUB_REPORTS lists the claims of the capture's fixture report (report.fixture true) here, with claim_extraction_status partial or complete; clients must label those as a fixture, not as live results.",
   "type": "object",
   "additionalProperties": false,
   "required": ["session", "continue_research", "expires_at", "manifest", "work", "claims", "claim_extraction_status"],

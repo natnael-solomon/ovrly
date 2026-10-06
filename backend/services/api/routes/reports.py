@@ -29,7 +29,12 @@ from services.jobs.queue import JobQueue
 from services.models import investigations, report_versions, saved_reports
 from services.reanalysis import replay, request_hash, request_reanalysis
 from services.report_export import build_export
-from services.reports import parse_canonical_uuid, save_owned_report, saved_report
+from services.reports import (
+    parse_canonical_uuid,
+    report_from_row,
+    save_owned_report,
+    saved_report,
+)
 
 router = APIRouter(tags=["reports"])
 
@@ -84,7 +89,7 @@ async def _owned_version(
         ).first()
     if row is None:
         raise not_found()
-    return ReportVersion.model_validate(row.payload), row.fixture
+    return report_from_row(row.payload, row.fixture), row.fixture
 
 
 @router.get("/investigations/{investigation_id}/reports/{version}", response_model=ReportVersion)

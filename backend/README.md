@@ -134,7 +134,9 @@ adds the retry class, per-class retry counters and the provider request id to
 `owner_id` and `cancel_outcome` columns to `jobs`. `0007_captures` adds capture
 sessions and chunk reservations/receipts. `0008_reports` adds immutable
 `report_versions` (with a trigger that rejects `UPDATE`), `saved_reports`,
-`reanalysis_requests` and the `voice_actions` audit table. Future schema changes require a reviewed migration
+`reanalysis_requests` and the `voice_actions` audit table, and
+`0009_reanalysis_source` adds the nullable `source_investigation_id` to
+`reanalysis_requests`. Future schema changes require a reviewed migration
 and upgrade/downgrade coverage, not `create_all()` during API startup.
 
 ### Durable jobs and recovery
@@ -389,7 +391,9 @@ Each accepted chunk is available to the worker before close. Both worker modes
 register `CaptureProcessor`, which re-verifies stored bytes under a session lock
 and publishes a durable validation result. **ASR, OCR and claim analysis remain
 #20/#25/#27/#29**: a published validation job still reads `waiting`, with empty
-`claims` and `claim_extraction_status: not_started`, never complete/no-claims.
+`claims` and `claim_extraction_status: not_started`, never complete/no-claims
+(the development-only `OVRLY_STUB_REPORTS` changes this for fixture reports; see
+[Reports, saves and voice actions](#reports-saves-and-voice-actions)).
 The per-claim envelope is typed for the pipeline handoff; no synthetic finding
 is emitted by the API. Android codecs mirror the additions, but device upload
 and polling integration remain AN-07.
@@ -490,10 +494,10 @@ owner-scoped: another owner's investigation, report or job is the same 404
 | Route | Behavior |
 | --- | --- |
 | `GET /v1/investigations/{id}/reports` | `{investigation_id, items}`: every published version, oldest first, with `id`, `version`, `created_at`, `provisional`, `change_summary`, `supersedes` and `fixture`, without claims or evidence. Empty `items` when no report exists. |
-| `GET /v1/investigations/{id}/reports/{version}` | The full immutable `ReportVersion`. A missing version is 404; `version` below 1 or not an integer is 422. |
+| `GET /v1/investigations/{id}/reports/{version}` | The full immutable `ReportVersion`, including `fixture` (true only for a development stub; the same field appears on the `report` of an investigation read). A missing version is 404; `version` below 1 or not an integer is 422. |
 | `POST /v1/reports/{report_id}/save` | No body. Saves the caller's snapshot of the version and returns `{report_id, investigation_id, version, saved_at, report}`. Idempotent: a repeat returns 200 with the same body and the original `saved_at`. Report ids are canonical lowercase UUID strings; anything else is 404. A report the caller already saved stays saveable after a second-device link moved the save. |
 | `GET /v1/investigations/{id}/reports/{version}/export` | The allowlisted export payload (decision 0003 contents): each claim's normalized meaning, interval, correction flag and assessment; source links with type, inspection level, retraction status and relation; `provisional`, `fixture`, the report version, `retrieved_at` (the retrieval date) and plain-language `limitations`. Transcript wording, evidence excerpts, assessment notes, media and identity are never included. On-device export (AN-11) covers the submission; this is the server-built equivalent. |
-| `POST /v1/investigations/{id}/reanalyze` | Requires `Idempotency-Key`. Body `{"reason": "correction", "base_version", "claim_id", "proposition"}`, `{"reason": "expansion", "base_version", "match_confirmed": true}` or `{"reason": "deeper", "base_version"}`; 202 with `{id, investigation_id, reason, base_version, published_version, job, created_at}`. See below. |
+| `POST /v1/investigations/{id}/reanalyze` | Requires `Idempotency-Key`. Body `{"reason": "correction", "base_version", "claim_id", "proposition"}`, `{"reason": "expansion", "base_version", "match_confirmed": true, "source_investigation_id"}` or `{"reason": "deeper", "base_version"}`; 202 with `{id, investigation_id, reason, base_version, published_version, source_investigation_id, job, created_at}`. See below. |
 | `GET /v1/reports/saved` | The caller's saves, newest first, at most 100, including saves moved to this account by BC-D07. Used by AN-10 recovery. |
 | `POST /v1/voice/actions` | Body per `packages/contracts/schemas/voice-action-request.schema.json`. Executes one action of the BC-D04 allowlist against one owned target and answers 200 with `result` `accepted` or `denied` per `voice-action-response.schema.json`; see below. |
 
@@ -535,7 +539,15 @@ evidence and assessment until the job reruns that claim alone; every other claim
 keeps its assessment, and earlier versions never change. A missing claim is 422
 `CLAIM_NOT_IN_VERSION`, an identical meaning 422 `CORRECTION_UNCHANGED`.
 **Expansion** to the full video requires `match_confirmed: true` (otherwise 422
-`MATCH_CONFIRMATION_REQUIRED`); **deeper** searches further. Neither changes content
+`MATCH_CONFIRMATION_REQUIRED`) and `source_investigation_id`, the caller's own
+investigation of the confirmed full video (otherwise 422
+`EXPANSION_SOURCE_REQUIRED`; the field is optional in the contract only so the
+addition is non-breaking). The source must be a different investigation (422
+`EXPANSION_SOURCE_SELF`), a shared URL or upload rather than a live capture (422
+`EXPANSION_SOURCE_UNSUPPORTED`), and not failed or cancelled (409
+`EXPANSION_SOURCE_UNAVAILABLE`); a missing or another caller's source is the same
+404 `NOT_FOUND`. It is recorded on the request row, echoed in the response and
+passed to the job as an identifier only. **Deeper** searches further. Neither changes content
 at once (`published_version` null). Every reason enqueues one owner-scoped
 `reanalysis` job in the same transaction, whose payload names the version to
 supersede and the claims to rerun (no user text). Its job summary reports the
@@ -562,8 +574,26 @@ warning at startup when on, needs the repository's `packages/contracts`
 directory next to `backend/`, and `publish_stub_report` raises
 `StubReportsDisabled` when called without the opt-in. With the same opt-in a
 stub `reanalysis` handler publishes one fixture version per request, adding a
-placeholder `insufficient_evidence` assessment for each unassessed claim. Never
-present a stub as a check. #27 removes both.
+placeholder `insufficient_evidence` assessment for each unassessed claim.
+
+Live captures get fixture versions too, so the overlay's live polling shows claims
+arriving. With the opt-in, the worker's `media_validation` handler is wrapped: after a
+chunk's bytes verify, the capture's fixture report advances when its content would
+change. The first validated chunk publishes claim 1 (no assessment), the second adds
+claim 2 and assesses claim 1, the third assesses claim 2; claims sit on the `capture`
+timeline at the interval of the chunk that introduced them. Close with
+`continue_research: true` publishes a final, non-provisional version once every
+received chunk is validated (at close, or when the last queued chunk finishes);
+close with `false` keeps the last provisional version. While a fixture report exists,
+`GET /v1/captures/{id}` also lists its claims (`checking` until assessed, then
+`partial`, `complete` after the final version, `cancelled` for unassessed claims after
+a Stop without continuing) with `claim_extraction_status` `partial` or `complete`.
+Every such version is stored with `fixture` true, carries `"fixture": true` in the
+report read model and starts its change summary with "Development fixture, not a
+check of this media". A real (non-fixture) report is never superseded by the stub.
+Without the opt-in, capture validation, polling and close behave exactly as described
+under [Incremental capture API](#incremental-capture-api). Never present a stub as a
+check. #27 removes all of it.
 
 ## Local checks
 

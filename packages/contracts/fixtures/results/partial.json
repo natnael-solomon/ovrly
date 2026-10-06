@@ -107,7 +107,8 @@
           "provisional": true,
           "summary": "The official fleet report gives a much lower electric share; more may follow."
         }
-      ]
+      ],
+      "fixture": false
     }
   }
 }
