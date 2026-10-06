@@ -15,6 +15,19 @@
   text stays in the chunk of its probe time even when recognition runs past the chunk's end
   (the chunk is held until it is in); frames still being read at Stop are counted.
 
+- Android voice actions wired to the API (AN-09, #35): the Voxide manifest
+  advertises `open_check`, `save_report`, `queue_cancel`, `queue_retry` and
+  `queue_continue` beside `open_tab`, each sent through `data/VoiceApi.kt` to
+  `POST /v1/voice/actions` with one `request_id` per command (replayed on
+  client retries and repeated tool calls). Tool results carry a `checks` state
+  of the five most recent checks (ids, status and source; no URLs), and the
+  device resolves the `latest` alias. Cancellation needs an on-screen
+  confirmation bound to its target that times out after 30 seconds and is
+  discarded when voice stops. A voice panel shows the recognized speech, each
+  accepted, denied or failed result and the opened check, and offers a typed
+  command alternative that works without a microphone or connection to Voxide.
+  Recognized text is never logged or stored.
+
 - Evidence stages (BE-09, #27): `retrieval` and `assessment` queue stages turn a
   published version with claims into the next version with evidence and assessments.
   Router-written neutral and disconfirming queries search Scholarxiv Papers; hits are

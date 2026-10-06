@@ -1,9 +1,11 @@
 package app.ovrly.voice
 
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VoiceCommandContractTest {
@@ -80,14 +82,33 @@ class VoiceCommandContractTest {
     }
 
     @Test
-    fun plannedActionsRemainUnavailableAndAreNotAdvertised() {
+    fun theAllowlistIsAdvertisedWithOneIdAndOnlyCancelIsDangerous() {
         val manifest = JSONObject(VoiceProtocol.manifest()).getJSONArray("actions")
-        assertEquals(1, manifest.length())
-        assertEquals("open_tab", manifest.getJSONObject(0).getString("name"))
+        assertEquals(1 + VoiceCommandAction.entries.size, manifest.length())
+        for ((index, action) in VoiceCommandAction.entries.withIndex()) {
+            val advertised = manifest.getJSONObject(index + 1)
+            assertEquals(action.wireName, advertised.getString("name"))
+            assertEquals(action.requiresConfirmation, advertised.getBoolean("dangerous"))
+            val params = advertised.getJSONObject("params")
+            assertEquals(setOf("id"), params.keys().asSequence().toSet())
+            assertTrue(params.getJSONObject("id").getBoolean("required"))
+            assertTrue("latest" in advertised.getString("description"))
+            assertFalse("confirmed" in params.toString())
+        }
+        val names = List(manifest.length()) { manifest.getJSONObject(it).getString("name") }
+        for (forbidden in listOf("delete_report", "publish", "settings", "switch_tab")) {
+            assertFalse(forbidden in names)
+        }
+    }
+
+    @Test
+    fun refusedCommandsCarryTheirCodeAndTheAppState() {
+        val state = JSONObject().put("checks", JSONArray())
         for (action in VoiceCommandAction.entries) {
             val tool = parse(action.wireName, """{"id":"target-1"}""")
             assertEquals(null, VoiceTab.from(tool.arguments))
-            val response = JSONObject(VoiceCommandContract.rejectForCurrentBuild(tool))
+            val error = VoiceCommandError.VOICE_ACTION_UNAVAILABLE
+            val response = JSONObject(VoiceCommandContract.reject(tool, error, state))
             assertEquals("tool_result", response.getString("type"))
             assertEquals("call-1", response.getString("id"))
             assertEquals(action.wireName, response.getString("name"))
@@ -95,8 +116,27 @@ class VoiceCommandContractTest {
             assertEquals("error", result.getString("status"))
             assertEquals("VOICE_ACTION_UNAVAILABLE", result.getString("code"))
             assertFalse(result.has("result"))
-            assertEquals(0, response.getJSONObject("state").length())
+            assertEquals(state.toString(), response.getJSONObject("state").toString())
         }
+    }
+
+    @Test
+    fun typedCommandsUseTheSameAllowlistAndNeverNormalizeIds() {
+        val typed = mapOf(
+            "open" to VoiceCommand(VoiceCommandAction.OPEN_CHECK, "latest"),
+            "  Save   LATEST " to VoiceCommand(VoiceCommandAction.SAVE_REPORT, "latest"),
+            "cancel Job_01" to VoiceCommand(VoiceCommandAction.QUEUE_CANCEL, "Job_01"),
+            "RETRY job-1" to VoiceCommand(VoiceCommandAction.QUEUE_RETRY, "job-1"),
+            "continue latest" to VoiceCommand(VoiceCommandAction.QUEUE_CONTINUE, "latest")
+        )
+        for ((text, command) in typed) {
+            assertEquals(text, command, VoiceCommandContract.parseTyped(text))
+        }
+        val refused = listOf(
+            "", "   ", "delete latest", "publish", "open a b", "open ../a", "open -a",
+            "open_check latest", "open caf\u00e9", "settings", "open https://example.invalid"
+        )
+        for (text in refused) assertEquals(text, null, VoiceCommandContract.parseTyped(text))
     }
 
     @Test
@@ -105,8 +145,8 @@ class VoiceCommandContractTest {
             val tool = parse("save_report", args)
             assertEquals(
                 "VOICE_ACTION_INVALID_ARGUMENTS",
-                JSONObject(VoiceCommandContract.rejectForCurrentBuild(tool))
-                    .getJSONObject("result").getString("code")
+                VoiceCommandContract.validate(tool.name, tool.arguments)
+                    .let { (it as VoiceCommandValidation.Rejected).error.name }
             )
         }
         val extra = VoiceProtocol.parse(

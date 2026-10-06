@@ -7,8 +7,21 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import app.ovrly.BuildConfig
+import app.ovrly.contract.Investigation
+import app.ovrly.data.ApiResult
+import app.ovrly.data.ApiServices
+import app.ovrly.data.VoiceApi
+import app.ovrly.data.cachedInvestigation
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 /**
  * Every build without the explicit live opt-in, debug or release, runs the in-process
@@ -70,7 +83,51 @@ class VoiceController(context: Context, navigator: VoiceNavigator) : AutoCloseab
         presentation = VoicePresentation(SystemClock::elapsedRealtime)
     )
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val services = ApiServices.get(applicationContext)
+    private val targets = services?.let { VoiceTargets(it.jobs) }
+    private val opened = MutableStateFlow<String?>(null)
+
+    @Volatile
+    private var checksState = JSONObject()
+
+    /** Approval for `queue_cancel`, shown on screen and bound to one request and target. */
+    internal val confirmations = VoiceConfirmations()
+
+    /** The check the last accepted `open_check` opened; #34 routes this to its report screen. */
+    internal val openedCheck: StateFlow<String?> = opened.asStateFlow()
+
+    private val effects = object : VoiceEffects {
+        override fun openCheck(investigationId: String) {
+            opened.value = investigationId
+        }
+
+        override suspend fun refreshChecks() {
+            services?.reconciler?.reconcile()
+        }
+
+        override suspend fun finished() = this@VoiceController.refreshChecks()
+    }
+
+    /** Runs a command, then refreshes the `checks` state before the assistant is told. */
+    private val executor: VoiceCommandExecutor = services?.let { api ->
+        VoiceBackend(
+            VoiceApi(api.api),
+            checkNotNull(targets),
+            confirmations,
+            effects,
+            scope
+        )
+    } ?: VoiceCommandExecutor.UNAVAILABLE
+
+    init {
+        session.commands = VoiceCommands(executor, { checksState }, confirmations::discardAll)
+    }
+
     val state: StateFlow<VoiceState> = session.state
+
+    /** Recognized user text and the last action result, shown on screen only. */
+    internal val activity: StateFlow<VoiceActivity> = session.activity
 
     /** Orb display level 0..1, at most 20 updates per second; 0 when not listening or speaking. */
     val level: StateFlow<Float> = session.level
@@ -78,15 +135,69 @@ class VoiceController(context: Context, navigator: VoiceNavigator) : AutoCloseab
     /** Lossy presentation cues; collectors that fall behind lose the oldest events. */
     val events: SharedFlow<VoiceOrbEvent> = session.events
 
-    fun start() = session.start()
+    fun start() {
+        scope.launch { refreshChecks() }
+        session.start()
+    }
 
-    fun holdStart() = session.holdStart()
+    fun holdStart() {
+        scope.launch { refreshChecks() }
+        session.holdStart()
+    }
 
     fun holdEnd() = session.holdEnd()
 
     fun interrupt() = session.interrupt()
 
-    fun stop(reason: String = "Voice stopped.") = session.stop(reason)
+    fun stop(reason: String = "Voice stopped.") {
+        confirmations.discardAll()
+        session.stop(reason)
+    }
 
-    override fun close() = session.close()
+    /**
+     * The typed alternative: the same allowlisted commands without a voice session, so a
+     * denied microphone, a disconnect or an unsupported command never leaves the user stuck.
+     * It never starts or reconnects voice and costs no provider session.
+     */
+    internal fun typed(text: String) {
+        val command = VoiceCommandContract.parseTyped(text)
+        if (command == null) {
+            session.activityLog.result(
+                VoiceResult("Typed command", VoiceCommandContract.TYPED_HINT, false, typed = true)
+            )
+            return
+        }
+        val label = command.action.label
+        val sending = VoiceResult(label, "Sending...", true, typed = true, pending = true)
+        session.activityLog.result(sending)
+        executor.execute(command) { outcome ->
+            val result = VoiceResult(label, outcome.message, outcome.success, true, outcome.code)
+            session.activityLog.result(result)
+        }
+    }
+
+    /** Clears the panel: recognized text, the last result and the opened check. */
+    internal fun clearActivity() {
+        opened.value = null
+        session.activityLog.clear()
+    }
+
+    /** The opened check from the server, or its last stored read when the server is away. */
+    internal suspend fun check(id: String): Investigation? {
+        val api = services ?: return null
+        return when (val result = api.investigations.refresh(id)) {
+            is ApiResult.Success -> result.value
+            is ApiResult.Failure -> api.jobs.cachedInvestigation(id)
+        }
+    }
+
+    private suspend fun refreshChecks() {
+        targets?.recent()?.let { checksState = VoiceTargets.state(it) }
+    }
+
+    override fun close() {
+        confirmations.discardAll()
+        session.close()
+        scope.cancel()
+    }
 }

@@ -286,7 +286,9 @@ fun CompanionScreen(
             }
             SettingsDisclosure(
                 "Voice details",
-                "Native authorization is unverified. Voice can only switch between Your space and Explore; it cannot start capture or the overlay, or discuss evidence. Playback capture is separate."
+                "Native authorization is unverified. Voice can switch tabs, open a check, " +
+                    "save a report and cancel, retry or continue a check; it cannot start " +
+                    "capture or the overlay. Playback capture is separate."
             )
             HorizontalDivider()
             SectionTitle("Storage", "Private / temporary")
