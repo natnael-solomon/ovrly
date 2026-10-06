@@ -1,5 +1,6 @@
 package app.ovrly.capture
 
+import app.ovrly.contract.CaptureChunk
 import app.ovrly.contract.CaptureChunkRequest
 import app.ovrly.contract.CaptureCreateRequest
 import app.ovrly.contract.CaptureMetadata
@@ -96,6 +97,30 @@ class CaptureUploaderTest {
         }.exceptionOrNull() as CaptureApiException
         assertEquals("CAPTURE_CHUNK_CONFLICT", failure.code)
         assertFalse(failure.retryable)
+    }
+
+    @Test fun choosingNotToContinueWhileSendingStopsBeforeTheNextChunk() {
+        val session = capture(4)
+        // The user picks "research will not continue" while chunk 1 is being sent.
+        val choosing = object : CaptureSessionApi by api {
+            override suspend fun putChunk(
+                sessionId: String,
+                seq: Int,
+                metadata: CaptureMetadata,
+                content: ByteArray
+            ): CaptureChunk {
+                val stored = api.putChunk(sessionId, seq, metadata, content)
+                if (seq == 1) assertTrue(CaptureLedger(root).recordChoice(false))
+                return stored
+            }
+        }
+        val outcome = runBlocking { CaptureUploader(choosing, root).sync(session) }
+        assertEquals(CaptureUploader.Outcome.DONE, outcome)
+        assertEquals(listOf("open", "put:0", "put:1", "close:false"), api.log)
+        assertEquals(setOf(0, 1), api.storedSeqs(remote()))
+        assertTrue(ledger.closed)
+        assertTrue(File(root, "chunk-002.zip").exists())
+        assertTrue(File(root, "chunk-003.zip").exists())
     }
 
     @Test fun offlineChunksStayOnTheDeviceAndAreSentLater() {

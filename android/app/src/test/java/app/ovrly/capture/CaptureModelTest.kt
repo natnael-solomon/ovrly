@@ -100,12 +100,54 @@ class CaptureModelTest {
             UploadProgress(2, 0, UploadStatus.PENDING, wifiOnly = true).summary()
         )
         val state = CaptureState(
-            message = "Stopped.",
+            message = "Paused.",
             upload = UploadProgress(3, 1, UploadStatus.PENDING)
         )
         assertEquals(
-            "Stopped. Saved on device, not yet sent: 2 of 3 chunks.",
+            "Paused. Saved on device, not yet sent: 2 of 3 chunks.",
             state.displayMessage
+        )
+    }
+
+    @Test fun aUserStopReadsAsOneShortLine() {
+        fun line(upload: UploadProgress, message: String = CaptureState.STOPPED) =
+            CaptureState(CapturePhase.FINISHED, message = message, upload = upload).displayMessage
+        assertEquals(
+            "Stopped · 16 sent · research continues",
+            line(UploadProgress(16, 16, UploadStatus.CLOSED, continueResearch = true))
+        )
+        assertEquals(
+            "Stopped · 1 sent · 2 on device · research will not continue",
+            line(UploadProgress(3, 1, UploadStatus.CLOSED, continueResearch = false))
+        )
+        assertEquals(
+            "Stopped · 0 sent · 2 on device, waiting for Wi-Fi",
+            line(UploadProgress(2, 0, UploadStatus.PENDING, wifiOnly = true))
+        )
+        assertEquals(
+            "Stopped · 0 sent to the test server · 3 on device · Not configured.",
+            line(
+                UploadProgress(
+                    3,
+                    0,
+                    UploadStatus.NOT_SENT,
+                    detail = "Not configured.",
+                    testServer = true
+                )
+            )
+        )
+        assertEquals("Stopped", line(UploadProgress()))
+        assertEquals(
+            "Stopped · 4 sent · research continues. No playback signal was detected.",
+            line(
+                UploadProgress(4, 4, UploadStatus.CLOSED, continueResearch = true),
+                CaptureState.STOPPED + " No playback signal was detected."
+            )
+        )
+        // The 3-minute limit keeps its own sentence and the upload summary.
+        assertEquals(
+            "Stopped at the limit. All 2 chunks sent.",
+            line(UploadProgress(2, 2, UploadStatus.SENT), "Stopped at the limit.")
         )
     }
 

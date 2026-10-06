@@ -1,5 +1,6 @@
 package app.ovrly.capture
 
+import android.content.Context
 import app.ovrly.BuildConfig
 import app.ovrly.contract.CaptureChunk
 import app.ovrly.contract.CaptureCloseRequest
@@ -18,6 +19,10 @@ import app.ovrly.contract.Modality
 import app.ovrly.contract.ProcessingStatus
 import app.ovrly.contract.SeqRange
 import app.ovrly.contract.Timebase
+import app.ovrly.data.ApiFailure
+import app.ovrly.data.ApiResult
+import app.ovrly.data.ApiServices
+import app.ovrly.data.CaptureApi
 import java.io.IOException
 import java.security.MessageDigest
 import java.time.Instant
@@ -56,29 +61,33 @@ internal class CaptureApiException(val code: String, message: String, val retrya
     IOException(message)
 
 /**
- * The production adapter. It will delegate to the app's API client from AN-03 (#18); until
- * that client exists every call fails with `CAPTURE_API_NOT_CONFIGURED`, which is not retried,
- * and the chunks stay on the device.
+ * The production adapter over the app's API client ([CaptureApi], AN-03). A transport failure
+ * becomes an [IOException] (retried with backoff); an error in the shared error shape becomes
+ * a [CaptureApiException] with the server's code and `retryable` flag; a response this client
+ * cannot read is a non-retryable `INCOMPATIBLE_RESPONSE`. Without a usable API base URL every
+ * call fails with `CAPTURE_API_NOT_CONFIGURED`, which is not retried, and the chunks stay on
+ * the device.
  */
-internal class ServerCaptureSessionApi : CaptureSessionApi {
+internal class ServerCaptureSessionApi(private val api: CaptureApi? = null) : CaptureSessionApi {
     override suspend fun open(
         idempotencyKey: String,
         request: CaptureCreateRequest
-    ): CaptureSession = notConfigured()
+    ): CaptureSession = configured().open(idempotencyKey, request).orThrow()
 
     override suspend fun putChunk(
         sessionId: String,
         seq: Int,
         metadata: CaptureMetadata,
         content: ByteArray
-    ): CaptureChunk = notConfigured()
+    ): CaptureChunk = configured().putChunk(sessionId, seq, metadata, content).orThrow()
 
     override suspend fun close(sessionId: String, request: CaptureCloseRequest): CaptureSession =
-        notConfigured()
+        configured().close(sessionId, request).orThrow()
 
-    override suspend fun status(sessionId: String): CaptureStatus = notConfigured()
+    override suspend fun status(sessionId: String): CaptureStatus =
+        configured().status(sessionId).orThrow()
 
-    private fun notConfigured(): Nothing = throw CaptureApiException(
+    private fun configured(): CaptureApi = api ?: throw CaptureApiException(
         NOT_CONFIGURED,
         "The capture server is not configured in this build.",
         retryable = false
@@ -86,29 +95,67 @@ internal class ServerCaptureSessionApi : CaptureSessionApi {
 
     companion object {
         const val NOT_CONFIGURED = "CAPTURE_API_NOT_CONFIGURED"
+        const val INCOMPATIBLE = "INCOMPATIBLE_RESPONSE"
     }
 }
 
-/** Chooses the capture API: the in-memory server in debug builds, the adapter otherwise. */
+/** The value of a successful call; a failure becomes the exception the uploader expects. */
+internal fun <T> ApiResult<T>.orThrow(): T = when (this) {
+    is ApiResult.Success -> value
+    is ApiResult.Failure -> throw failure.toException()
+}
+
+/** A transport failure is a plain [IOException]; anything else a [CaptureApiException]. */
+internal fun ApiFailure.toException(): IOException = when (this) {
+    is ApiFailure.Network -> IOException("The capture server could not be reached.")
+
+    is ApiFailure.Server -> CaptureApiException(error.code, error.message, retryable)
+
+    is ApiFailure.Incompatible -> CaptureApiException(
+        ServerCaptureSessionApi.INCOMPATIBLE,
+        "The capture server sent a response this app cannot read.",
+        retryable = false
+    )
+}
+
+/**
+ * Chooses the capture API. Every build uses the server through [ServerCaptureSessionApi];
+ * `captureApi=memory` in the ignored `api.local.properties` switches a local build to the
+ * labelled [InMemoryCaptureSessionApi] for offline demonstrations.
+ */
 internal object CaptureApis {
     @Volatile private var override: CaptureSessionApi? = null
-    private val default: CaptureSessionApi by lazy {
-        if (BuildConfig.DEBUG) InMemoryCaptureSessionApi() else ServerCaptureSessionApi()
-    }
 
-    val current: CaptureSessionApi get() = override ?: default
+    @Volatile private var created: CaptureSessionApi? = null
+
+    private val useMemory: Boolean get() = BuildConfig.OVRLY_CAPTURE_API == MEMORY
+
+    /** True when uploads go to the in-memory server, so status text never claims a real upload. */
+    val isTestServer: Boolean get() = override?.isTestServer ?: useMemory
+
+    fun current(context: Context): CaptureSessionApi = override ?: created ?: synchronized(this) {
+        created ?: create(context.applicationContext).also { created = it }
+    }
 
     /** Replaces the API for tests; pass null to restore the default. */
     fun replace(api: CaptureSessionApi?) {
         override = api
     }
+
+    private fun create(context: Context): CaptureSessionApi = if (useMemory) {
+        InMemoryCaptureSessionApi()
+    } else {
+        ServerCaptureSessionApi(ApiServices.get(context)?.api?.let(::CaptureApi))
+    }
+
+    private const val MEMORY = "memory"
 }
 
 /**
  * An in-memory capture server with the BE-06 rules that matter to the client: the chunk grid,
  * idempotent replay by `(session_id, seq)`, conflicts for different bytes, out-of-order gaps,
  * no new chunks after close and a close that cannot change its choice. Used by unit tests and,
- * labelled as a test server, by debug builds until the real client is wired.
+ * labelled as a test server, by local builds with `captureApi=memory`.
  */
 internal class InMemoryCaptureSessionApi : CaptureSessionApi {
     override val isTestServer: Boolean = true
