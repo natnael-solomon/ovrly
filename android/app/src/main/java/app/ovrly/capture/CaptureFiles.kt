@@ -17,7 +17,7 @@ class CaptureFiles internal constructor(private val root: File, private val cont
 
     private val ledger = CaptureLedger(root)
     private val storage = ChunkStorage(root, ledger)
-    private var open: OpenChunk? = null
+    private val cursor = ChunkCursor(storage)
 
     /** Bytes currently stored on the device for this capture. */
     val bytes: Long get() = storage.bytes
@@ -42,13 +42,13 @@ class CaptureFiles internal constructor(private val root: File, private val cont
         }
         storage.manifest = LocalManifest(UUID.randomUUID().toString())
         storage.save()
-        open = storage.open(0)
+        cursor.begin()
         return replaced
     }
 
     @Synchronized
     fun writeAudio(buffer: ByteArray, length: Int, elapsedMs: Long) {
-        val chunk = chunkFor(elapsedMs, acceptLate = true) ?: return
+        val chunk = cursor.chunkFor(elapsedMs, acceptLate = true) ?: return
         storage.ensureRoom(length.toLong())
         chunk.audio.write(buffer, 0, length)
         chunk.audioBytes += length
@@ -58,26 +58,57 @@ class CaptureFiles internal constructor(private val root: File, private val cont
     }
 
     /**
-     * Keeps a sampled frame on the device only; its capture time is listed with the chunk it
-     * falls in. A frame for an already sealed chunk is dropped and counted.
+     * Takes a probe's capture time from [elapsed] and registers it in one locked step, so no
+     * audio write or tick can seal its chunk in between. Until the frame is written with
+     * [writeFrame] or the probe is released, the chunk is held at its interval's end instead
+     * of being sealed without the frame's text. Null when no capture is open or past 3:00.
      */
     @Synchronized
-    fun writeFrame(jpeg: ByteArray, elapsedMs: Long) {
-        val chunk = chunkFor(elapsedMs, acceptLate = false)
-        if (chunk == null) {
-            if (elapsedMs < CaptureLimits.LIVE_MS) storage.droppedFrames++
+    internal fun frameStarted(elapsed: () -> Long): Probe? {
+        val elapsedMs = elapsed()
+        return if (cursor.frameStarted(elapsedMs)) Probe(elapsedMs) else null
+    }
+
+    /** A registered probe; [release] it when it is not kept or fails before it is written. */
+    internal inner class Probe(val elapsedMs: Long) {
+        /** Drops the registration; a no-op once the frame was written. Nothing is counted. */
+        fun release() {
+            synchronized(this@CaptureFiles) { cursor.release(elapsedMs) }
+        }
+    }
+
+    /**
+     * Records one frame the sampler wanted: its text goes into the chunk of
+     * [FrameText.framePtsMs], held for it if that interval already ended, and the image [jpeg]
+     * stays on the device only. A capped frame is only counted. A frame for a chunk that was
+     * already sealed (it was never registered with [frameStarted]) is dropped and counted;
+     * one that arrives after [finish] was already counted as unfinished.
+     */
+    @Synchronized
+    internal fun writeFrame(jpeg: ByteArray?, text: FrameText) {
+        if (cursor.open == null) return
+        if (text.status == FrameStatus.CAPPED) {
+            storage.cappedFrames++
             return
         }
-        storage.keepFrame(jpeg, elapsedMs)
-        chunk.frameOffsetsMs += elapsedMs
-        storage.frames++
+        val elapsedMs = text.framePtsMs
+        cursor.frameDone(elapsedMs) { chunk ->
+            if (chunk == null) {
+                if (elapsedMs < CaptureLimits.LIVE_MS) storage.droppedFrames++
+            } else {
+                jpeg?.let { storage.keepFrame(it, elapsedMs) }
+                chunk.frames += text
+                storage.frames++
+                if (text.status == FrameStatus.FAILED) storage.failedFrames++
+            }
+        }
     }
 
     /** Seals every chunk whose interval ended before [elapsedMs]. */
     @Synchronized
     fun advance(elapsedMs: Long) {
-        if (open != null && elapsedMs < CaptureLimits.LIVE_MS) {
-            chunkFor(elapsedMs, acceptLate = true)
+        if (cursor.open != null && elapsedMs < CaptureLimits.LIVE_MS) {
+            cursor.chunkFor(elapsedMs, acceptLate = true)
         }
     }
 
@@ -89,11 +120,11 @@ class CaptureFiles internal constructor(private val root: File, private val cont
     @Synchronized
     fun finish(durationMs: Long, reason: String, signal: Boolean) {
         val duration = durationMs.coerceIn(0, CaptureLimits.LIVE_MS)
-        if (open != null) {
-            if (duration > 0) chunkFor(duration - 1, acceptLate = true)
-            open?.let { storage.seal(it, maxOf(duration, ChunkGrid.startOf(it.seq))) }
+        if (cursor.open != null) {
+            // Frames still being read at Stop or 3:00 are lost; they are counted, not dropped.
+            cursor.finish(duration)
         }
-        open = null
+        storage.closeOpenDirs()
         storage.manifest = storage.manifest?.copy(
             finished = true,
             durationMs = duration,
@@ -105,8 +136,7 @@ class CaptureFiles internal constructor(private val root: File, private val cont
 
     @Synchronized
     fun delete() {
-        open?.audio?.close()
-        open = null
+        cursor.clear()
         if (root.exists() && !root.deleteRecursively()) {
             throw IOException("Could not delete local capture.")
         }
@@ -163,24 +193,6 @@ class CaptureFiles internal constructor(private val root: File, private val cont
             return true
         }
         return false
-    }
-
-    /**
-     * The open chunk for [elapsedMs], sealing the chunks before it. Audio that arrives just
-     * after its chunk was sealed goes into the open chunk; a late frame is dropped and counted,
-     * because its offset would fall outside the open chunk. Null past the 3-minute limit.
-     */
-    private fun chunkFor(elapsedMs: Long, acceptLate: Boolean): OpenChunk? {
-        var chunk = open ?: throw IOException("Capture output is closed.")
-        val seq = ChunkGrid.seqAt(elapsedMs)
-        while (elapsedMs < CaptureLimits.LIVE_MS && chunk.seq < seq) {
-            storage.seal(chunk, ChunkGrid.endOf(chunk.seq))
-            chunk = storage.open(chunk.seq + 1)
-            open = chunk
-        }
-        return chunk.takeIf {
-            elapsedMs < CaptureLimits.LIVE_MS && (acceptLate || it.seq == seq)
-        }
     }
 
     companion object {

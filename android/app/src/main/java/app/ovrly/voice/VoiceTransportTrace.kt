@@ -19,7 +19,7 @@ internal class VoiceTransportTrace(private val diagnostics: VoiceDiagnostics) {
             VoiceEvent.Interrupted -> "interrupted"
             VoiceEvent.TurnComplete -> "turn_complete"
             is VoiceEvent.Error -> "error"
-            VoiceEvent.Text -> "text"
+            is VoiceEvent.Text -> "text"
             VoiceEvent.Unknown -> "other"
         }
     )

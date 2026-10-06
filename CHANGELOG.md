@@ -13,6 +13,70 @@
   `api.local.properties` keeps the labelled in-memory test server for offline demonstrations.
   The live panel labels stub report versions (`fixture`) as "Fixture / not live".
 
+- On-device screen text for live capture (AN-06, #100): frames are probed once a second and
+  kept on a visible change or a 5-second heartbeat, at most 20 per minute; likely text regions
+  are cropped and read on the phone by bundled ML Kit Text Recognition Latin 16.0.1. Chunks now
+  carry `{text, box, frame_pts}` observations, per-frame status and recognition time, the
+  sampling policy and the recognizer version, and declare `text` or `both` coverage. Frames
+  still never leave the device. ML Kit's Google datatransport upload components are removed
+  from the manifest, and a build check fails if any datatransport or Firebase component is
+  left in a merged manifest (decision 0005). Stop no longer waits for recognition. A frame's
+  text stays in the chunk of its probe time even when recognition runs past the chunk's end
+  (the chunk is held until it is in); frames still being read at Stop are counted.
+
+- Android voice actions wired to the API (AN-09, #35): the Voxide manifest
+  advertises `open_check`, `save_report`, `queue_cancel`, `queue_retry` and
+  `queue_continue` beside `open_tab`, each sent through `data/VoiceApi.kt` to
+  `POST /v1/voice/actions` with one `request_id` per command (replayed on
+  client retries and repeated tool calls). Tool results carry a `checks` state
+  of the five most recent checks (ids, status and source; no URLs), and the
+  device resolves the `latest` alias. Cancellation needs an on-screen
+  confirmation bound to its target that times out after 30 seconds and is
+  discarded when voice stops. A voice panel shows the recognized speech, each
+  accepted, denied or failed result and the opened check, and offers a typed
+  command alternative that works without a microphone or connection to Voxide.
+  Recognized text is never logged or stored.
+
+- Evidence stages (BE-09, #27): `retrieval` and `assessment` queue stages turn a
+  published version with claims into the next version with evidence and assessments.
+  Router-written neutral and disconfirming queries search Scholarxiv Papers; hits are
+  deduplicated by DOI and arXiv id, ranked with in-house BM25 and read as abstracts or
+  open-access full text from arXiv or Europe PMC, with the inspection level recorded;
+  Crossref flags retracted, withdrawn or corrected sources and unknown stays unknown.
+  The router labels each passage, retracted sources are never counted, the overall label
+  is computed and abstains when evidence is missing, and every version is
+  citation-checked before it is published. Budgets per claim keep unreached claims
+  visible but unassessed. Papers and Router calls share a PostgreSQL token bucket under
+  the account limit (migration `0010_provider_buckets`); calls wait for a token and a
+  provider 429 holds the bucket for its `Retry-After`. Long stages heartbeat in the
+  background, and assessment is enqueued with the fenced retrieval publish. The
+  production `reanalysis` handler reruns corrected claims, searches deeper, or brings in
+  the confirmed full video once it has a report, re-checking with backoff. Registered
+  only with the server-side `OVRLY_SCHOLARXIV_API_KEY`; tests replay synthetic
+  cassettes and never call a provider.
+- Android instrumented tests in CI (REPO-05 part 1, #76): a new **Android
+  instrumented checks** workflow runs AndroidX Test, Espresso and Compose tests
+  on API 29 and API 34 emulators for every PR that touches Android, with the
+  same documentation-only skip as Android checks, AVD snapshots cached only by
+  `main`, one automatic retry with flakes named in the job summary, and reports
+  kept for seven days. The first tests cover share intake against a provider in
+  another app with real `content://` grants (granted, ungranted, revoked and
+  deleted sources, oversize, overlong and mislabelled files), the share sheet's
+  rejections, `CaptureService` start, Stop, the continuation choice, the
+  3-minute limit, denied permissions and a projection stopped mid-capture with
+  every resource released, and overlay create and dismiss without leaked
+  windows, including a refused or revoked overlay permission. JaCoCo unit and
+  instrumented line coverage (off unless `-Povrly.coverage=true`) is summarized
+  in the job with 90% floors for capture, share and contract parsing and at most
+  a one-point drop against `main` (#13).
+
+- Capture pipeline orchestration (#24): successful byte validation atomically
+  queues `asr` and `device_text`, then `claim_extraction` after both publish,
+  with owner-scoped, idempotent per-chunk jobs and Stop cancellation across the
+  chain. Capture polling reads claim progress from the latest report, including
+  fixture-labelled stub versions. Real stage handlers and real-claims validation
+  remain #20/#25; queued work is not reported as successful analysis.
+
 - Report versions carry `fixture` (true only for development stub versions) in every
   report read, including the `report` of an investigation, so clients can label stub
   claims as a fixture rather than live results. Additive to `0.2.0-draft`; the
@@ -151,6 +215,10 @@
 - Added public-window background blur on supported Android 12+ devices, with opaque fallbacks.
 
 ### Fixed
+
+- Share intake no longer crashes on a file whose provider calls it a video but
+  whose bytes are not a readable media container; it is rejected as not a
+  readable video.
 
 - Addressed RES-02 benchmark review: withdraw the unreviewable hosted model/chunk preference, label the private OCR procedure explicitly, distinguish existing evidence from remaining plan gates, and guard zero-reference aggregate rates. Opt-in `res02-v2` scoring fixes currency and letter-number tokenization and counts ignored punctuation-only ASR segments without changing v1 baseline scoring or timestamp indexes.
 

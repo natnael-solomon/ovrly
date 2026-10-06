@@ -96,6 +96,18 @@ async def publish_report_version(
 REANALYSIS_STAGE = "reanalysis"
 
 
+def reanalysis_request_of(stage: str, payload: dict[str, Any] | None) -> uuid.UUID | None:
+    """The reanalysis request a job works for: the ``reanalysis`` job itself, or the
+    retrieval and assessment it started."""
+    value = (payload or {}).get(
+        "request_id" if stage == REANALYSIS_STAGE else "reanalysis_request_id"
+    )
+    try:
+        return uuid.UUID(str(value)) if value else None
+    except ValueError:
+        return None
+
+
 def contract_stage(row: Row[Any]) -> str:
     stage: str = row.stage
     if stage != REANALYSIS_STAGE:

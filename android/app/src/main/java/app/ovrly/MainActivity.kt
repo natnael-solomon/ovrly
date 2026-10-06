@@ -336,6 +336,14 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+                    if (!gallery) {
+                        // Voice results, the typed alternative and cancel confirmation (#35).
+                        app.ovrly.ui.voice.VoiceActivityHost(
+                            voice,
+                            orbDock,
+                            Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
+                        )
+                    }
                 }
             }
         }

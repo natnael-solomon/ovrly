@@ -14,6 +14,7 @@ from services.jobs.handlers import CancellationRequested, JobContext, JobHandler
 from services.jobs.queue import ClaimedJob, JobQueue, Lease, LeaseLost, PublishRejected
 from services.jobs.retries import RetryableError, RetryPolicy, UnknownOutcome
 from services.logging import configure_logging
+from services.pipeline.publish import publish_stage
 
 logger = logging.getLogger(__name__)
 
@@ -117,9 +118,15 @@ class Worker:
                 return
             await self.faults.checkpoint(Checkpoint.BEFORE_PUBLISH, job)
             try:
-                await self.queue.publish(lease, result)
+                published = await publish_stage(self.queue, job, result)
+                if published is None:
+                    await self.queue.cancel(lease)
+                    logger.info("Job %s cancelled during stage %s", job.id, job.key.stage)
             except PublishRejected as rejected:
                 logger.warning("Job %s not published: %s", job.id, rejected.reason)
+            except INFRASTRUCTURE_ERRORS:
+                logger.warning("Job %s infrastructure error in stage %s", job.id, job.key.stage)
+                await self._release(lease)
             await self.faults.checkpoint(Checkpoint.AFTER_PUBLISH, job)
         except asyncio.CancelledError:
             # Forced shutdown: hand the lease back so the job is neither lost nor duplicated.

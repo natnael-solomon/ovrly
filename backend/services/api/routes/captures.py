@@ -19,7 +19,6 @@ from services.api.auth import CurrentPrincipal, load_owned
 from services.api.capture_schemas import (
     MAX_CAPTURE_MS,
     CaptureChunk,
-    CaptureClaimState,
     CaptureCloseRequest,
     CaptureCreateRequest,
     CaptureMetadata,
@@ -30,11 +29,20 @@ from services.api.capture_schemas import (
 from services.api.errors import ApiError, safe_error
 from services.api.routes.common import engine, settings, upload_store
 from services.api.routes.investigations import _idempotency_key
-from services.captures import gaps, interval, manifest, session_response, stage_key
+from services.captures import (
+    chunk_jobs,
+    claim_progress,
+    gaps,
+    interval,
+    manifest,
+    session_response,
+    stage_key,
+)
 from services.jobs.models import jobs
 from services.jobs.queue import JobQueue
 from services.models import capture_chunks, capture_sessions, investigations, principals
-from services.pipeline.stub_reports import stub_claim_progress, sync_capture_stub
+from services.pipeline.stub_reports import sync_capture_stub
+from services.reports import latest_reports
 
 router = APIRouter(tags=["captures"])
 
@@ -292,7 +300,7 @@ async def put_chunk(
                 queued = await JobQueue(request.app.state.database).enqueue(
                     connection,
                     stage_key(capture_id, seq),
-                    {"session_id": str(capture_id), "seq": seq, "owner_id": str(principal.id)},
+                    {"capture_id": str(capture_id), "seq": seq},
                     owner_id=principal.id,
                 )
                 stored = (
@@ -364,9 +372,22 @@ async def close_capture(
             ).one()
             if not body.continue_research:
                 queue = JobQueue(request.app.state.database)
-                for chunk in received:
-                    if chunk.job_id is not None:
-                        await queue.request_cancel(chunk.job_id, connection=connection)
+                identifiers: Sequence[uuid.UUID] = (
+                    (
+                        await connection.execute(
+                            select(jobs.c.id)
+                            .where(
+                                chunk_jobs(capture_id, [c.seq for c in received]),
+                                jobs.c.owner_id == principal.id,
+                            )
+                            .order_by(jobs.c.id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                for job_id in identifiers:
+                    await queue.request_cancel(job_id, connection=connection)
             await connection.execute(
                 update(investigations)
                 .where(investigations.c.id == capture_id)
@@ -392,29 +413,41 @@ async def capture_status(
         )
         session = await load_owned(connection, capture_sessions, capture_id, principal)
         chunks = await chunks_for(connection, capture_id)
-        states = {
-            row.id: row
-            for row in (
+        states = list(
+            (
                 await connection.execute(
                     select(jobs).where(
-                        jobs.c.id.in_([c.job_id for c in chunks if c.job_id is not None]),
+                        chunk_jobs(capture_id, [c.seq for c in chunks]),
                         jobs.c.owner_id == principal.id,
                     )
                 )
             ).all()
-        }
+        )
         work = []
         for chunk in chunks:
             if chunk.received_at is None:
                 continue
-            job = states.get(chunk.job_id)
+            related = [
+                row
+                for row in states
+                if row.input_hash == stage_key(capture_id, chunk.seq).input_hash
+            ]
+            # Keep the validation job as the stable chunk receipt, but expose failures
+            # and active work from every downstream stage rather than hiding it.
+            job = next((row for row in related if row.id == chunk.job_id), None)
             state = job.state if job is not None else "deleted"
             status: Literal["waiting", "checking", "failed", "cancelled"] = "waiting"
-            if session.continue_research is False or state in {"cancelled", "deleted"}:
+            if (
+                session.continue_research is False
+                or state in {"cancelled", "deleted"}
+                or any(
+                    row.state in {"cancelled", "deleted"} or row.cancel_requested for row in related
+                )
+            ):
                 status = "cancelled"
-            elif state == "failed":
+            elif any(row.state == "failed" for row in related):
                 status = "failed"
-            elif state in {"leased", "running"}:
+            elif any(row.state in {"leased", "running"} for row in related):
                 status = "checking"
             work.append(
                 CaptureWork(
@@ -424,17 +457,8 @@ async def capture_status(
                     error=safe_error("PROCESSING_FAILED" if status == "failed" else None),
                 )
             )
-        claims: list[CaptureClaimState] = []
-        extraction: Literal["not_started", "partial", "complete"] = "not_started"
-        if settings(request).stub_reports:
-            # Development-only: progress of the fixture report (OVRLY_STUB_REPORTS).
-            stub = await stub_claim_progress(connection, capture_id, session.continue_research)
-            if stub is not None:
-                progress, extraction = stub
-                claims = [
-                    CaptureClaimState(claim_id=claim_id, processing_status=state, error=None)
-                    for claim_id, state in progress
-                ]
+        reports = await latest_reports(connection, [capture_id])
+        claims, extraction = claim_progress(reports.get(capture_id), session.continue_research)
         return CaptureStatus(
             session=session_response(session, chunks, await database_time(connection)),
             continue_research=session.continue_research,

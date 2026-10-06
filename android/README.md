@@ -272,9 +272,9 @@ stored or sent.
 | Rule | Behavior |
 | --- | --- |
 | Chunk grid | `CaptureLimits.CHUNK_MS` = 10000. Chunk `seq` covers `[seq * 10000, min((seq + 1) * 10000, 180000))` ms from the start of capture, the grid BE-06 enforces. Only the final chunk may be shorter; the 3-minute stop seals seq 17 at exactly 180000 ms. RES-02 may tune the length within the contract's 1000..30000. |
-| Package | One ZIP per chunk (`application/zip`): `chunk.json` (seq, `start_ms`, `end_ms`, `timebase: capture`, modality, audio format, `frames_uploaded: false`, the capture times of the frames sampled in the interval, an empty `text_observations` list, the sampling policy and `recognizer: null`) and `audio-16000-mono-s16le.pcm`. ZIP entry times are fixed to the ZIP epoch. Only audio is uploaded, so a chunk declares `speech`; a chunk without audio is skipped and recorded as such. |
-| Frames | Fixed sampling: one JPEG (720 px long edge, quality 72) about every 5 s, as before. Frames stay in `capture/frames/` on the device and are never uploaded; no text is recognized on the device. On-device OCR (AN-06) is deferred by user decision. Local frames are deleted first when space is needed. |
-| Local manifest | `no_backup/capture/capture.json` (version 2) lists every chunk with size, SHA-256 and frame times, chunks skipped because they held no audio, gaps, chunks deleted after upload, kept and late-dropped frames, the fixed sampling policy, duration and stop reason. A gap of kind `interrupted` is recorded when playback audio stops arriving for at least 1 s. Screen lock still ends the capture (see [compatibility](../docs/compatibility.md)), so the final chunk ends at the lock. There is no pause control. |
+| Package | One ZIP per chunk (`application/zip`): `chunk.json` (seq, `start_ms`, `end_ms`, `timebase: capture`, modality, audio format, `frames_uploaded: false`, each frame read in the interval with its `frame_pts`, status, `recognition_ms` and `failed_regions`, `text_observations` as `{text, box, frame_pts}` with the box normalized to 0..10000 of the frame, the sampling policy and the recognizer name and version) and, when there was audio, `audio-16000-mono-s16le.pcm`. Frame images are never packaged. ZIP entry times are fixed to the ZIP epoch. Modality is `speech` when the chunk has audio, `text` when at least one frame in it was read (even if it held no text), `both` for both; a chunk with neither is skipped and recorded as such. |
+| Screen text (AN-06, #100) | The screen is probed once a second at a 720 px long edge. A probe is kept when its 64x64 grayscale thumbnail differs from the last kept one by a mean absolute difference of at least 12, or 5 s after the last kept frame (heartbeat), and at most 20 frames are kept in any 60 s; refused frames are counted as capped. Probe rate, threshold and heartbeat are the RES-02 workstation values (#14). Each kept frame is cropped to likely text regions (rows with many sharp brightness steps, padded; the whole frame when they cover most of it; none when no row qualifies, status `no_text_regions`) and read on the device by ML Kit Text Recognition Latin 16.0.1 with the bundled model ([0005](../docs/decisions/0005-on-device-screen-text.md)). Regions are grown to at least 32 px on each edge and read one at a time. Each line becomes an observation; a region whose read errors or times out (5 s) is counted in `failed_regions`, and the frame is `failed` only when every region failed. After a timeout the frame's remaining regions are skipped (counted as failed), and the timed-out bitmap is left to the garbage collector because ML Kit does not cancel the task. A frame's text always goes into the chunk of its probe time: the probe is registered when its time is taken, and when it is still being copied or read at the chunk's 10 s boundary, that chunk (and any after it, so chunks stay in order) is held and sealed as soon as the text is in, while audio continues into the next chunk. A frame still being read 45 s after its probe time (every region timing out, plus a margin) is given up on and counted as unfinished, so a held chunk always seals. Frames still being read at Stop or 3:00 are counted as unfinished. A card shorter than the 1 s probe interval can still be missed. Recognition runs on the frame thread after the frame is copied out of the reader, never under the lock that Stop takes, so Stop does not wait for it. The kept frame JPEG (quality 72) stays in `capture/frames/` and is deleted first when space is needed. |
+| Local manifest | `no_backup/capture/capture.json` (version 2) lists every chunk with size, SHA-256, frame times and observation count, chunks skipped because they held neither audio nor a read frame, gaps, chunks deleted after upload, kept, late-dropped, capped, failed and unfinished (still being read at Stop) frames, the sampling policy, the recognizer version, duration and stop reason. A gap of kind `interrupted` is recorded when playback audio stops arriving for at least 1 s. Screen lock still ends the capture (see [compatibility](../docs/compatibility.md)), so the final chunk ends at the lock. There is no pause control. |
 | Storage | The 32 MiB cap applies to what is on the device. When a write would exceed it, local frames are deleted first, then chunks the server already holds, oldest first. Unsent chunks are never deleted: if they alone fill the budget, capture stops with "N chunks are saved on device, not yet sent". A new capture refuses to replace one whose chunks are still waiting to be sent or whose continuation choice has not been closed on the server; it replaces it only after that upload stopped for good (closed, not continued or permanently failed) and says how many unsent chunks were deleted. A capture interrupted by process death keeps its sealed chunks. A single-file capture left by an app version from before chunking is deleted when the app opens, with a message saying so. |
 | Upload | Each sealed chunk schedules the WorkManager chain `capture-upload-<local session id>` (`APPEND_OR_REPLACE`, network required, exponential backoff from 10 s). A capture that sealed no chunk schedules nothing and never opens a server session. `CaptureUploader` opens the server session with the local session id as `Idempotency-Key`, sends each unsent chunk with `PUT /v1/captures/{id}/chunks/{seq}` and marks it sent only after the server reports it stored, so retries and lost acknowledgements are idempotent by `(session_id, seq)`. Transport and retryable errors retry; any other contract error stops the upload and keeps the chunks. Upload bookkeeping is bound to the local session id, so a worker that outlives its capture cannot mark a newer capture sent, closed or failed. |
 | Status | `CaptureState.upload` reports sending, sent, closed or "Saved on device, not yet sent: N of M chunks". The foreground notification shows elapsed time, upload progress and Stop. |
@@ -302,14 +302,43 @@ with the new constraint, and pending chunks read "Waiting for Wi-Fi".
 
 Tests: `CaptureModelTest` (grid, 3-minute boundary, upload text, continuation
 prompt), `CaptureFilesTest` (sequencing, contiguous offsets, package contents,
-local-only frames, late frames, gaps, skipped chunks, the 180000 ms stop,
+text frames and observations, local-only frame images, late frames, gaps, skipped
+chunks, the 180000 ms stop,
 rolling deletion, local frame eviction, replacement refusal, restore after
 process death), `CaptureUploaderTest` (idempotent re-upload, offline retention,
 retry, close with both choices, no server session without chunks, a pending
 close blocking replacement, a stale worker unable to write into a new capture,
 unconfigured server), `CaptureApiTest` (MockWebServer: idempotent create, multipart chunk and duplicate
-retry, close body, status fixture, error mapping, an end-to-end upload and close)
-`CaptureLiveResultsFetcherTest` (status and investigation reads, Room storage of the read,`npolling that ends on a closed session and reports a lost connection) and`n`CaptureStopLogTest` (a normal stop is not logged as an interruption).
+retry, close body, status fixture, error mapping, an end-to-end upload and close),
+`CaptureLiveResultsFetcherTest` (status and investigation reads, Room storage of the read,
+polling that ends on a closed session and reports a lost connection), `CaptureTextTest` (probe rate, change and heartbeat
+decisions, the per-minute cap, a brief synthetic title card caught by the change
+trigger and missed by fixed 5 s sampling, text-region crops, box normalization,
+the bundled recognizer version) and `CaptureStopLogTest` (a normal stop is not
+logged as an interruption). Recognition itself runs only on a device.
+
+### Telemetry
+
+ML Kit brings Google's `datatransport` libraries, which would upload SDK usage
+metrics. `app/src/main/AndroidManifest.xml` removes their upload components
+(`JobInfoSchedulerService`, `AlarmManagerSchedulerBroadcastReceiver`,
+`TransportBackendDiscovery`) with `tools:node="remove"`, and
+`verify<Variant>NoTelemetry` fails `assemble` and `check` if any
+`com.google.android.datatransport` or `com.google.firebase` component is left in
+the merged manifest of any variant. Nothing recognized or sampled goes to Google;
+the text observations go to the ovrly backend in the chunks.
+
+### APK size
+
+The bundled recognizer adds native libraries for each ABI (about 10.6 MB for
+arm64-v8a and 6.5 MB for armeabi-v7a, compressed) and a 1.2 MB model. Release
+builds keep only `arm64-v8a` and `armeabi-v7a` (`ndk.abiFilters` on the release
+build type); debug builds keep every ABI so x86_64 emulator CI can run them.
+Measured on 6 October 2026: the unsigned release APK is 24.1 MB, of which the
+native libraries are 17.0 MB (arm64-v8a 10.6 MB, armeabi-v7a 6.5 MB), the model
+1.2 MB and the minified code 3.8 MB; the debug APK with every ABI is 83.9 MB. A
+ChromeOS (x86_64) release is not built; `ChromeOsAbiSupport` is suppressed on that
+line only, since ChromeOS is not a supported device (BC-D02).
 
 ## Live overlay results
 
@@ -366,6 +395,62 @@ Polling keeps running after Stop until the session settles or the poll policy's 
 it, so results that arrive after close still reach the panel. With `captureApi=memory` the
 panel stays "not connected": the in-memory server has no investigations to read. When the polled report version is a development stub (`fixture` true, `OVRLY_STUB_REPORTS`), `PollingLiveResultsSource` labels the panel "Fixture / not live", as the fixture source does, so synthetic claims are never shown as live research.
 
+## Instrumented tests and coverage
+
+REPO-05 part 1 (#76) adds `app/src/androidTest` with AndroidX Test (runner, core,
+rules, ext-junit), Espresso and the Compose test rule (`ui-test-junit4`, with
+`ui-test-manifest` as a debug dependency). The **Android instrumented checks**
+workflow runs them on emulators; do not run an emulator on a shared low-memory
+machine, but compile the tests locally with:
+
+```bash
+sh gradlew --no-daemon --console=plain :app:assembleDebugAndroidTest
+```
+
+| Test | What it proves |
+| --- | --- |
+| `ShareInputReaderTest` | `ShareInputReader` against a provider in another app with real `content://` grants: a granted video is accepted and streamed (size from `OpenableColumns.SIZE`, from the descriptor length, or unknown and capped while staging), an ungranted or revoked URI is private, a revoked grant stops the copy, a deleted file is expired, oversize and overlong videos, a provider type that is not video, a sniffed container winning over the provider, an audio-only file and a text file called `video/mp4`, a non-`content` URI and the share intent shapes. |
+| `SharePolicyDeviceTest` | Link and video rules on ART's `java.net.URI`. |
+| `ShareIntakeSheetTest` | The sheet's oversize and malformed rejections, the file alternative and Close. |
+| `CaptureServiceTest` | `CaptureService` with a real MediaProjection: start and Stop, Stop with a continuation choice (the first choice wins), the 3-minute limit, playback-audio permission denied, consent not granted, and the projection stopped by the system mid-capture. After every stop the playback recorder, notification and service are gone, the platform lists no projection for the app (`dumpsys media_projection`, checked positive while recording) and every capture display, in any state, is removed, which only the app's `VirtualDisplay.release()` can do. One accommodation: on Android 10 (API 29) the platform keeps the display of a projection it stopped until the app's process dies, and `release()` can no longer remove it, so for that one path the display check runs only from API 30 and the test asserts the stop reported no cleanup issue; counts are taken against the value before start, so the kept display does not affect later tests. |
+| `CaptureUploadsTest` | The Wi-Fi-only preference is saved and reschedules the upload chain on unmetered networks, and `CaptureUploadWorker` under WorkManager sends every chunk to the in-memory server and closes it with either choice. |
+| `OverlayServiceTest` | `OverlayService` show, hide, repeated show and demo/fixture/reset modes leave exactly one window, then none; a refused or mid-display revoked overlay permission leaves none; `OverlayWindow` shows and closes one window. Windows are counted from `dumpsys window`. |
+
+The fixture provider (`ShareFixtureProvider`) is declared in the androidTest
+manifest, so it runs in the test package's own process and uid; it is plain Java
+because that process does not load the app's Kotlin or AndroidX classes. The
+shell grants and revokes its URIs for `app.ovrly`. Videos are generated on the
+emulator with `MediaCodec`; no media is committed. Screen-capture consent comes
+from `appops set app.ovrly PROJECT_MEDIA allow`, which makes the system consent
+screen answer without a dialog, and the overlay permission from the
+`SYSTEM_ALERT_WINDOW` app op. Revoking `RECORD_AUDIO` kills the app process, so
+the mid-capture audio revocation path cannot run in-process; the
+projection-stopped case covers revocation during capture instead.
+
+Coverage is off by default. `-Povrly.coverage=true` turns on JaCoCo 0.8.14 for
+unit and instrumented tests of the debug variant and registers
+`:app:jacocoDebugReport`, which reads whatever execution data exists (unit
+tests, connected runs and retried attempts) without running tests. Excluded,
+and listed in `app/build.gradle.kts`: generated code (`R`, `BuildConfig`,
+`Manifest`, Room `_Impl`, serializers, `ComposableSingletons`), the Compose
+preview files (`GalleryPreviews`, `AppearancePreviews`, `LiveResultsPreviews`)
+and the gallery fixtures. Previews inside production files (`GlassOverlay.kt`,
+`DemoOverlayPanel.kt`) stay counted. The API 34 job enforces at least 90% of
+lines in `capture/`, `share/` and `contract/`, and at most a one-point drop in
+overall lines against the last `main` measurement; API 29 is reported only.
+
+Tests run under Android Test Orchestrator, so each test has its own process and a
+crash fails only that test. `.github/scripts/android_instrumented.py` also
+requires every `@Test` declared in `src/androidTest` to appear in the first
+attempt's results; missing or undeclared tests fail the job without a retry, so
+an aborted run cannot pass on a retry of the one test it reported.
+
+Flake policy: `.github/scripts/android_instrumented.py` retries each failed test
+once, in its own run, in the same job and names flakes in the job summary and as warnings. A
+test that flakes twice in 48 hours, or twice on one PR, is quarantined with
+`@Ignore` and an issue on the same day. Never re-run a job to get a green
+result.
+
 ## Gallery and demo
 
 Open `app/src/main/java/app/ovrly/ui/GalleryPreviews.kt` in Studio's Design or Split view. `GlassOverlay.kt` contains the live-control previews. Gallery selection does not change the live overlay.
@@ -403,10 +488,10 @@ key; never use a secret key or distribute a live-configured APK casually.
 There is no local attempt cap: whoever runs live tests tracks provider usage
 against the dashboard.
 
-Live voice sends microphone audio for tab switching only and never
-reconnects automatically. Native authorization, device compatibility and
-billing semantics remain unverified; one connection was charged as one session
-in device testing. Product voice actions remain separate work (#33, #35).
+Live voice sends microphone audio for tab switching and the voice actions
+below, and never reconnects automatically. Native authorization, device
+compatibility and billing semantics remain unverified; one connection was
+charged as one session in device testing.
 
 ### Session policy
 
@@ -457,42 +542,81 @@ Diagnostics use the `OvrlyVoice` log tag and contain only setup stages, status
 codes, event categories, counts and byte measurements: no keys, URLs,
 transcripts, audio or target IDs. Socket and TLS cleanup run off the UI thread.
 
-### Planned voice command contract
+### Voice actions
 
-The offline contract defines these exact, case-sensitive names. Every command
-takes only `{"id":"target-id"}`; extra arguments (including `confirmed` or
-`owner`) are rejected. The tool-call envelope's `id` identifies the call and is
-separate from `args.id`, which identifies the target.
+AN-09 (#35) wires the BC-D04 allowlist to `POST /v1/voice/actions` (BE-10, #33)
+through `data/VoiceApi.kt` on the shared `ApiClient` and guest credential. The
+manifest advertises `open_tab` and these five actions, each taking exactly
+`{"id":"..."}`; extra arguments (including `confirmed` or `owner`) are refused
+on the device and never sent. The tool-call envelope's `id` identifies the call
+and is separate from `args.id`, which identifies the target.
 
-| Command | Target | On-screen confirmation |
-| --- | --- | --- |
-| `open_check` | Investigation/check | No |
-| `save_report` | Report | No |
-| `queue_cancel` | Job | Required |
-| `queue_retry` | Job | No |
-| `queue_continue` | Job | No |
+| Action | Target | On-screen confirmation | After the server accepts |
+| --- | --- | --- | --- |
+| `open_check` | Investigation | No | The voice panel opens the check (status and claim count; a development fixture report is labelled as a fixture) until the report screens (#34) exist. |
+| `save_report` | Report | No | Nothing else; the server saved it. |
+| `queue_cancel` | Job | Required | Stored checks are reconciled. |
+| `queue_retry` | Job | No | Stored checks are reconciled. |
+| `queue_continue` | Job | No | Stored checks are reconciled. |
 
-The current client ID syntax is 1-128 ASCII characters, starting with a letter
-or digit and otherwise containing letters, digits, `_` or `-`. IDs are opaque
-and case-sensitive: no trimming, coercion, URL interpretation or guessing a
-missing ID from the selected screen. Reconcile this syntax with the shared
-schemas in #15 before wiring #33/#35; it is not an implemented backend schema.
-Valid syntax does not prove the target exists or belongs to the caller.
+The assistant cannot see the app, so every tool result carries the state key
+`checks`: the five most recent checks from the Room store, each with
+`investigation_id`, `report_id`, `job_id`, `status` and `source` (`link` or
+`video`); no URL, title or transcript. An id may also be the word `latest`,
+which the device resolves to the most recent check's investigation, report or
+job before anything is sent; with no check, report or job it answers without a
+request. Any other id is opaque and case-sensitive (1-128 ASCII letters, digits,
+`_` or `-`, starting with a letter or digit) and is sent as given.
 
-Only cancellation requires confirmation. Future integration must bind approval
-to the exact call and target, reject a remote `confirmed` flag, and discard
-pending approval on stop/backgrounding. Retry and continue remain subject to
-backend job-state and resource limits even without a confirmation dialog.
-None of these confirmations or product handlers is wired yet.
+Each command is one request with a new `request_id`. A retried tool call (same
+call id and arguments) replays its first result instead of running again, and
+client retries inside one request (cold start, a refreshed credential) resend
+the same `request_id`, so the server replays rather than acting twice. A
+response whose `request_id` does not echo the request is never used.
 
-The active manifest advertises only `open_tab`, which takes exactly
-`{"tab":"space"}` or `{"tab":"explore"}`. Settings is not a voice target. If
-that tab is already showing, the result says so and nothing changes; otherwise
-the app switches tabs (closing the gallery or an open report). Product requests
-return `status: error` with
-`VOICE_ACTION_UNAVAILABLE` when valid or `VOICE_ACTION_INVALID_ARGUMENTS` when
-invalid. All other actions, including delete/publish/settings, return
-`VOICE_ACTION_UNSUPPORTED`. No unfinished action returns success. Exact duplicate
-call IDs replay their prior result; changing a target under the same call ID
-stops the session as a protocol error. Malformed JSON fails protocol parsing.
-Tests exercise these paths with fakes and consume no provider sessions.
+| Server answer | What the user sees and the assistant is told |
+| --- | --- |
+| 200 `accepted` | Success with the server's message. |
+| 200 `denied` with `VOICE_TARGET_NOT_FOUND` (missing or another owner's target; the server never sends `VOICE_TARGET_NOT_OWNED`), `VOICE_ACTION_INVALID_STATE` (retry or continue on a finished job) or `VOICE_ACTION_UNSUPPORTED` | Error with the server's message and code. |
+| 200 with a `result` this version does not know | Error; nothing is assumed to have happened. |
+| 422 `VALIDATION_FAILED`, 409 `IDEMPOTENCY_KEY_REUSED`, any other error shape | Error with its code. |
+| No response, or a body outside the contract | "Cannot reach ovrly" or "update needed". |
+
+Cancellation waits for an on-screen dialog bound to that exact request and
+target; it is declined after 30 seconds, and every pending approval is
+discarded when voice stops, fails or the app leaves the foreground, including
+cancellations queued behind the dialog or still resolving their target. A remote
+`confirmed` flag is never read. Retry and continue never change a job on this
+server: they are accepted while the job is in progress and denied once it has
+finished.
+
+The voice panel above the tabs shows what the user said (`text_user`, joined
+per turn), the last result and the opened check. It appears while voice is
+live, after any result, and when the microphone is denied or voice ended with
+an error. Recognized text stays in memory for the screen: it is never logged,
+stored or uploaded, and a new session starts with an empty panel. The panel's
+typed alternative takes `open`, `save`, `cancel`, `retry` or `continue`,
+optionally followed by an id (default `latest`), and runs the same command path
+without a voice session, so it works with a denied microphone, after a
+disconnect and in the offline simulation; it never starts or reconnects voice.
+
+`open_tab` is unchanged: it takes exactly `{"tab":"space"}` or
+`{"tab":"explore"}`, Settings is not a voice target, and an already showing tab
+is reported without changes. Everything else, including delete, publish and
+settings, is refused on the device with `VOICE_ACTION_UNSUPPORTED`, shown on
+screen and never sent. Builds without an ovrly service address refuse the five
+actions with `VOICE_ACTION_UNAVAILABLE`. Changing a target under the same call
+id stops the session as a protocol error; malformed JSON fails protocol
+parsing. The offline simulation never issues tool calls.
+
+All unit and CI tests use fakes: `MockVoiceTransport`, a fake transport, MockWebServer on
+loopback or an OkHttp interceptor. `NoLiveSessionsTest` checks that test
+builds have no live opt-in or key and that every test constructing
+`VoxideTransport` points it at a fake. No test opens a provider session.
+
+| Test | What it proves |
+| --- | --- |
+| `VoiceApiTest` | Every shared voice-actions fixture with a valid request, sent and parsed through the client with its outcome; 422, 409 and network failures; a mismatched `request_id`; the same `request_id` on a cold-start retry. |
+| `VoiceBackendTest` | `latest` per target kind, explicit ids, no request without a target, the `checks` state without URLs, cancellation approved, declined, mis-answered, timed out and discarded, effects only after acceptance, the fixture allowlist and the unsupported-action denial. |
+| `VoiceCommandSessionTest` | Allowlisted calls reach the executor and others are refused, late answers carry the state and are shown, denials are visible, a repeated call runs once, an answer after stop is dropped with the approval discarded and no reconnect, and user speech is shown while assistant text is not. |
+| `VoiceCommandContractTest`, `VoiceProtocolTest` | The advertised manifest and `checks` state schema, refused-command results, typed-command parsing and the text events. |

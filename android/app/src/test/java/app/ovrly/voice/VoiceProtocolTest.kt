@@ -37,14 +37,14 @@ class VoiceProtocolTest {
             VoiceConfiguration(true, "wss://example.invalid:8443/", "vox_pub_test").httpsOrigin)
     }
 
-    @Test fun manifestAdvertisesOnlyTheTabActionAndNoUserState() {
+    @Test fun manifestAdvertisesTheTabActionTheAllowlistAndTheChecksState() {
         val manifest = JSONObject(VoiceProtocol.manifest())
         assertEquals("production", manifest.getString("environment"))
-        assertEquals(0, manifest.getJSONArray("stateSchema").length())
+        assertEquals("""["checks"]""", manifest.getJSONArray("stateSchema").toString())
         val actions = manifest.getJSONArray("actions")
-        assertEquals(1, actions.length())
+        val names = List(actions.length()) { actions.getJSONObject(it).getString("name") }
+        assertEquals(listOf("open_tab") + VoiceCommandAction.entries.map { it.wireName }, names)
         val action = actions.getJSONObject(0)
-        assertEquals("open_tab", action.getString("name"))
         val params = action.getJSONObject("params")
         assertEquals(1, params.length())
         val tab = params.getJSONObject("tab")
@@ -139,8 +139,8 @@ class VoiceProtocolTest {
             """{"type":"ready","unused":[true,false,null,-0.25e+2,{"x":"escaped\"value"}]}"""))
         assertEquals(VoiceEvent.Interrupted, VoiceProtocol.parse("""{"type":"interrupted"}"""))
         assertEquals(VoiceEvent.TurnComplete, VoiceProtocol.parse("""{"type":"turn_complete"}"""))
-        assertEquals(VoiceEvent.Text, VoiceProtocol.parse("""{"type":"text","text":"Hello","turnComplete":true}"""))
-        assertEquals(VoiceEvent.Text, VoiceProtocol.parse("""{"type":"text_user","text":"Hi"}"""))
+        assertEquals(VoiceEvent.Text(false, "Hello", true), VoiceProtocol.parse(reply("Hello")))
+        assertEquals(VoiceEvent.Text(true, "Hi", false), VoiceProtocol.parse(userText("Hi")))
         assertEquals(VoiceEvent.Error(true), VoiceProtocol.parse("""{"type":"error","message":"usage_limit"}"""))
         assertEquals(VoiceEvent.Unknown, VoiceProtocol.parse("""{"type":"future_event"}"""))
         invalid("""{"type":"text","text":0}""")
@@ -153,4 +153,8 @@ class VoiceProtocolTest {
     private fun invalid(text: String) {
         assertThrows(VoiceProtocolException::class.java) { VoiceProtocol.parse(text) }
     }
+
+    private fun reply(text: String) = """{"type":"text","text":"$text","turnComplete":true}"""
+
+    private fun userText(text: String) = """{"type":"text_user","text":"$text"}"""
 }

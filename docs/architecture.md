@@ -6,13 +6,13 @@
 
 | Package | Responsibility |
 | --- | --- |
-| `capture` | Projection/playback capture, 10-second chunks on the capture timeline, local-only frame samples, bounded local storage, chunk upload scheduling and lifecycle |
+| `capture` | Projection/playback capture, 10-second chunks on the capture timeline, on-device screen-text recognition with local-only frames, bounded local storage, chunk upload scheduling and lifecycle |
 | `contract` | Typed models and the production parsers for the shared `packages/contracts` schemas: voice actions, uploads, investigations with jobs and report versions, claims, evidence, assessments, capture sessions and chunks |
 | `overlay` | Floating-window lifecycle, movement and controls |
 | `share` | Share intake: on-device checks, private staging, upload and investigation creation, duplicate detection |
 | `data` | API client on OkHttp (guest credential, request ids, cold start, typed errors), the Room store of shares, local job states and cached report versions, the investigation repository and start/foreground reconciliation |
 | `ui` | Companion screens, production controls and isolated sample/gallery content |
-| `voice` | Experimental, explicitly configured Voxide companion navigation |
+| `voice` | Experimental, explicitly configured Voxide companion: tab navigation and the BC-D04 voice actions through `data/VoiceApi.kt` |
 
 Android owns permissions and media access. Hiding controls does not stop capture. Stopping capture releases media access; research cancellation is a separate, future action.
 
@@ -77,7 +77,7 @@ tests prove cancellation during retrieval and rejection of delayed publication.
 
 `services/api/auth` owns guest principals, opaque bearer credentials (stored as digests), Google account linking per [BC-D07](decisions/BC-D07-account-link.md) (`google.py` verifies the ID token behind an `IdTokenVerifier` protocol; `linking.py` upgrades the caller in place or merges a second device into the existing account in one transaction, every write restricted to the calling principal) and the owner-scoped loader every object route uses; another owner's object is a 404. `services/api/routes` exposes `/v1/principals/guest`, `/v1/principals/link`, `/v1/uploads`, `/v1/investigations`, the `/v1/jobs` actions, the report versions, export and reanalysis under `/v1/investigations/{id}/reports` and `/v1/investigations/{id}/reanalyze`, saves under `/v1/reports`, and `/v1/voice/actions` (BE-10, #33); `services/api/errors.py` gives every failure the shared contract error shape `{code, message, retryable, action, request_id}` from [`packages/contracts`](../packages/contracts/README.md). Upload bytes go through the `UploadStore` interface in `services/storage.py` (local filesystem now, object storage pending BC-D03). Investigation creation writes the record, its idempotency key and one `intake` job in one transaction before answering 202: `services/api/intake.py` holds the `QueueDispatcher` that calls `JobQueue.enqueue` on the same connection with a stage key derived from the investigation id, so neither a replay nor a dispatcher failure can leave the record and the job out of step. `services/pipeline/intake.py` is the worker-side `intake` stage registered by `default_handlers()`; it confirms the owned record and publishes a placeholder result until BE-07 (#20) adds media stages. Investigation reads return the contract read model: `state` derived from the job (`queued`, `running`, `failed`, `cancelled`), `processing_status`, the latest job summary and the latest report version, without exposing leases, fencing tokens or failure types. The intake and account-link request and response models in `services/api/schemas.py` are mirrored by the JSON Schemas and the OpenAPI document in `packages/contracts` (BE-03, #15); the read models for claims, evidence, assessments, report versions and job summaries live there too and generate the contract's result fixtures; the report routes emit `ReportVersion`, written once by `services/reports.py` and never updated. Tables are defined in `services/models.py` and created by migrations `0003_identity_intake`, `0005_account_link` and `0008_reports`.
 
-Investigations are queued but not analysed yet: media stages are BE-07 (#20) and real report content is #27 (until then the development-only `OVRLY_STUB_REPORTS` publishes a labelled fixture report); saved reports move to the account on a second-device merge; quotas and retention are #77.
+Investigations are queued but not analysed yet: media stages are BE-07 (#20) and claim extraction is #25. The evidence stages (#27, `services/evidence`, `services/providers`) turn published claims into evidence and assessments through Scholarxiv retrieval, open-access passages, a router relation step and citation validation; until #25 publishes real claims, the development-only `OVRLY_STUB_REPORTS` publishes a labelled fixture report); saved reports move to the account on a second-device merge; quotas and retention are #77.
 
 `services/privacy.py` schedules opt-in retention work on the existing durable
 job engine in both worker entry points. It deletes an expired principal's
@@ -106,7 +106,13 @@ investigation/owner. The API reserves a persistent byte key before writing,
 then commits each verified receipt and `media_validation` job together.
 Capture polling reports missing intervals and client-declared speech/text
 coverage, separately from processing. Both worker modes verify each chunk's
-stored bytes before close; they do not yet transcribe or extract claims.
+stored bytes before close and atomically enqueue `asr` and `device_text`;
+publication of both queues one `claim_extraction` job for that chunk.
+The handlers for those stages remain #20/#25, so unimplemented stages stay
+queued. Stage keys preserve per-capture/sequence idempotency, publication shares
+the queue's lease fence, and Stop cancels downstream work under the session lock.
+Capture polling derives per-claim states from the latest report, including
+explicitly labelled development fixtures; validation alone is not analysis.
 Session row locks serialize byte commits, Stop and retention, while queue
 fencing prevents cancelled/deleted work from publishing. See the
 [capture API](../backend/README.md#incremental-capture-api) for transport,
@@ -118,7 +124,7 @@ Before connecting Android, agree a versioned API contract with validated schemas
 
 `packages/contracts` is the single source for that contract. The Android `contract` package parses every schema in it with production parsers (`VoiceActionCodec`, `InvestigationCodec`, `UploadCodec`, `CaptureCodec`), one Kotlin enum per contract enum with an `UNKNOWN` fallback that is never a success state, and constructors that enforce the schema rules, including the investigation `oneOf` branches so a failure is never read as a finding; its unit tests read the committed fixtures and schemas directly through Gradle test resources and cross-check the enums and model members against them, see the [Android README](../android/README.md#contract-models-and-fixtures). This is the #62 deliverable of #15. The data package (AN-03 part 1, #18) calls the intake endpoints through these codecs, and keeps shares, local job states and report versions in Room with reconciliation on start and foreground, see [Data layer and share intake](../android/README.md#data-layer-and-share-intake).
 
-Hosted model weights stay with the provider. Credentials stay on the server; prompts and adapters belong in the backend. Evaluation fixtures live in root `evaluation/`, independently of backend implementation. Voxide remains a separate companion-navigation path. The capture transport is implemented on the backend; Android capture-to-network wiring remains separate work.
+Hosted model weights stay with the provider. Credentials stay on the server; prompts and adapters belong in the backend. Evaluation fixtures live in root `evaluation/`, independently of backend implementation. Voxide is a separate companion path; its voice actions go through the backend's `POST /v1/voice/actions`, which owns validation and ownership. The capture transport is implemented on the backend; Android capture-to-network wiring remains separate work.
 
 ## Evaluation-data boundary
 

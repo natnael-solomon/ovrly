@@ -134,9 +134,10 @@ adds the retry class, per-class retry counters and the provider request id to
 `owner_id` and `cancel_outcome` columns to `jobs`. `0007_captures` adds capture
 sessions and chunk reservations/receipts. `0008_reports` adds immutable
 `report_versions` (with a trigger that rejects `UPDATE`), `saved_reports`,
-`reanalysis_requests` and the `voice_actions` audit table, and
+`reanalysis_requests` and the `voice_actions` audit table.
 `0009_reanalysis_source` adds the nullable `source_investigation_id` to
-`reanalysis_requests`. Future schema changes require a reviewed migration
+`reanalysis_requests`, and `0010_provider_buckets` adds the shared provider rate-limit
+buckets. Future schema changes require a reviewed migration
 and upgrade/downgrade coverage, not `create_all()` during API startup.
 
 ### Durable jobs and recovery
@@ -389,14 +390,45 @@ audio/frame streams must be packaged before using this transport.
 
 Each accepted chunk is available to the worker before close. Both worker modes
 register `CaptureProcessor`, which re-verifies stored bytes under a session lock
-and publishes a durable validation result. **ASR, OCR and claim analysis remain
-#20/#25/#27/#29**: a published validation job still reads `waiting`, with empty
-`claims` and `claim_extraction_status: not_started`, never complete/no-claims
-(the development-only `OVRLY_STUB_REPORTS` changes this for fixture reports; see
-[Reports, saves and voice actions](#reports-saves-and-voice-actions)).
-The per-claim envelope is typed for the pipeline handoff; no synthetic finding
-is emitted by the API. Android codecs mirror the additions, but device upload
-and polling integration remain AN-07.
+and publishes a durable validation result. Publication atomically queues `asr`
+and `device_text` for that chunk; only after **both** publish does
+`claim_extraction` enter the queue. All four use the contract stage names and
+the identifier-only payload `{"capture_id": "<uuid>", "seq": 0}`, with ownership
+on the job row. Previously queued validation payloads using `session_id` and
+`owner_id` remain readable; successors use the new payload. Stage keys retain
+the capture/sequence hash and version 1, changing only the stage name.
+
+`services/pipeline/capture.py` publishes and enqueues in one transaction with
+the existing lease/generation fence. Session locks serialize the two observation
+publishers with Stop and retention; retries cannot duplicate successors, a
+failed prerequisite cannot start extraction, and Stop without continuation
+cancels all queued/in-flight stages, not just byte validation. A publication
+transaction failure releases the lease for retry. No migration or replay of
+already published pre-orchestration validation jobs is performed.
+
+The production **ASR, device-text and claim handlers remain #20/#25**; absent
+handlers leave their jobs queued, never successful placeholders. Register them
+under `asr`, `device_text` and `claim_extraction` in both worker modes. Their
+published results must contain the real stage artifacts; orchestration neither
+transcribes nor extracts claims. Retrieval/assessment remain #27.
+
+Capture polling keeps each validation job ID as the stable chunk receipt while
+reporting failures, cancellation and active work across its downstream stages.
+It reads claims from the **latest report version**, independent of
+`OVRLY_STUB_REPORTS`: unassessed claims are `checking` (or `cancelled` after Stop
+without continuation), provisional assessments are `partial`, and final
+assessments are `complete`. Extraction is `not_started` without a report,
+`partial` for a provisional report and `complete` for a final report, including
+a final report with no claims. Byte validation alone never means no claims.
+Investigation job summaries include the downstream capture stages too.
+
+The #33 capture stub exercises report progression with `OVRLY_STUB_REPORTS=1`;
+it still generates only explicitly labelled fixture reports after validation
+and does not install pretend production ASR/text/claim handlers. Recovery tests
+use synthetic observation results to exercise the fan-in separately. The final
+end-to-end run with real claims waits for #20/#25. See
+[Reports, saves and voice actions](#reports-saves-and-voice-actions).
+Android device upload and polling integration remain AN-07.
 
 The existing upload byte budget applies to the whole session, including pending
 reservations. Multipart metadata is limited to 8192 bytes and total transport
@@ -504,8 +536,9 @@ owner-scoped: another owner's investigation, report or job is the same 404
 Report versions are written once by `services/reports.py
 publish_report_version`, which locks the investigation so versions run 1, 2, 3
 and each names the one it supersedes; a database trigger rejects any `UPDATE`
-of `report_versions`. The assessment pipeline (#27) and reanalysis (below)
-are the future publishers. A save copies the version's payload into
+of `report_versions`. The evidence stages (see
+[Evidence stages](#evidence-stages-retrieval-and-assessment)) and reanalysis (below)
+publish through it. A save copies the version's payload into
 `saved_reports` without a foreign key to it, so a save moved to an account
 survives the expiry of the guest workspace that produced it.
 
@@ -554,8 +587,11 @@ supersede and the claims to rerun (no user text). Its job summary reports the
 contract stage the work starts at (`retrieval`, or `media_validation` for an
 expansion), since `reanalysis` is a handler name, not a contract stage. The owner
 can cancel it through
-`POST /v1/jobs/{id}/cancel`. The assessment pipeline (#27) registers the production
-`reanalysis` handler; until then these jobs stay queued. Same key and body replays
+`POST /v1/jobs/{id}/cancel`. The production `reanalysis` handler is one of the
+[evidence stages](#evidence-stages-retrieval-and-assessment): a correction reruns
+retrieval and assessment for the corrected claim only, deeper reruns every claim with a
+larger budget, and an expansion brings the confirmed full video's latest report into the
+clip. Without the Scholarxiv key these jobs stay queued. Same key and body replays
 the 202 body; the same key with a different body is 409 `IDEMPOTENCY_KEY_REUSED`.
 `reanalysis_requests` keeps one row per accepted request.
 
@@ -565,7 +601,8 @@ second-device link waits for it and, once the guest is merged, is refused with 4
 merged guest after `transfer_saved_reports` ran; this covers the voice
 `save_report` action too.
 
-`OVRLY_STUB_REPORTS=1` is a **development-only** bridge until #27: after the
+`OVRLY_STUB_REPORTS=1` is a **development-only** bridge until claim extraction (#25)
+supplies real claims: after the
 `intake` stage the worker publishes one report version per investigation from
 `packages/contracts/fixtures/results/complete.json` (version 1, provisional,
 synthetic claims, stored with `fixture` true and a change summary starting
@@ -591,9 +628,117 @@ a Stop without continuing) with `claim_extraction_status` `partial` or `complete
 Every such version is stored with `fixture` true, carries `"fixture": true` in the
 report read model and starts its change summary with "Development fixture, not a
 check of this media". A real (non-fixture) report is never superseded by the stub.
-Without the opt-in, capture validation, polling and close behave exactly as described
-under [Incremental capture API](#incremental-capture-api). Never present a stub as a
-check. #27 removes all of it.
+Polling reads the latest stored report even without the opt-in; turning it off
+prevents new stub publication, not visibility of an existing fixture-labelled
+report. The production capture-stage orchestration is independent of this flag,
+as described under [Incremental capture API](#incremental-capture-api).
+Never present a stub as a check. When both are configured the stub's `reanalysis`
+handler wins over the production one. The stub goes once #25 publishes real claims.
+
+## Evidence stages: retrieval and assessment
+
+BE-09 (#27). Two queue stages with the contract's stage names turn a published version
+that has claims into the next version with evidence and assessments. They are
+registered (embedded and standalone workers alike, through
+`services/pipeline/registry.py`) only when `OVRLY_SCHOLARXIV_API_KEY` is set; the key
+is server-side only and never logged.
+
+1. The stage that publishes claims (`claim_extraction`, #25) calls
+   `services.evidence.stages.enqueue_retrieval(...)` with the version it published.
+2. `retrieval` (`services/evidence/retrieval.py`), per claim and within the budget:
+   - asks the router (`OVRLY_EVIDENCE_QUERY_ROUTE`, default `auto:cheap`) for neutral
+     and disconfirming search queries (at most `OVRLY_EVIDENCE_MAX_QUERIES_PER_CLAIM`);
+     if the router fails, the claim text itself becomes one neutral query;
+   - searches Scholarxiv Papers (`POST /api/v1/papers/search`, `searchFilterString.all`);
+     a query that fails is counted, and a claim whose every query failed is kept
+     **unassessed** (`retrieval_unavailable`), never reported as "no evidence";
+   - collapses hits of one work (same journal DOI, same arXiv id across versions,
+     keeping the latest version) and records which query kinds found it;
+   - ranks candidates with BM25 over title and abstract (`services/evidence/bm25.py`;
+     no embeddings, vector store or reranker model) and keeps the top passages;
+   - reads the abstract by default and, for the top few, open-access full text from
+     arXiv HTML or Europe PMC, keeping the best-matching paragraph; the inspection level
+     (`metadata_only`, `abstract_only`, `full_text`) says what was actually read;
+   - asks Crossref (`filter=updates:{doi}`) whether a journal DOI was retracted,
+     withdrawn or corrected; arXiv-only papers and failed lookups stay `unknown`.
+   The result is stored as the job result (the per-stage artifact), so a failed
+   assessment never repeats retrieval. Publishing that result enqueues `assessment` in
+   the same fenced transaction, so a lost lease or a cancelled retrieval leaves no
+   assessment job behind.
+3. `assessment` (`services/evidence/assessment.py`) asks the router
+   (`OVRLY_EVIDENCE_RELATION_ROUTE`, default `auto:quality`) how each passage relates
+   to the claim: supports, challenges, qualifies, context or cannot_assess, with a
+   rationale that becomes the relation `note`. These map onto the contract's `relation`
+   enum (context and cannot_assess are `insufficient`). A retracted or withdrawn source is
+   never counted. The overall label is computed, not generated: challenge with support or
+   qualify is `mixed`, then `challenged`, `qualified`, `supported`, and
+   `insufficient_evidence` when nothing settles the claim (each origin counts once). The
+   summary describes the evidence and its limits and never gives a verdict on the video.
+4. Before publishing, every version is citation-checked: each relation must cite evidence
+   that exists in the version and belongs to the same claim, and an assessment without
+   relations must abstain. A failing version is not published (`non_retriable_input`).
+
+A version published in between (a correction, say) supersedes the run, which then
+publishes nothing. Claims the budget or a provider failure did not reach stay visible
+without an assessment and keep the version provisional (`processing_status: partial`);
+a `deeper` reanalysis continues them.
+
+Router calls send only documented fields (`model`, `messages`, `models`, `max_tokens`,
+`temperature`), strip a leading `<think>` block, code fences and any preamble, validate
+the JSON against a schema, repair once, and report a discarded reply to the router as
+`regenerated`. Content is data in every prompt and no tools are offered. Router 401 or
+403 fails the stage as a configuration fault, a 429 that persists is `rate_limited`,
+and 5xx or an invalid reply leaves that claim unassessed rather than guessing.
+Retrieval and assessment extend their lease in the background every third of
+`OVRLY_JOB_LEASE_SECONDS` while provider calls run, and stop on a cancellation request.
+
+Papers and Router calls share one PostgreSQL token bucket (`provider_buckets`,
+migration `0010_provider_buckets`) across all worker processes, refilled at
+`OVRLY_SCHOLARXIV_REQUESTS_PER_HOUR` (default 1000, leaving headroom under the 1 200
+per hour Free account limit). An empty bucket makes the call wait for the next token,
+with jitter so waiting workers do not wake together; only a wait over 5 minutes makes
+the stage `rate_limited`. A provider 429 holds the bucket for its `Retry-After` (60 s if
+absent) for every worker, and the call is retried up to 3 times before the stage becomes
+`rate_limited`. Every outbound request carries a
+fresh `X-Request-Id`; logs record only the provider code, that id and the status.
+
+Federated search is opt-in (`OVRLY_SCHOLARXIV_FEDERATED=1`, Go plan and above). A Free
+key gets 403 and the stage falls back to single-source search, noting the fallback. A
+federated source that reports `{count: 0, hasMore: false}` may have failed silently
+(the provider documents this), so it is recorded as unknown and the assessment says the
+search was incomplete. A live reproduction of that partial failure needs a Go+ account
+or a provider replay; the tests use a synthetic one.
+
+| Setting | Default / meaning |
+| --- | --- |
+| `OVRLY_SCHOLARXIV_API_KEY` | Unset. Server-only `sxv_` key; without it the evidence stages are not registered |
+| `OVRLY_SCHOLARXIV_BASE_URL` | `https://www.scholarxiv.com` |
+| `OVRLY_SCHOLARXIV_REQUESTS_PER_HOUR` | 1000; 1..1200. Shared Papers and Router budget |
+| `OVRLY_SCHOLARXIV_FEDERATED` | `0`; federated search needs the Go plan |
+| `OVRLY_EVIDENCE_QUERY_ROUTE` / `OVRLY_EVIDENCE_RELATION_ROUTE` | `auto:cheap` / `auto:quality`; a non-`auto:` value pins a model through `models` |
+| `OVRLY_EVIDENCE_MAX_CLAIMS` | 20; claims per run, the rest stay unassessed |
+| `OVRLY_EVIDENCE_MAX_QUERIES_PER_CLAIM` | 3; 1..6 |
+| `OVRLY_EVIDENCE_RESULTS_PER_QUERY` | 10; 1..50 |
+| `OVRLY_EVIDENCE_MAX_CANDIDATES_PER_CLAIM` | 20; after deduplication |
+| `OVRLY_EVIDENCE_MAX_PASSAGES_PER_CLAIM` | 4; 1..10 |
+| `OVRLY_EVIDENCE_MAX_FULL_TEXT_PER_CLAIM` | 2; 0..5 full-text fetches |
+| `OVRLY_EVIDENCE_MAX_LLM_CALLS_PER_CLAIM` | 4; 2..10, shared by query writing, relations and repairs |
+| `OVRLY_EVIDENCE_PROVIDER_TIMEOUT_SECONDS` | 20 |
+| `OVRLY_CROSSREF_MAILTO` | Empty; optional contact address for the Crossref polite pool |
+
+A `deeper` reanalysis doubles the search breadth within the hard caps above. An
+`expansion` whose full video has no report yet publishes a waiting result and schedules
+another check (30 s, doubling, capped at 10 minutes; the request points at the new job,
+so it stays visible and cancellable) and fails after 12 checks. A correction or
+deeper reanalysis enqueues its retrieval only in its own fenced publish. The request
+always points at the job currently doing its work, and cancelling the receipt job of a
+reanalysis that has already handed on (`POST /v1/jobs/{id}/cancel` or `queue_cancel`)
+cancels that job instead. Tests
+(`tests/test_evidence_units.py`, `tests/test_evidence_stages.py`) replay synthetic
+cassettes for every provider (`tests/cassettes/`, `tests/evidence_cassettes.py`)
+through an `httpx` mock transport; no test or CI job calls a real provider. The
+cassettes are shaped from the providers' public documentation and are not recordings;
+real redacted recordings need an authorized key and rights review first.
 
 ## Local checks
 

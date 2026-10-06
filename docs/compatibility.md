@@ -70,7 +70,7 @@ Silence, blocked and routing are different findings and are recorded differently
 
 Evidence folders stay local (`.local` is Git-ignored). This file records results only.
 
-Since #26 the sampled frames are kept in `capture/frames/` (still about every 5 s, never uploaded); the script reads them from there.
+Since #26 the sampled frames are kept in `capture/frames/` (never uploaded); the script reads them from there. Since #100 frames are change-triggered with a 5 s heartbeat instead of fixed 5 s sampling, so frame counts in new cells are not comparable with the cells above.
 
 ## Decision
 
