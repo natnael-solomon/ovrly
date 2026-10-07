@@ -1,7 +1,7 @@
 """Bounded, owner-scoped device text; completion records delivery, never continuous coverage."""
 
 import json
-from typing import Annotated, Any, TypeVar
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Path, Request
@@ -24,7 +24,6 @@ from services.pipeline.speech import speech_stage_key
 router = APIRouter(tags=["investigations"])
 MAX_BODY_BYTES = 262_144
 MAX_STORED_BYTES = 2_097_152
-_T = TypeVar("_T", bound=BaseModel)
 
 
 def conflict(code: str = "DEVICE_TEXT_CONFLICT") -> ApiError:
@@ -40,7 +39,7 @@ def unique_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return value
 
 
-async def bounded_body(request: Request, model: type[_T]) -> _T:
+async def bounded_body[T: BaseModel](request: Request, model: type[T]) -> T:
     if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
         raise ApiError(415, "DEVICE_TEXT_CONTENT_TYPE", "Device text requires application/json")
     body = bytearray()

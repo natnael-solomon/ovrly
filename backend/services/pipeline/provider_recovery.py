@@ -5,7 +5,7 @@ import inspect
 import logging
 from collections.abc import Awaitable
 from datetime import UTC, datetime
-from typing import Any, TypeVar
+from typing import Any
 
 from services.jobs.handlers import JobContext
 from services.jobs.queue import ClaimedJob
@@ -18,11 +18,10 @@ from services.pipeline.llm import (
     RequestAccount,
 )
 
-T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
 
-async def wait_for_provider(pending: Awaitable[T], context: JobContext) -> T:
+async def wait_for_provider[T](pending: Awaitable[T], context: JobContext) -> T:
     """Await a provider call while keeping its lease alive.
 
     The lease is renewed just before the call starts, then every third of the lease measured

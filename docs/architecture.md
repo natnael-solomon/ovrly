@@ -57,7 +57,7 @@ Unit tests cover palette contrast, fallback decisions, demo-entry policy, live c
 
 ## Backend foundation
 
-`backend` is one Python 3.11/uv project with FastAPI, shared settings and SQLAlchemy asyncio/Psycopg. `services/api` owns the API lifespan; `services/worker` runs standalone or as an optional lifespan task (`OVRLY_EMBED_WORKER=1`); `services/jobs` holds the durable queue. The [Linux/WSL helper](../backend/README.md#local-setup-linux--wsl) starts PostgreSQL 16 in Compose, applies Alembic migrations and runs the API and embedded worker natively.
+`backend` is one Python 3.12/uv project with FastAPI, shared settings and SQLAlchemy asyncio/Psycopg. `services/api` owns the API lifespan; `services/worker` runs standalone or as an optional lifespan task (`OVRLY_EMBED_WORKER=1`); `services/jobs` holds the durable queue. The [Linux/WSL helper](../backend/README.md#local-setup-linux--wsl) starts PostgreSQL 16 in Compose, applies Alembic migrations and runs the API and embedded worker natively.
 
 `/healthz` checks the database, that the schema is at the Alembic head the build ships, that the upload directory is writable and, when enabled, that the embedded worker is running and has polled or extended a lease within two minutes. It also reports queue depth, the oldest claimable job's age and the worker heartbeat age (RFC section 16 signals) without contacting a provider. Failures return a safe 503 with one reason; failed embedded-worker startup prevents API startup. API-only readiness does not monitor a separate worker. Shutdown stops owned tasks, finishes or releases the worker's in-flight lease and closes database connections. Deployment, smoke, keep-alive and backup are in the [deployment runbook](operations/deployment.md).
 

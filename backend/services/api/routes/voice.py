@@ -13,7 +13,7 @@ same transaction as the action. No transcript or audio reaches this endpoint or 
 
 import logging
 import uuid
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request
 from fastapi.exceptions import RequestValidationError
@@ -44,7 +44,6 @@ from services.reports import parse_canonical_uuid, save_owned_report
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["voice"])
 
-Model = TypeVar("Model", bound=BaseModel)
 _IN_PROGRESS = {JobState.QUEUED.value, JobState.LEASED.value, JobState.RUNNING.value}
 
 
@@ -63,7 +62,7 @@ class _Denied(Exception):
         self.action = action
 
 
-def _validated(model: type[Model], body: Any) -> Model:
+def _validated[Model: BaseModel](model: type[Model], body: Any) -> Model:
     try:
         return model.model_validate(body)
     except ValidationError as exc:

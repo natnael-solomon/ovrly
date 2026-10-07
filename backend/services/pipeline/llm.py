@@ -5,7 +5,7 @@ import json
 import math
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, TypeVar
+from typing import Any, Literal, Protocol
 
 import httpx
 from pydantic import BaseModel, SecretStr, ValidationError
@@ -591,9 +591,6 @@ def _find_all(haystack: str, needle: str) -> list[int]:
     return starts
 
 
-M = TypeVar("M", bound=BaseModel)
-
-
 def _completion_json(completion: Completion) -> tuple[Any, dict[str, bool]]:
     text = completion.content.strip()
     flags = {"thinking_leaked": "<think>" in text or "</think>" in text, "fenced": "```" in text}
@@ -621,7 +618,9 @@ def _completion_json(completion: Completion) -> tuple[Any, dict[str, bool]]:
         raise ExtractionInvalid("Invalid extraction schema") from None
 
 
-def parse_typed_completion(completion: Completion, schema: type[M]) -> tuple[M, dict[str, bool]]:
+def parse_typed_completion[M: BaseModel](
+    completion: Completion, schema: type[M]
+) -> tuple[M, dict[str, bool]]:
     data, flags = _completion_json(completion)
     try:
         return schema.model_validate(data), flags
