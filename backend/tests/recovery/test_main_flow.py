@@ -172,7 +172,11 @@ async def until(http, headers, identifier, done, seconds=60):
 
 
 def published(body):
-    return body["processing_status"] in {"complete", "failed", "cancelled"}
+    # The assessment job is marked published just after its report version commits.
+    job = body.get("job") or {}
+    return body["processing_status"] in {"complete", "failed", "cancelled"} and job.get(
+        "state"
+    ) not in {"queued", "leased", "running"}
 
 
 def assert_published_report(body, replay):

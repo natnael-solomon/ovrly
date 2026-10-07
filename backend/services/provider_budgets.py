@@ -174,7 +174,8 @@ async def provider_statuses(
     )
     asr = ProviderStatus(
         "groq_asr",
-        settings.asr_enabled and settings.asr_configured,
+        # Default-on speech counts as configured only once its verified limits exist.
+        settings.asr_enabled and bool(speech),
         "local_rolling_ledger",
         speech,
         await _asr_hold(connection, settings, now) if speech else 0.0,
