@@ -217,7 +217,8 @@ they do not mean absent audio or no claims, and carry `reason: "no_speech"`.
 report `unavailable` with separate reasons. Provider request/account identifiers,
 request markers and storage paths are never exposed.
 
-The server currently implements Groq-only speech, disabled by default, with the
+The server currently implements Groq-only speech, on by default (without its
+provider configuration speech is `unavailable` with reason `provider_unavailable`), with the
 RFC-D27 policy (BE-07b, #117): the primary model, then the fallback model once,
 then explicit unavailability. The `speech.reason` of unavailable speech is the
 last attempt's: `quota_exhausted` (gap `ASR_QUOTA_EXHAUSTED`), `unknown_outcome`
@@ -231,7 +232,7 @@ speech leaves investigation state queued for later analysis; media coverage
 remains the original preparation facts. Partial analysis is described at the
 top of this file and owner retry in the schema index; Android speech parsing is
 later work.
-See [hosted speech configuration](../../backend/README.md#hosted-uploaded-speech-disabled-by-default).
+See [hosted speech configuration](../../backend/README.md#hosted-uploaded-speech).
 
 For a capture-source investigation, `speech` concatenates the published
 chunks' segments on the `capture` timebase (aggregate source/audio digests are

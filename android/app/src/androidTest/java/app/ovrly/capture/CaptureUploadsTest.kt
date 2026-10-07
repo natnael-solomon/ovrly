@@ -53,6 +53,16 @@ class CaptureUploadsTest {
         assertEquals(NetworkType.CONNECTED, pending(session).constraints.requiredNetworkType)
     }
 
+    @Test fun researchIsOfflineOnlyForTheTestServer() {
+        val offline = CaptureApis.researchOffline(context)
+        assertTrue(offline.orEmpty().contains("in-memory test server"))
+
+        CaptureApis.replace(ServerCaptureSessionApi(null))
+
+        // The debug build has a usable service URL, so server chunks reach research.
+        assertEquals(null, CaptureApis.researchOffline(context))
+    }
+
     @Test fun wifiOnlyWithoutACaptureOnlySavesThePreference() {
         CapturePreferences.setWifiOnly(context, true)
 

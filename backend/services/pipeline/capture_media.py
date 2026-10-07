@@ -320,6 +320,8 @@ def build_capture_speech(
             return _unavailable("no_audio_track")
         if not settings.asr_enabled:
             return _unavailable("disabled")
+        if not settings.asr_configured:
+            return _unavailable("provider_unavailable")
         start = prepared.chunk.seq * prepared.chunk_duration_ms
         end = prepared.chunk.end_ms
 

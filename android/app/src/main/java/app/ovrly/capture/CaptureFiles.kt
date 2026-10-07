@@ -174,7 +174,7 @@ class CaptureFiles internal constructor(private val root: File, private val cont
             frames = restored.frames,
             playbackSignal = restored.playbackSignal,
             hasLocalCapture = true,
-            message = "Local interval retained temporarily. Research is not connected.",
+            message = "Local interval retained temporarily.",
             upload = UploadProgress.of(
                 restored,
                 ledger,
@@ -201,9 +201,9 @@ class CaptureFiles internal constructor(private val root: File, private val cont
         private const val METADATA_ALLOWANCE = 64 * 1024L
         private const val MS_PER_SECOND = 1_000
         private const val LEGACY_MESSAGE =
-            "A local capture from an earlier app version was deleted. Research is not connected."
+            "A local capture from an earlier app version was deleted."
         private const val EXPIRED_MESSAGE =
-            "Expired or interrupted temporary capture was deleted. Research is not connected."
+            "Expired or interrupted temporary capture was deleted."
 
         internal fun rootOf(context: Context): File = File(context.noBackupFilesDir, "capture")
 
