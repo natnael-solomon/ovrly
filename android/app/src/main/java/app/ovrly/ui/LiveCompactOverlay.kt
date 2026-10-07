@@ -3,9 +3,8 @@ package app.ovrly.ui
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -53,7 +52,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.ovrly.R
@@ -117,16 +115,19 @@ internal fun LiveOverlay(
         modifier = modifier,
         contentAlignment = Alignment.TopStart,
         transitionSpec = {
-            // Forms grow from and shrink into the pill's corner, where the window stays: a
-            // soft spring for the size and scale, a quick cross-fade so the two never overlap.
+            // Forms grow from and shrink into the pill's corner, where the window stays. One
+            // eased tween drives size and scale: springs settle in tiny steps, and each step
+            // relays out the overlay window, which showed as jitter at the end.
             if (frame.animate) {
                 val corner = TransformOrigin(0f, 0f)
                 val enter = fadeIn(tween(FORM_MS, delayMillis = FORM_MS / 3)) +
-                    scaleIn(FormScaleSpring, FORM_START_SCALE, corner)
+                    scaleIn(tween(FORM_MS, easing = FastOutSlowInEasing), FORM_START_SCALE, corner)
                 val exit = fadeOut(tween(FORM_MS / 2)) +
                     scaleOut(tween(FORM_MS / 2), FORM_END_SCALE, corner)
                 (enter togetherWith exit).using(
-                    SizeTransform(clip = false) { _, _ -> FormSizeSpring }
+                    SizeTransform(clip = false) { _, _ ->
+                        tween(FORM_MS, easing = FastOutSlowInEasing)
+                    }
                 )
             } else {
                 fadeIn(snap()).togetherWith(fadeOut(snap()))
@@ -429,12 +430,7 @@ private const val EXPAND_LABEL = "Expand live results"
 internal const val BUBBLE_DP = 64
 private const val BUBBLE_INSET_DP = 4
 
-/** The soft spring every form change uses for its scale and size. */
-private val FormScaleSpring = spring<Float>(FORM_DAMPING, Spring.StiffnessMediumLow)
-private val FormSizeSpring = spring<IntSize>(FORM_DAMPING, Spring.StiffnessMediumLow)
-
 private const val FORM_MS = 220
-private const val FORM_DAMPING = 0.82f
 private const val FORM_START_SCALE = 0.85f
 private const val FORM_END_SCALE = 0.92f
 private const val PULSE_MS = 220

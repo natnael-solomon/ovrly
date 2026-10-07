@@ -1,8 +1,5 @@
 package app.ovrly.ui
 
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -149,9 +146,7 @@ internal fun OverlayPanelScaffold(
         if (fixedHeight) Modifier.height(spec.height) else Modifier.heightIn(max = spec.height)
     CompositionLocalProvider(LocalContentColor provides p.ink) {
         Column(
-            modifier.width(spec.width).then(size).mockGlass(spec.higherOpacity)
-                .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
-                .padding(12.dp)
+            modifier.width(spec.width).then(size).mockGlass(spec.higherOpacity).padding(12.dp)
         ) {
             Row(
                 Modifier.fillMaxWidth().onSizeChanged {
