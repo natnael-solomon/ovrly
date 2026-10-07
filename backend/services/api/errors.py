@@ -92,6 +92,9 @@ def _validation_message(exc: RequestValidationError) -> tuple[str, str]:
         location = [str(part) for part in error.get("loc", ()) if not isinstance(part, int)]
         if location and location[-1] in _IDENTITY_FIELDS:
             return "CLIENT_IDENTITY_REJECTED", "Identity is taken from the bearer credential"
+        if error.get("type") == "extra_forbidden":
+            # The last element is a key the client chose; never echo it (#28).
+            location = location[:-1]
         paths.append(".".join(location) or "body")
     unique = ", ".join(dict.fromkeys(paths)) or "body"
     message = f"The request is invalid at: {unique}"

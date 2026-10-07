@@ -3,7 +3,9 @@
 Both are parsed into plain paragraphs with the standard library's HTML parser, which does
 not expand entities from a document type definition, so a hostile body cannot trigger an
 entity-expansion attack. A missing, closed or unparseable full text is simply absent: the
-caller then relies on the abstract and records ``abstract_only``.
+caller then relies on the abstract and records ``abstract_only``. Every fetch goes
+through :func:`services.providers.egress.fetch`, so a redirect (or a future URL taken from
+provider metadata) is re-checked against the SSRF guard on every hop.
 """
 
 import json
@@ -14,7 +16,8 @@ from typing import Final
 
 import httpx
 
-from services.providers.http import ProviderError, send
+from services.providers.egress import fetch
+from services.providers.http import ProviderError
 
 ARXIV: Final = "arxiv"
 EUROPEPMC: Final = "europepmc"
@@ -78,7 +81,7 @@ class FullTextClient:
             return None
         url = f"{ARXIV_HTML}{arxiv_id}"
         try:
-            response, raw = await send(self.client, ARXIV, "GET", url)
+            response, raw = await fetch(self.client, ARXIV, url)
         except ProviderError:
             return None
         if response.status_code != 200 or "html" not in response.headers.get("content-type", ""):
@@ -96,9 +99,7 @@ class FullTextClient:
             "pageSize": 1,
         }
         try:
-            response, raw = await send(
-                self.client, EUROPEPMC, "GET", EUROPEPMC_SEARCH, params=params
-            )
+            response, raw = await fetch(self.client, EUROPEPMC, EUROPEPMC_SEARCH, params=params)
             if response.status_code != 200:
                 return None
             results = json.loads(raw)["resultList"]["result"]
@@ -116,7 +117,7 @@ class FullTextClient:
             return None
         url = f"{EUROPEPMC_REST}{pmcid}/fullTextXML"
         try:
-            response, raw = await send(self.client, EUROPEPMC, "GET", url)
+            response, raw = await fetch(self.client, EUROPEPMC, url)
         except ProviderError:
             return None
         if response.status_code != 200:
