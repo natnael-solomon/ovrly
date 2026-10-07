@@ -426,7 +426,7 @@
 - Reserved Instrument Serif for editorial report/gallery headings and the text-based wordmark. Functional headings, including capture dialogs and demo claims, use Lexend without changing type sizes.
 - Added rendered chrome splash, adaptive launcher and header-wordmark assets. The splash fills Android's icon mask; header glare and Light-mode contrast treatments remain local drawing effects. Notifications retain the monochrome split ring. See [UI maintenance](docs/android-ui.md).
 - Corrected the "A moment outside" artwork to use circles.
-- Updated to Gradle 9.8.0, Android Gradle plugin 9.4.1 with Kotlin 2.2.10, and compileSdk/targetSdk 37. Dependencies include core 1.19.1, splashscreen 1.2.0, activity 1.13.0, lifecycle 2.11.0, savedstate 1.5.0, Compose BOM 2026.09.00, coroutines 1.11.0 and OkHttp 5.5.0. Lint treats warnings as errors.
+- Updated to Gradle 9.8.1, Android Gradle plugin 9.4.1 with Kotlin 2.2.10, and compileSdk/targetSdk 37. Dependencies include core 1.19.1, splashscreen 1.2.0, activity 1.13.0, lifecycle 2.11.0, savedstate 1.5.0, Compose BOM 2026.09.00, coroutines 1.11.0 and OkHttp 5.5.0. Lint treats warnings as errors.
 - Organized the Android foundation under `android`, updated the Windows helper and reserved the `backend` boundary.
 - Made Liquid Chrome the fresh-install default while preserving saved appearance choices; restyled controls and retained all 15 gallery studies and font licenses.
 - Moved working controls into Settings without removing capture consent. The demo overlay stays below half the usable screen, with 16 dp margins, a draggable header and separate body scrolling.

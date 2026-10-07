@@ -4,7 +4,7 @@ Kotlin/Jetpack Compose app for Android 10+ (API 29), with floating controls, loc
 
 ## Setup
 
-Install JDK 21, Android SDK platform 37, Build Tools 36.0.0 and Platform Tools, and accept the SDK licenses. The wrapper uses Gradle 9.8.0 and Android Gradle plugin 9.4.1 with built-in Kotlin. Lint treats warnings as errors.
+Install JDK 21, Android SDK platform 37, Build Tools 36.0.0 and Platform Tools, and accept the SDK licenses. The wrapper uses Gradle 9.8.1 and Android Gradle plugin 9.4.1 with built-in Kotlin. Lint treats warnings as errors.
 
 Open this directory in Android Studio and select JDK 21 for Gradle. For terminal builds, set `JAVA_HOME` and `ANDROID_HOME`. Keep `local.properties` uncommitted and pointed at the same SDK.
 
