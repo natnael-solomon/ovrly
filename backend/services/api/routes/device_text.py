@@ -14,7 +14,7 @@ from services.api.auth import CurrentPrincipal, Principal, load_owned, lock_acti
 from services.api.errors import ApiError
 from services.api.routes.common import engine
 from services.api.text_schemas import DeviceTextRead, TextBatch, TextCompletion
-from services.jobs.models import job_results, jobs
+from services.jobs.models import DEVICE_TEXT_FENCE_STAGE, job_results, jobs
 from services.jobs.queue import JobQueue, StageKey
 from services.models import investigations, upload_text, uploads
 from services.pipeline.intake import intake_stage_key
@@ -169,7 +169,7 @@ async def create_text_document(
 ) -> Row[Any]:
     queued = await queue.enqueue(
         connection,
-        StageKey(1, "upload_device_text", media.input_hash),
+        StageKey(1, DEVICE_TEXT_FENCE_STAGE, media.input_hash),
         {"investigation_id": str(identifier)},
         owner_id=owner_id,
     )
