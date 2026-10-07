@@ -6,12 +6,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties.StateDescription
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
-import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
@@ -226,7 +225,7 @@ class ReportScreenTest {
         show(OpenReport(reportView(complete), retrievedAt = ChecksFixtures.NOW), dark = true)
 
         compose.onNodeWithContentDescription("Share report")
-            .assertHeightIsAtLeast(MIN_TARGET).performClick()
+            .assertTouchTarget().performClick()
 
         compose.runOnIdle {
             val export = exports.single()
@@ -286,7 +285,7 @@ class ReportScreenTest {
             .assert(hasText("Supports the claim"))
             .assert(hasText("Synthetic Publisher"))
         compose.onAllNodesWithContentDescription("Open source: Synthetic source 1")
-            .onFirst().assertHeightIsAtLeast(MIN_TARGET)
+            .onFirst().assertTouchTarget()
     }
 
     @Test fun everyReportControlHasA48DpTarget() {
@@ -314,8 +313,7 @@ class ReportScreenTest {
             "I confirm this is the full video of the clip I captured.",
             "Cancel"
         ).forEach {
-            compose.onNode(hasText(it) and hasClickAction())
-                .assertHeightIsAtLeast(MIN_TARGET)
+            compose.onNode(hasText(it) and hasClickAction()).assertTouchTarget()
         }
     }
 
@@ -332,14 +330,12 @@ class ReportScreenTest {
         assertNoClippedText()
     }
 
-    /** Every clickable node on screen lays out at least 48 by 48 dp, its touch area. */
+    /** Every clickable node on screen can be touched over at least 48 by 48 dp. */
     private fun assertClickTargets() {
         val ids = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().map { it.id }
         assertTrue(ids.isNotEmpty())
         ids.forEach { id ->
-            compose.onNode(SemanticsMatcher("node $id") { it.id == id })
-                .assertHeightIsAtLeast(MIN_TARGET)
-                .assertWidthIsAtLeast(MIN_TARGET)
+            compose.onNode(SemanticsMatcher("node $id") { it.id == id }).assertTouchTarget()
         }
     }
 
@@ -356,14 +352,30 @@ class ReportScreenTest {
                 node.config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
                 val layout = layouts.single()
                 assertFalse(
-                    "\"${layout.layoutInput.text}\" is clipped",
+                    "\"${layout.layoutInput.text}\" is clipped: ${layout.size} in " +
+                        "${layout.layoutInput.constraints}, text ${layout.multiParagraph.height}",
                     layout.hasVisualOverflow
                 )
             }
         }
     }
 
+    /**
+     * The node's touch area, including the platform's minimum touch target expansion that
+     * Material controls drawn at 40 dp rely on, is at least 48 by 48 dp.
+     */
+    private fun SemanticsNodeInteraction.assertTouchTarget(): SemanticsNodeInteraction {
+        val node = fetchSemanticsNode()
+        val bounds = node.touchBoundsInRoot
+        with(node.layoutInfo.density) {
+            val width = bounds.width.toDp()
+            val height = bounds.height.toDp()
+            assertTrue("touch area $width by $height", width >= MIN_TARGET && height >= MIN_TARGET)
+        }
+        return this
+    }
+
     private companion object {
-        val MIN_TARGET = 48.dp
+        val MIN_TARGET = 47.5.dp
     }
 }

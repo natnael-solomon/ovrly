@@ -5,12 +5,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -275,7 +273,10 @@ private fun FullVideoCard(busy: Boolean, onStart: () -> Unit, modifier: Modifier
     }
 }
 
-/** A bordered card with a tone bar; the content always states the tone in words. */
+/**
+ * A bordered card with a tone bar; the content always states the tone in words. The card is
+ * as tall as its content at any text size: the bar follows the card, never the reverse.
+ */
 @Composable
 internal fun Panel(tone: Tone, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val p = LocalOvrlyPalette.current
@@ -285,10 +286,10 @@ internal fun Panel(tone: Tone, modifier: Modifier = Modifier, content: @Composab
         color = p.surface,
         border = BorderStroke(1.dp, p.rule)
     ) {
-        Row(Modifier.height(IntrinsicSize.Min)) {
-            ToneBar(tone)
+        Box {
+            Box(Modifier.matchParentSize()) { ToneBar(tone) }
             Column(
-                Modifier.weight(1f).padding(CARD_PADDING),
+                Modifier.fillMaxWidth().padding(start = TONE_BAR).padding(CARD_PADDING),
                 verticalArrangement = Arrangement.spacedBy(SMALL_GAP)
             ) { content() }
         }
