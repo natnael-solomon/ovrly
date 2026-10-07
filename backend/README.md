@@ -791,6 +791,24 @@ OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0
   tests/test_job_queue.py tests/recovery
 ```
 
+Harness rules (#130):
+
+- **One database per case.** Every case under `tests/recovery` gets a fresh database
+  copied from a migrated template (`isolated_database_url` in `tests/conftest.py`) and
+  dropped with `WITH (FORCE)` afterwards. Workers register the real stage names and the
+  worker loop runs global sweeps (reconciliation scheduling, due analysis, retention), so
+  a shared database let one case's worker claim, schedule or expire another case's rows.
+  The other backend tests keep the session database.
+- **Leases.** The harness default is `DEFAULT_LEASE_SECONDS` (2 s), long enough that a
+  loaded runner does not lose a lease between heartbeats and short enough that a crashed
+  worker's lease expires within the re-lease waits. Cases about expiry, heartbeats or
+  stale publication pass `job_lease_seconds` explicitly (`SHORT_LEASE_SECONDS` or less).
+  Harness state waits default to 20 s and return as soon as the state is reached.
+- **Failure diagnostics.** When a case fails, including any wait timeout, the report gains
+  a "Captured recovery diagnostics" section with the stack of every pending asyncio task
+  (taken before teardown stops the workers) and the case's job rows (scheduling and lease
+  columns only, no payloads).
+
 Privacy recovery tests cover current workspace/upload retention and late-result
 rejection. External-provider erasure, future artifact stores and physical
 backup expiry are not implemented; the chunk `(session, seq)` idempotency test

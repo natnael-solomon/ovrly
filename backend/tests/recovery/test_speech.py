@@ -2,7 +2,6 @@
 
 import asyncio
 import io
-import sys
 import uuid
 import wave
 from datetime import UTC, date, datetime, timedelta
@@ -70,33 +69,18 @@ def success(_):
     )
 
 
-def dump_tasks():
-    """Write every task's stack so a timed-out wait shows where the worker is busy."""
-    for task in asyncio.all_tasks():
-        out = io.StringIO()
-        task.print_stack(file=out)
-        sys.stderr.write(f"task {task.get_name()}:\n{out.getvalue()}\n")
-
-
 async def wait_for_speech(http, identifier, headers):
-    # One wait covers intake, ffprobe/ffmpeg preparation and every speech attempt. Hosted CI
-    # showed this stalling past 10 s on slow runners (test_known_transient_outcomes on main
-    # bf7c1cd, test_repeated_quota_failure in #126's baseline): both timed out at the first
-    # wait, before any retry, with the worker still busy inside a stage. A local repro with
-    # real PostgreSQL ruled out cancelling the in-flight heartbeat (350 runs, CPU-starved
-    # included), so the wait is widened and the task stacks are dumped if it still expires.
-    try:
-        async with asyncio.timeout(30):
-            while True:
-                response = await http.get(f"/v1/investigations/{identifier}", headers=headers)
-                assert response.status_code == 200, response.text
-                body = response.json()
-                if (body.get("speech") or {}).get("status") in {"completed", "unavailable"}:
-                    return body
-                await asyncio.sleep(0.02)
-    except TimeoutError:
-        dump_tasks()
-        raise
+    # One wait covers intake, ffprobe/ffmpeg preparation and every speech attempt, so it is
+    # wider than the other waits. If it still expires, the recovery conftest reports every
+    # pending task stack and this case's job rows.
+    async with asyncio.timeout(30):
+        while True:
+            response = await http.get(f"/v1/investigations/{identifier}", headers=headers)
+            assert response.status_code == 200, response.text
+            body = response.json()
+            if (body.get("speech") or {}).get("status") in {"completed", "unavailable"}:
+                return body
+            await asyncio.sleep(0.02)
 
 
 def model_of(request):

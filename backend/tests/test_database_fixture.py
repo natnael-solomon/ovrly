@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from conftest import database_url
+from conftest import database_url, isolated_database_url
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -95,3 +95,28 @@ def test_create_failure_never_drops_a_database(isolated_connection):
     with pytest.raises(RuntimeError, match="creation failed"):
         next(database_url.__wrapped__())
     assert admin.execute.call_count == 1
+
+
+def test_isolated_database_is_a_dropped_copy_of_the_template(isolated_connection):
+    generator = isolated_database_url.__wrapped__("ovrly_test_template")
+    supplied = make_url(next(generator))
+    admin = isolated_connection.return_value.__enter__.return_value
+    try:
+        assert supplied.database.startswith("ovrly_test_")
+        assert supplied.database not in {"ovrly", "ovrly_test_template"}
+        assert admin.execute.call_args_list[0].args[0].as_string() == (
+            f'CREATE DATABASE "{supplied.database}" TEMPLATE "ovrly_test_template"'
+        )
+    finally:
+        generator.close()
+    assert admin.execute.call_count == 2
+    assert admin.execute.call_args_list[1].args[0].as_string() == (
+        f'DROP DATABASE "{supplied.database}" WITH (FORCE)'
+    )
+
+
+def test_isolated_database_checks_routing_before_connect(monkeypatch, isolated_connection):
+    monkeypatch.setenv("OVRLY_TEST_DATABASE_URL", f"{TEST_URL}?host=remote.invalid")
+    with pytest.raises(pytest.fail.Exception, match="routing overrides"):
+        next(isolated_database_url.__wrapped__("ovrly_test_template"))
+    isolated_connection.assert_not_called()
