@@ -1,1 +1,1 @@
-"""Hosted speech adapters; never run a local model or fall back to another provider."""
+"""Hosted Groq speech: a primary model and one fallback model (RFC-D27); no local model."""

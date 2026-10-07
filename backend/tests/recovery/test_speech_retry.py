@@ -1,4 +1,4 @@
-"""An owner can retry only explicitly quota-blocked speech, preserving other work."""
+"""An owner can retry only speech both RFC-D27 models refused for quota, preserving other work."""
 
 import asyncio
 import uuid
@@ -18,7 +18,14 @@ from services.pipeline.media_validation import media_stage_key
 from .test_analysis import audiovisual as synthetic_av
 from .test_analysis import send_text, text_source
 from .test_media_validation import audio_bytes, submit
-from .test_speech import speech_error, speech_settings, speech_worker, success, wait_for_speech
+from .test_speech import (
+    model_of,
+    speech_error,
+    speech_settings,
+    speech_worker,
+    success,
+    wait_for_speech,
+)
 
 audiovisual = synthetic_av
 
@@ -61,7 +68,7 @@ async def test_owner_retry_rechecks_quota_and_reuses_text_deadline_and_media(
 
     def replay(request):
         calls.append(request)
-        if len(calls) == 1:
+        if len(calls) <= 2:
             return httpx.Response(429, json={"error": {"code": "insufficient_quota"}})
         return success(request)
 
@@ -85,7 +92,8 @@ async def test_owner_retry_rechecks_quota_and_reuses_text_deadline_and_media(
         )
         assert rejected.status_code == 200, rejected.text
         assert rejected.json()["outcome"] == "quota_exhausted"
-        assert len(calls) == 1
+        # Both models were refused for quota before the owner could retry.
+        assert [model_of(call) for call in calls] == ["synthetic-model", "synthetic-fallback"]
         clock[0] += timedelta(days=1)
         replies = await asyncio.gather(
             *(
@@ -113,7 +121,8 @@ async def test_owner_retry_rechecks_quota_and_reuses_text_deadline_and_media(
         assert done["analysis"]["status"] == "complete"
         assert done["analysis"]["text"] == before["analysis"]["text"]
         assert done["analysis"]["text_deadline"] == before["analysis"]["text_deadline"]
-        assert len(calls) == 2
+        assert done["speech"]["model"] == "synthetic-model"
+        assert len(calls) == 3
 
 
 async def test_retry_request_errors_and_non_blocked_speech_make_no_provider_call(harness, tmp_path):
@@ -189,14 +198,42 @@ async def test_uncertain_provider_outcome_is_never_replayed_by_retry(harness, tm
         assert (await http.get(f"/v1/investigations/{identifier}", headers=headers)).json() == (
             failed
         )
-        assert len(calls) == 1
+        assert [model_of(call) for call in calls] == ["synthetic-model", "synthetic-fallback"]
+
+
+async def test_quota_after_an_unknown_primary_outcome_is_never_retried(harness, tmp_path):
+    calls = []
+
+    def replay(request):
+        calls.append(request)
+        if model_of(request) == "synthetic-model":
+            raise httpx.ReadTimeout("private detail", request=request)
+        return exhausted(request)
+
+    config = speech_settings(harness, tmp_path)
+    app = create_app(config)
+    worker = speech_worker(harness, config, replay)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http,
+    ):
+        identifier, headers = await submit(http, audio_bytes())
+        await worker.start()
+        failed = await wait_for_speech(http, identifier, headers)
+        # The last attempt names the gap, but the primary may have processed the audio.
+        assert speech_error(failed) == "ASR_QUOTA_EXHAUSTED"
+        assert failed["speech"]["reason"] == "quota_exhausted"
+        assert await retry(http, identifier, headers, "after-unknown") == "not_eligible"
+        await asyncio.sleep(0.2)
+        await worker.stop()
+        assert len(calls) == 2
 
 
 async def test_repeated_quota_failure_keeps_gap_and_a_new_request_can_retry_again(
     harness, tmp_path
 ):
     calls = []
-    answers = [exhausted, exhausted, success]
+    answers = [exhausted, exhausted, exhausted, exhausted, success]
 
     def replay(request):
         calls.append(request)
@@ -224,12 +261,12 @@ async def test_repeated_quota_failure_keeps_gap_and_a_new_request_can_retry_agai
         assert speech_error(again) == "ASR_QUOTA_EXHAUSTED"
         assert again["id"] == identifier
         assert await retry(http, identifier, headers, "first") == "accepted"
-        assert len(calls) == 2
+        assert len(calls) == 4
         assert await retry(http, identifier, headers, "second") == "accepted"
         done = await wait_for_speech(http, identifier, headers)
         await worker.stop()
         assert done["speech"]["status"] == "completed"
-        assert len(calls) == 3
+        assert len(calls) == 5
 
 
 @pytest.mark.parametrize("loss", ["deleted", "cancelled", "source", "audio", "disabled"])
@@ -276,7 +313,7 @@ async def test_retry_cannot_bypass_deletion_cancellation_source_loss_or_settings
         await worker.start()
         await asyncio.sleep(0.2)
         await worker.stop()
-        assert len(calls) == 1
+        assert len(calls) == 2
         body = await http.get(f"/v1/investigations/{identifier}", headers=headers)
         assert body.status_code == 200
         assert (body.json().get("speech") or {}).get("status") != "completed"
