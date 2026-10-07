@@ -10,6 +10,7 @@ import tempfile
 import uuid
 import wave
 from collections.abc import Coroutine
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -184,63 +185,26 @@ def _publish_audio(
     }
 
 
-def _decoded_video_duration(stdout: bytes) -> float | None:
-    times: list[int] = []
-    for line in stdout.splitlines():
-        if not line.startswith(b"out_time_us="):
-            continue
-        try:
-            times.append(int(line.split(b"=", 1)[1]))
-        except ValueError:
-            continue
-    if not times:
-        return None
-    return max(times) / 1000000
+def _decoded_video_end(report: bytes) -> float:
+    """End time of the last decoded frame, from ffmpeg's version-stable framecrc rows.
 
-
-def _packet_video_duration(stdout: bytes) -> float | None:
+    `-progress` out_time is the last frame's start on ffmpeg 6 but its end on 4.4.
+    """
+    timebase: Fraction | None = None
+    end = Fraction(0)
     try:
-        packets = json.loads(stdout)["packets"]
-    except (ValueError, KeyError, TypeError, RecursionError):
-        raise InvalidMedia("Invalid video packet metadata") from None
-    duration = 0.0
-    for packet in packets:
-        if not isinstance(packet, dict):
-            raise InvalidMedia("Invalid video packet metadata")
-        try:
-            pts = float(packet["pts_time"])
-            packet_duration = float(packet.get("duration_time") or 0)
-        except (ValueError, KeyError, TypeError, OverflowError):
-            continue
-        if math.isfinite(pts) and math.isfinite(packet_duration):
-            duration = max(duration, pts + max(packet_duration, 0))
-    return duration or None
-
-
-async def _probe_initial_video_duration(
-    settings: Settings, limits: CommandLimits, snapshot: Path
-) -> float | None:
-    packets = await _media_command(
-        [
-            settings.ffprobe_path,
-            "-v",
-            "error",
-            *_INPUT_OPTIONS,
-            "-read_intervals",
-            "%+2",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "packet=pts_time,duration_time",
-            "-of",
-            "json",
-            str(snapshot),
-        ],
-        limits,
-    )
-    if packets.returncode != 0:
-        raise InvalidMedia("Video packets could not be probed")
-    return _packet_video_duration(packets.stdout)
+        for line in report.splitlines():
+            if line.startswith(b"#tb 0:"):
+                numerator, denominator = line.split(b":", 1)[1].split(b"/")
+                timebase = Fraction(int(numerator), int(denominator))
+            elif line and not line.startswith(b"#"):
+                if timebase is None:
+                    raise InvalidMedia("Missing decoded video timebase")
+                _, _, pts, frame_duration, *_ = line.split(b",")
+                end = max(end, (int(pts) + max(int(frame_duration), 0)) * timebase)
+    except (ValueError, ZeroDivisionError):
+        raise InvalidMedia("Invalid decoded video frames") from None
+    return float(end)
 
 
 async def _prepare(
@@ -271,7 +235,7 @@ async def _prepare(
                 "error",
                 *_INPUT_OPTIONS,
                 "-show_entries",
-                "format=duration:stream=codec_type,duration",
+                "format=duration:stream=codec_type",
                 "-of",
                 "json",
                 str(snapshot),
@@ -282,25 +246,16 @@ async def _prepare(
             raise InvalidMedia("Media could not be probed")
         try:
             data = json.loads(probe.stdout)
-            raw_duration = data.get("format", {}).get("duration")
-            duration = float(raw_duration) if raw_duration is not None else None
+            duration = float(data["format"]["duration"])
             streams = {stream["codec_type"] for stream in data["streams"]}
-            video_stream_durations = [
-                float(stream["duration"])
-                for stream in data["streams"]
-                if stream.get("codec_type") == "video" and stream.get("duration") is not None
-            ]
         except (ValueError, KeyError, TypeError, OverflowError):
             raise InvalidMedia("Invalid media metadata") from None
-        if duration is not None and not math.isfinite(duration):
-            raise InvalidMedia("Invalid media metadata")
-        if not streams & {"audio", "video"}:
-            raise InvalidMedia("Missing usable media streams")
-        if duration is not None and duration <= 0:
-            raise InvalidMedia("Missing usable duration")
-        if duration is not None and duration > settings.max_shared_duration_seconds:
+        if not math.isfinite(duration) or duration <= 0 or not streams & {"audio", "video"}:
+            raise InvalidMedia("Missing usable duration or streams")
+        if duration > settings.max_shared_duration_seconds:
             raise MediaTooLong
         if "video" in streams:
+            frames = Path(directory) / "frames.crc"
             decoded = await _media_command(
                 [
                     settings.ffmpeg_path,
@@ -322,12 +277,9 @@ async def _prepare(
                     "1",
                     "-t",
                     str(settings.max_shared_duration_seconds + 0.1),
-                    "-progress",
-                    "pipe:1",
-                    "-nostats",
                     "-f",
-                    "null",
-                    "-",
+                    "framecrc",
+                    str(frames),
                 ],
                 CommandLimits(
                     settings.media_extract_timeout_seconds,
@@ -338,18 +290,16 @@ async def _prepare(
             )
             if decoded.returncode != 0:
                 raise InvalidMedia("Video decoding failed")
-            video_duration = _decoded_video_duration(decoded.stdout)
-            if video_duration is None and video_stream_durations:
-                video_duration = max(video_stream_durations)
-            if video_duration is None:
-                video_duration = await _probe_initial_video_duration(settings, limits, snapshot)
-            if video_duration is None:
-                raise InvalidMedia("Missing decoded video duration") from None
-            if video_duration > settings.max_shared_duration_seconds:
-                raise MediaTooLong
+            try:
+                report = await _finish_file_work(asyncio.to_thread(frames.read_bytes))
+            except FileNotFoundError:
+                raise InvalidMedia("Missing decoded video frames") from None
+            video_duration = _decoded_video_end(report)
             if video_duration <= 0:
                 raise InvalidMedia("Empty video")
-            duration = max(duration or 0, video_duration)
+            if video_duration > settings.max_shared_duration_seconds:
+                raise MediaTooLong
+            duration = max(duration, video_duration)
         audio = None
         if "audio" in streams:
             output = Path(directory) / "audio.wav"
@@ -417,9 +367,7 @@ async def _prepare(
                         settings.max_shared_duration_seconds,
                     )
                 )
-            duration = max(duration or 0, audio["duration_seconds"])
-        if duration is None or duration <= 0:
-            raise InvalidMedia("Missing usable duration")
+            duration = max(duration, audio["duration_seconds"])
         return {
             "coverage": {
                 "status": "not_started",

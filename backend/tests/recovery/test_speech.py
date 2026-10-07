@@ -11,13 +11,7 @@ import pytest
 from sqlalchemy import select
 from test_contract_roundtrip import validate
 
-from recovery.test_media_validation import (
-    audio_bytes,
-    executable,
-    media_settings,
-    submit,
-    wait_for_media,
-)
+from recovery.test_media_validation import audio_bytes, media_settings, submit, wait_for_media
 from recovery.test_privacy import expire, sweep
 from services.api.main import create_app
 from services.asr.groq import GroqAdapter
@@ -486,7 +480,7 @@ async def test_terminal_provider_outcomes_are_safe_and_charge_conservatively(
 
 
 async def test_video_without_audio_skips_groq_even_when_enabled(harness, tmp_path):
-    video = tmp_path / "silent.avi"
+    video = tmp_path / "silent.mkv"
     generated = await run_command(
         [
             "ffmpeg",
@@ -499,34 +493,13 @@ async def test_video_without_audio_skips_groq_even_when_enabled(harness, tmp_pat
             "-t",
             "1",
             "-c:v",
-            "mpeg4",
+            "ffv1",
             str(video),
         ],
         CommandLimits(10, 5, 65536, 1048576),
     )
     assert generated.returncode == 0
-    ffprobe_video_only = executable(
-        tmp_path,
-        """
-import json
-
-print(json.dumps({"format": {"duration": "1.000000"}, "streams": [{"codec_type": "video"}]}))
-""",
-    )
-    ffmpeg_with_decoded_duration = executable(
-        tmp_path,
-        """
-print("out_time_us=1000000")
-print("progress=end")
-""",
-        "media-ffmpeg",
-    )
-    config = speech_settings(
-        harness,
-        tmp_path,
-        ffprobe_path=ffprobe_video_only,
-        ffmpeg_path=ffmpeg_with_decoded_duration,
-    )
+    config = speech_settings(harness, tmp_path)
     app = create_app(config)
     worker = speech_worker(harness, config, lambda _: pytest.fail("No-audio source reached Groq"))
     async with (

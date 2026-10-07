@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import io
 import os
+import struct
 import sys
 import uuid
 import wave
@@ -32,8 +33,8 @@ def media_worker(harness, config, **overrides):
     )
 
 
-def executable(tmp_path, code, name="media-tool"):
-    tool = tmp_path / name
+def executable(tmp_path, code):
+    tool = tmp_path / "media-tool"
     tool.write_text(f"#!{sys.executable} -S\n" + code)
     tool.chmod(0o700)
     return str(tool)
@@ -415,7 +416,7 @@ async def test_media_failures_are_safe_and_visible(harness, tmp_path, content, o
 
 
 async def test_silent_video_preserves_pending_text_and_absent_speech(harness, tmp_path):
-    video = tmp_path / "silent.avi"
+    video = tmp_path / "silent.mkv"
     generated = await run_command(
         [
             "ffmpeg",
@@ -428,35 +429,17 @@ async def test_silent_video_preserves_pending_text_and_absent_speech(harness, tm
             "-t",
             "1",
             "-c:v",
-            "mpeg4",
+            "ffv1",
             str(video),
         ],
         CommandLimits(10, 5, 65536, 1048576),
     )
     assert generated.returncode == 0, generated.stderr
-    ffprobe_without_format_duration = executable(
-        tmp_path,
-        """
-import json
-
-print(json.dumps({"format": {}, "streams": [{"codec_type": "video"}]}))
-""",
-    )
-    ffmpeg_with_decoded_duration = executable(
-        tmp_path,
-        """
-print("out_time_us=1000000")
-print("progress=end")
-""",
-        "media-ffmpeg",
-    )
     config = media_settings(
         harness,
         embed_worker=True,
         storage_dir=tmp_path / "uploads",
         artifacts_dir=tmp_path / "artifacts",
-        ffprobe_path=ffprobe_without_format_duration,
-        ffmpeg_path=ffmpeg_with_decoded_duration,
     )
     app = create_app(config)
     async with (
@@ -501,38 +484,15 @@ async def test_video_cannot_hide_excess_duration_in_container_metadata(harness, 
         CommandLimits(10, 5, 65536, 1048576),
     )
     assert generated.returncode == 0, generated.stderr
-    ffprobe_with_understated_duration = executable(
-        tmp_path,
-        """
-import json
-import subprocess
-import sys
-
-completed = subprocess.run(["ffprobe", *sys.argv[1:]], capture_output=True, check=False)
-if completed.returncode != 0:
-    sys.stdout.buffer.write(completed.stdout)
-    sys.stderr.buffer.write(completed.stderr)
-    sys.exit(completed.returncode)
-payload = json.loads(completed.stdout)
-payload.setdefault("format", {})["duration"] = "1.000000"
-print(json.dumps(payload))
-""",
-    )
-    ffmpeg_with_decoded_duration = executable(
-        tmp_path,
-        """
-print("out_time_us=2000000")
-print("progress=end")
-""",
-        "media-ffmpeg",
-    )
+    original = video.read_bytes()
+    duration_element = b"\x44\x89\x88" + struct.pack(">d", 3000)
+    assert original.count(duration_element) == 1
+    content = original.replace(duration_element, b"\x44\x89\x88" + struct.pack(">d", 1000))
     config = media_settings(
         harness,
         embed_worker=True,
         storage_dir=tmp_path / "uploads",
         artifacts_dir=tmp_path / "artifacts",
-        ffprobe_path=ffprobe_with_understated_duration,
-        ffmpeg_path=ffmpeg_with_decoded_duration,
         max_shared_duration_seconds=1,
     )
     app = create_app(config)
@@ -540,7 +500,7 @@ print("progress=end")
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http,
     ):
-        identifier, headers = await submit(http, video.read_bytes())
+        identifier, headers = await submit(http, content)
         result = await wait_for_media(http, identifier, headers)
         assert result["state"] == "failed"
         assert result["error"]["code"] == "DURATION_LIMIT_EXCEEDED"
