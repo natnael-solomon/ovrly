@@ -1,8 +1,8 @@
 """Outbound request guard against server-side request forgery (REPO-06, #28).
 
-Every evidence-provider request leaves through :class:`GuardedTransport`. Its network
-backend resolves the host once, refuses the connection when **any** resolved address is
-private, loopback, link-local (including the cloud metadata address 169.254.169.254),
+Every evidence-provider and Groq speech request leaves through :class:`GuardedTransport`.
+Its network backend resolves the host once, refuses the connection when **any** resolved
+address is private, loopback, link-local (including the cloud metadata address 169.254.169.254),
 shared, reserved, multicast, an IPv6 unique-local or site-local address, or an IPv6 form
 that embeds such an IPv4 address (mapped, NAT64, 6to4, Teredo, compatible), and then
 connects to exactly the address it checked. Checking and connecting therefore use one

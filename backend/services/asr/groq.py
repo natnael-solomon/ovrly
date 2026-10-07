@@ -1,4 +1,4 @@
-"""Bounded Groq HTTP boundary. A transport may be supplied for offline replay."""
+"""Bounded Groq HTTP boundary through the SSRF guard; tests may supply a replay transport."""
 
 import asyncio
 import json
@@ -10,6 +10,11 @@ from typing import Any, Protocol
 import httpx
 
 from services.jobs.retries import RateLimited, Transient
+from services.providers.egress import GuardedTransport, UnsafeUrl
+
+# Whisper timestamps are quantised (20 ms) and the final segment often ends at or just past
+# the audio length, which callers round down. Small overruns are clamped, not rejected.
+OVERRUN_TOLERANCE_MS = 1000
 
 
 def transcription_parameters(model: str) -> dict[str, str]:
@@ -66,7 +71,7 @@ def _segments(data: Any, duration_ms: int, offset_ms: int) -> list[dict[str, Any
             or isinstance(start, bool)
             or not isinstance(end, (int, float))
             or isinstance(end, bool)
-            or not 0 <= start < end <= duration_ms / 1000
+            or not 0 <= start < end <= (duration_ms + OVERRUN_TOLERANCE_MS) / 1000
             or not math.isfinite(start)
             or not math.isfinite(end)
             or not isinstance(text, str)
@@ -76,6 +81,8 @@ def _segments(data: Any, duration_ms: int, offset_ms: int) -> list[dict[str, Any
         start_ms, end_ms = round(start * 1000), round(end * 1000)
         if start_ms >= end_ms:
             raise ASRInvalidResponse
+        end_ms = min(end_ms, duration_ms)
+        start_ms = min(start_ms, end_ms - 1)
         result.append(
             {"start_ms": offset_ms + start_ms, "end_ms": offset_ms + end_ms, "text": text}
         )
@@ -117,7 +124,9 @@ class GroqAdapter:
             async with (
                 asyncio.timeout(self.timeout_seconds),
                 httpx.AsyncClient(
-                    transport=self.transport, trust_env=False, timeout=self.timeout_seconds
+                    transport=self.transport if self.transport is not None else GuardedTransport(),
+                    trust_env=False,
+                    timeout=self.timeout_seconds,
                 ) as client,
                 client.stream(
                     "POST",
@@ -163,5 +172,8 @@ class GroqAdapter:
                 if response.status_code != 200:
                     raise ASRUnavailable
                 return _segments(data, duration_ms, offset_ms)
+        except UnsafeUrl:
+            # Refused before connecting, so nothing reached the provider.
+            raise ASRUnavailable from None
         except (httpx.HTTPError, TimeoutError):
             raise ASRUnknownOutcome from None
