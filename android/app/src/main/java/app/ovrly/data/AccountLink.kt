@@ -192,7 +192,8 @@ internal class AccountLinker(
 /**
  * Removes the checks this device holds from the server, with their cached report versions,
  * after it switched to an account created on another device. Shares not yet accepted stay
- * and are sent under the account.
+ * and are sent under the account: their declared or completed upload belonged to the revoked
+ * guest, so it is cleared and the staged copy is uploaded again as the account.
  */
 @Dao
 internal abstract class LocalHistoryDao {
@@ -202,9 +203,16 @@ internal abstract class LocalHistoryDao {
     @Query("DELETE FROM investigations WHERE server_id IS NOT NULL")
     abstract suspend fun deleteServerChecks()
 
+    @Query(
+        "UPDATE investigations SET upload_id = NULL, declared_upload = NULL " +
+            "WHERE server_id IS NULL"
+    )
+    abstract suspend fun forgetGuestUploads()
+
     @Transaction
     open suspend fun forgetServerHistory() {
         deleteReports()
         deleteServerChecks()
+        forgetGuestUploads()
     }
 }
