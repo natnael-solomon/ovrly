@@ -72,12 +72,18 @@ def configured(harness, tmp_path, **overrides):
 
 
 class Replay:
-    """Answers Groq, the extraction/reconciliation router and every evidence provider."""
+    """Answers Groq, the extraction/reconciliation router and every evidence provider.
 
-    def __init__(self):
+    ``extraction`` names the recorded extraction cassette; ``correct`` makes reconciliation
+    link the later of two claims as the correction of the earlier one.
+    """
+
+    def __init__(self, extraction="scholarxiv_extraction.json", correct=False):
         self.asr = []
         self.llm = []
         self.evidence = Providers()
+        self.extraction = extraction
+        self.correct = correct
 
     def groq(self, request):
         self.asr.append(request)
@@ -88,7 +94,7 @@ class Replay:
         self.llm.append(body)
         source = json.loads(body["messages"][1]["content"])
         if body["model"] == "auto:cheap":
-            recorded = cassette("scholarxiv_extraction.json")
+            recorded = cassette(self.extraction)
             speech = next(
                 item["id"] for item in source["observations"] if item["modality"] == "speech"
             )
@@ -98,30 +104,46 @@ class Replay:
         recorded = cassette("scholarxiv_reconciliation.json")
         message = recorded["choices"][0]["message"]
         content = json.loads(message["content"])
+        claims = sorted(
+            source["claims"],
+            key=lambda claim: claim["interpretation"]["source_refs"][0]["start_char"],
+        )
         content["updates"] = [
             {
                 "claim_id": claim["id"],
                 "proposition": claim["proposition"],
                 "interpretation": claim["interpretation"],
-                "corrects": None,
+                "corrects": claims[0]["id"] if self.correct and index == 1 else None,
             }
-            for claim in source["claims"]
+            for index, claim in enumerate(claims)
         ]
         message["content"] = json.dumps(content)
         return httpx.Response(200, json=recorded)
 
 
 @pytest.fixture
-async def replay(harness):
-    # The shared Scholarxiv bucket must not carry another test's spending into this run.
+async def replays(harness):
+    """Build a :class:`Replay` per test; the shared Scholarxiv bucket starts empty."""
     async with harness.control.engine.begin() as connection:
         await connection.execute(delete(provider_buckets))
-    replay = Replay()
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(replay.router), base_url="https://router.example"
-    ) as http:
-        replay.http = http
-        yield replay
+    clients = []
+
+    def build(**options):
+        replay = Replay(**options)
+        replay.http = httpx.AsyncClient(
+            transport=httpx.MockTransport(replay.router), base_url="https://router.example"
+        )
+        clients.append(replay.http)
+        return replay
+
+    yield build
+    for client in clients:
+        await client.aclose()
+
+
+@pytest.fixture
+def replay(replays):
+    return replays()
 
 
 def main_flow_worker(harness, config, replay):
@@ -177,6 +199,31 @@ def published(body):
     return body["processing_status"] in {"complete", "failed", "cancelled"} and job.get(
         "state"
     ) not in {"queued", "leased", "running"}
+
+
+async def run_upload(harness, tmp_path, replay, media, **overrides):
+    """One upload with device text through the production stage table; the final read."""
+    config = configured(harness, tmp_path, **overrides)
+    worker = main_flow_worker(harness, config, replay)
+    app = create_app(config)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http,
+    ):
+        identifier, headers = await submit(http, media)
+        await worker.start()
+        try:
+            transcribed = await until(
+                http,
+                headers,
+                identifier,
+                lambda body: (body.get("speech") or {}).get("status") == "completed",
+            )
+            path = f"/v1/investigations/{identifier}/device-text"
+            await send_text(http, path, headers, text_source(transcribed, media))
+            return await until(http, headers, identifier, published)
+        finally:
+            await worker.stop()
 
 
 def assert_published_report(body, replay):
@@ -330,3 +377,46 @@ async def test_defaults_without_provider_keys_fail_visibly_instead_of_skipping(
     assert speech_gaps == ["ASR_UNAVAILABLE"]
     [text] = body["extraction_progress"]["observations"]
     assert (text["status"], text["reason"]) == ("failed", "EXTRACTION_UNAVAILABLE")
+
+
+async def test_a_correction_finishes_with_the_superseded_appearance_unassessed(
+    harness, tmp_path, production_defaults, replays, audiovisual
+):
+    replay = replays(extraction="scholarxiv_extraction_two_claims.json", correct=True)
+    body = await run_upload(harness, tmp_path, replay, audiovisual)
+    assert body["processing_status"] == "complete", body.get("error")
+    report = body["report"]
+    assert report["provisional"] is False and report["version"] == 3
+    earlier, later = sorted(
+        report["claims"],
+        key=lambda claim: claim["interpretation"]["source_refs"][0]["start_char"],
+    )
+    assert earlier["superseded_by_occurrence_id"] == later["id"]
+    assert later["corrects_occurrence_id"] == earlier["id"]
+    assert [item["claim_id"] for item in report["assessments"]] == [later["id"]]
+
+
+async def test_claims_over_the_run_quota_stay_visible_and_the_report_finishes(
+    harness, tmp_path, production_defaults, replays, audiovisual
+):
+    replay = replays(extraction="scholarxiv_extraction_two_claims.json")
+    body = await run_upload(
+        harness, tmp_path, replay, audiovisual, quotas_enabled=True, quota_claims_per_run=1
+    )
+    assert body["processing_status"] == "complete", body.get("error")
+    report = body["report"]
+    assert report["provisional"] is False and len(report["claims"]) == 2
+    assert len(report["assessments"]) == 1
+    assert "1 claim budget" in report["change_summary"]
+
+
+async def test_a_failed_evidence_stage_fails_the_investigation_visibly(
+    harness, tmp_path, production_defaults, replay, audiovisual
+):
+    # Scholarxiv refuses the search plan: retrieval fails terminally without retries.
+    replay.evidence.papers_status = 401
+    body = await run_upload(harness, tmp_path, replay, audiovisual)
+    assert body["processing_status"] == "failed" and body["state"] == "failed"
+    assert body["report"] is None
+    assert body["error"]["code"] == "EVIDENCE_FAILED"
+    assert body["job"]["stage"] == "retrieval" and body["job"]["state"] == "failed"

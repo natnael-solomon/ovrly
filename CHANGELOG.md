@@ -11,7 +11,10 @@
   (`provider_unavailable` speech, `EXTRACTION_UNAVAILABLE`, `EvidenceUnavailable`)
   instead of being skipped. An end-to-end test with recorded synthetic provider
   responses runs in **Backend recovery**. The live capture status no longer says
-  research is not connected when a server is configured.
+  research is not connected when a server is configured. Corrections and claims the
+  evidence run could not assess (claim budget, provider gaps) no longer keep a report
+  provisional, and a failed evidence stage fails the investigation with
+  `EVIDENCE_FAILED` or `EVIDENCE_UNAVAILABLE`, so polling always ends.
 
 - Backend CI reuses main's cached coverage baseline (#125): a passing `main` push
   caches its coverage report by commit, and PRs compare against that exact report

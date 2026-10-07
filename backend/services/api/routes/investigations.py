@@ -14,7 +14,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from services.api.auth import CurrentPrincipal, Principal, load_owned, owned_rows
-from services.api.errors import ApiError, extraction_failure_code, safe_error
+from services.api.errors import (
+    ApiError,
+    evidence_failure_code,
+    extraction_failure_code,
+    safe_error,
+)
 from services.api.intake import InvestigationDispatcher
 from services.api.routes.common import engine, settings
 from services.api.schemas import (
@@ -387,6 +392,33 @@ async def read_models(
         for item in models:
             if item.job is not None and item.job.id in by_id:
                 item.error = SafeError.model_validate(safe_error(by_id[item.job.id]))
+    # A terminally failed evidence stage of the main flow ends the investigation (#127);
+    # reanalysis requests report their own failures and keep the published report.
+    evidence_jobs = [
+        item.job.id
+        for item in models
+        if item.job is not None
+        and item.job.stage in {"retrieval", "assessment"}
+        and item.job.state == "failed"
+    ]
+    if evidence_jobs:
+        failed = await connection.execute(
+            select(jobs.c.id, jobs.c.stage, jobs.c.failure, jobs.c.payload).where(
+                jobs.c.id.in_(evidence_jobs)
+            )
+        )
+        codes = {
+            row.id: evidence_failure_code(row.failure)
+            for row in failed
+            if row.stage in {"retrieval", "assessment"}
+            and not (row.payload or {}).get("reanalysis_request_id")
+        }
+        for item in models:
+            if item.job is not None and item.job.id in codes:
+                item.state = "failed"
+                item.processing_status = "failed"
+                item.report = None
+                item.error = SafeError.model_validate(safe_error(codes[item.job.id]))
     return models
 
 

@@ -17,7 +17,8 @@ from services.api.capture_schemas import (
     ModalityCoverage,
     SeqRange,
 )
-from services.api.schemas import CoverageStatus, ProcessingStatus, ReportVersion
+from services.api.errors import safe_error
+from services.api.schemas import CoverageStatus, ProcessingStatus, ReportVersion, SafeError
 from services.jobs.handlers import JobContext
 from services.jobs.models import jobs
 from services.jobs.queue import ClaimedJob, StageKey
@@ -65,11 +66,20 @@ def claim_progress(
     for claim in report.claims:
         assessment = assessments.get(claim.id)
         state: ProcessingStatus
+        error = None
         if assessment is not None:
             state = "partial" if assessment.provisional else "complete"
+        elif continue_research is False or claim.superseded_by_occurrence_id is not None:
+            # A superseded appearance is never assessed; its correction carries the result.
+            state = "cancelled"
+        elif not report.provisional:
+            # A final version keeps a claim it could not assess visible, with the reason in
+            # its change summary (#127), so polling ends instead of waiting for it.
+            state = "failed"
+            error = SafeError.model_validate(safe_error("CLAIM_UNASSESSED"))
         else:
-            state = "cancelled" if continue_research is False else "checking"
-        claims.append(CaptureClaimState(claim_id=claim.id, processing_status=state, error=None))
+            state = "checking"
+        claims.append(CaptureClaimState(claim_id=claim.id, processing_status=state, error=error))
     return claims, "partial" if report.provisional else "complete"
 
 

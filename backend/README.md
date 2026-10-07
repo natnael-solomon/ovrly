@@ -28,8 +28,17 @@ A capture or upload runs these stages with production defaults:
 3. `claim_extraction` windows over the time-ordered speech and text observations.
 4. `reconciliation` once the input settles. Its fenced publication enqueues
    `retrieval` for every current, unassessed claim of the reconciled version.
-5. `retrieval`, then `assessment`, which publishes the next report version. With every
-   claim assessed and no open capture it is final (`processing_status: complete`).
+5. `retrieval`, then `assessment`, which publishes the next report version. Once the run
+   has tried every current claim and no capture is open, the version is final
+   (`processing_status: complete`). Superseded appearances are never assessed and do
+   not hold it open. A claim the run tried but could not assess (claim budget from
+   `OVRLY_EVIDENCE_MAX_CLAIMS` or `OVRLY_QUOTA_CLAIMS_PER_RUN`, unavailable search or
+   relation step) stays visible without an assessment, its reason is counted in
+   `change_summary`, and capture polling reports it `failed` with `CLAIM_UNASSESSED`.
+6. A terminally failed `retrieval` or `assessment` job of this flow ends the
+   investigation as `failed` with `EVIDENCE_UNAVAILABLE` (no Scholarxiv key) or
+   `EVIDENCE_FAILED` (for example a refused plan or failed citation check), so clients
+   stop polling. Reanalysis requests keep their own status and the published report.
 
 `OVRLY_ASR_ENABLED`, `OVRLY_EXTRACTION_ENABLED` and `OVRLY_RECONCILIATION_ENABLED`
 default to `1`. A stage left on without its provider configuration still starts and
@@ -40,12 +49,13 @@ fails visibly per input, never silently:
 | Groq key, model, account label or verified limits | Speech `unavailable` with reason `provider_unavailable`; analysis gap `ASR_UNAVAILABLE`. No Groq call |
 | Scholarxiv key, verified extraction pool or model list | Extraction observations `failed` with `EXTRACTION_UNAVAILABLE` |
 | Verified reconciliation pool | `reconciliation_progress` `failed` with `EXTRACTION_UNAVAILABLE`; the provisional report stays readable |
-| Scholarxiv key at the evidence stages | `retrieval`/`assessment` jobs fail with `EvidenceUnavailable`, shown as the investigation's failed `job` |
+| Scholarxiv key at the evidence stages | `retrieval`/`assessment` jobs fail with `EvidenceUnavailable`; the investigation reads `failed` with `EVIDENCE_UNAVAILABLE` |
 
 An explicit opt-in (`=1` in the environment or an argument) must still be complete: the
 server refuses to start with a partial configuration, as before. `=0` opts a stage out.
 `OVRLY_STUB_REPORTS=1` turns the default-on extraction and reconciliation off.
-`tests/recovery/test_main_flow.py` runs the whole flow for an upload and a capture with
+`tests/recovery/test_main_flow.py` runs the whole flow for an upload and a capture, a
+correction, claims over the per-run quota and a refused evidence search, with
 recorded synthetic provider responses (`tests/cassettes/main_flow` and the evidence
 cassettes) against PostgreSQL in **Backend recovery**; no request leaves the test. The
 other stage suites pin the earlier opt-outs in `tests/conftest.py` and opt in per test.
@@ -1291,8 +1301,10 @@ server-side only and never logged.
 
 A version published in between (a correction, say) supersedes the run, which then
 publishes nothing. Claims the budget or a provider failure did not reach stay visible
-without an assessment and keep the version provisional (`processing_status: partial`);
-a `deeper` reanalysis continues them.
+without an assessment, with the reason counted in `change_summary`; once the run has
+tried every current claim the version is final (`processing_status: complete`, #127).
+A `deeper` reanalysis can continue them. A terminally failed stage of the main flow
+fails the investigation with `EVIDENCE_FAILED` or `EVIDENCE_UNAVAILABLE`.
 
 Router calls send only documented fields (`model`, `messages`, `models`, `max_tokens`,
 `temperature`), strip a leading `<think>` block, code fences and any preamble, validate

@@ -597,7 +597,19 @@ def merged_version(
             )
             evidence.extend(outcome.evidence)
         assessed = {a.claim_id for a in assessments}
-        provisional = capture_open or any(c.id not in assessed for c in base.claims)
+        attempted = {outcome.claim_id for outcome in outcomes}
+        # Superseded appearances are never assessed (#127). A claim this run tried but could
+        # not assess (budget, provider gaps) stays visible as unassessed with its reason in
+        # the summary; only a claim still waiting for an evidence run keeps it provisional.
+        waiting = [
+            c
+            for c in base.claims
+            if c.superseded_by_occurrence_id is None
+            and c.id not in assessed
+            and c.id not in attempted
+            and base.provisional
+        ]
+        provisional = capture_open or bool(waiting)
         done = sum(1 for o in outcomes if o.assessment is not None)
         summary = (
             f"Evidence check{' (deeper search)' if depth == 'deeper' else ''}: "

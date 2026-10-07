@@ -375,7 +375,7 @@ async def test_retrieval_failures_are_typed(client, app, providers):
 
 
 @pytest.mark.parametrize("quota_policy", [False, True])
-async def test_claim_budget_keeps_extra_claims_visible_and_provisional(
+async def test_claim_budget_keeps_extra_claims_visible_and_finishes(
     client, app, providers, quota_policy
 ):
     headers = await guest(client)
@@ -392,11 +392,12 @@ async def test_claim_budget_keeps_extra_claims_visible_and_provisional(
     await run(app, evidence.retrieval, RETRIEVAL_STAGE, investigation_id)
     await run(app, evidence.assessment, ASSESSMENT_STAGE, investigation_id)
     report = await read(client, headers, investigation_id, base.version + 1)
-    assert report["provisional"] is True and len(report["claims"]) == 2
+    # The capped claim stays visible and unassessed with its reason; the run is final (#127).
+    assert report["provisional"] is False and len(report["claims"]) == 2
     assert len(report["assessments"]) == 1
     assert "1 claim budget" in report["change_summary"]
     body = (await client.get(f"/v1/investigations/{investigation_id}", headers=headers)).json()
-    assert body["processing_status"] == "partial"
+    assert body["processing_status"] == "complete"
 
 
 async def test_reanalysis_correction_and_deeper(client, app, providers):
