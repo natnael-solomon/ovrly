@@ -100,18 +100,19 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Restore main coverage baseline
         # Exact commit only: an older main report is never substituted. A miss falls back
-        # to remeasuring main in the next step, with a warning.
+        # to remeasuring main in the next step, with a warning. The cache version hashes the
+        # path list, so restore and save must use the identical path or no key ever matches.
         if: steps.baseline.outputs.sha != ''
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: backend/reports/main-cache
+          path: backend/reports/main-baseline
           key: backend-coverage-main-${{ steps.baseline.outputs.sha }}
       - name: Test and compare coverage with main
         id: checks
         env:
           SAVE_BASELINE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
-          args=(--cached-baseline reports/main-cache)
+          args=(--cached-baseline reports/main-baseline)
           if [[ "$SAVE_BASELINE" == true ]]; then
             args+=(--save-baseline reports/main-baseline)
           fi

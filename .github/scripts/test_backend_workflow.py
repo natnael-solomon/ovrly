@@ -40,7 +40,7 @@ class BackendWorkflowTest(unittest.TestCase):
         self.assertNotIn("restore-keys", validate)
         self.assertIn("--baseline-sha", validate)
         checks = validate.split("- name: Test and compare coverage with main", 1)[1].split("- name:", 1)[0]
-        self.assertIn("--cached-baseline reports/main-cache", checks)
+        self.assertIn("--cached-baseline reports/main-baseline", checks)
         self.assertIn(
             "SAVE_BASELINE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
             checks)
@@ -50,6 +50,24 @@ class BackendWorkflowTest(unittest.TestCase):
                       "&& steps.checks.outcome == 'success'", save)
         self.assertIn("key: backend-coverage-main-${{ github.sha }}", save)
         self.assertEqual(1, SOURCE.count("actions/cache/save@"))
+
+    def test_baseline_restore_and_save_use_identical_path_and_key_family(self):
+        # actions/cache hashes the path list into the cache version: a differing path
+        # never matches even with an identical key.
+        validate = SOURCE.split("  validate:\n", 1)[1].split("  recovery:\n", 1)[0]
+        restore = validate.split("- name: Restore main coverage baseline", 1)[1].split("- name:", 1)[0]
+        save = validate.split("- name: Save main coverage baseline", 1)[1].split("- name:", 1)[0]
+        checks = validate.split("- name: Test and compare coverage with main", 1)[1].split("- name:", 1)[0]
+        restore_path = re.search(r"^\s+path: (\S+)$", restore, re.M).group(1)
+        save_path = re.search(r"^\s+path: (\S+)$", save, re.M).group(1)
+        self.assertEqual(restore_path, save_path)
+        relative = restore_path.removeprefix("backend/")
+        self.assertIn(f"--cached-baseline {relative}", checks)
+        self.assertIn(f"--save-baseline {relative}", checks)
+        restore_key = re.search(r"key: (\S+)\$\{\{", restore).group(1)
+        save_key = re.search(r"key: (\S+)\$\{\{", save).group(1)
+        self.assertEqual(restore_key, save_key)
+
     def test_postgres_is_skipped_for_docs_without_skipping_required_result(self):
         validate = SOURCE.split("  validate:\n", 1)[1].split("  recovery:\n", 1)[0]
         self.assertIn("if: needs.changes.outputs.backend == 'true'", validate)
