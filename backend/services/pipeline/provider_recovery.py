@@ -22,12 +22,26 @@ logger = logging.getLogger(__name__)
 
 
 async def wait_for_provider(pending: Awaitable[T], context: JobContext) -> T:
+    """Await a provider call while keeping its lease alive.
+
+    The lease is renewed as soon as the call starts, then every third of the lease measured
+    from the start of each renewal, so database latency cannot stretch the gap. Renewal is
+    strictly fenced on an unexpired lease, which leaves at least two thirds of the lease for
+    renewal latency and scheduling delay.
+    """
     task = asyncio.ensure_future(pending)
+    loop = asyncio.get_running_loop()
+    interval = context.lease_seconds / 3
     try:
+        next_renewal = loop.time()
         while not task.done():
-            done, _ = await asyncio.wait({task}, timeout=context.lease_seconds / 3)
-            if not done:
-                await context.heartbeat()
+            delay = next_renewal - loop.time()
+            if delay > 0:
+                done, _ = await asyncio.wait({task}, timeout=delay)
+                if done:
+                    break
+            next_renewal = loop.time() + interval
+            await context.heartbeat()
         return await task
     finally:
         task.cancel()

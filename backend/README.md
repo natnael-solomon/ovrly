@@ -430,7 +430,10 @@ Every HTTP completion, repair, routing decision, regenerated-feedback request
 and fallback reserves one request **before send**, atomically with the fenced
 stage checkpoint. The in-flight marker is written in that transaction only after
 the reservation is admitted, so a refused reservation never leaves an unknown
-outcome, even if the later budget-exhaustion checkpoint loses its lease. A
+outcome, even if the later budget-exhaustion checkpoint loses its lease. While a
+provider call runs, the lease is renewed when the call starts and then every third
+of the lease, timed from each renewal's start so database latency cannot stretch
+the gap; a renewal after expiry is refused. A
 conservative local token approximation reserves the
 ASCII-escaped serialized JSON request's byte count (including prompts, schema
 and overlapping input), configured output-token cap, and 256 framing tokens.
