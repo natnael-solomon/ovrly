@@ -377,10 +377,12 @@ the Stop choice is open or TalkBack is on. Later claims and updates only change 
 light the dot, which pulses twice. The expanded panel never fades; the pill and bubble fade to
 70% after 4 s without a touch or a new result, and return on the next touch or result; there
 is no fade under TalkBack.
-Expanding is instant. Other form changes (collapse, Stop) take about 150 ms: the old form
-fades and shrinks into the pill's corner while the window keeps its size, then the new form
-fades in. The window never resizes mid-animation (each resize relays out the overlay window,
-which jittered). Every change is instant when the phone's animations are off. Collapse puts the pill back at the
+Expanding unrolls the panel downward from the pill's height in about 150 ms: the window takes
+the panel's size at once and only a clip in the draw phase moves. Other form changes
+(collapse, Stop) take about 150 ms: the old form fades and shrinks into the pill's corner
+while the window keeps its size, then the new form fades in. The window never resizes
+mid-animation (each resize relays out the overlay window, which jittered). Every change is
+instant when the phone's animations are off. Collapse puts the pill back at the
 panel's top. When research that continued
 after Stop has settled, `CaptureLive` posts a silent, low-priority "Results ready · N claims"
 notification that opens the capture's report (`MainActivity.ACTION_OPEN_CHECK`), whether or

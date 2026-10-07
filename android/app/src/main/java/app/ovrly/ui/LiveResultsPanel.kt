@@ -1,5 +1,8 @@
 package app.ovrly.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,9 +24,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -67,10 +77,23 @@ internal fun LiveExpandedPanel(
     modifier: Modifier = Modifier,
     frame: LivePanelFrame = LivePanelFrame()
 ) {
+    // The panel unrolls downward from the pill's height. Only a clip in the draw phase
+    // changes, so the window, which already has the panel's size, never relays out (each
+    // relayout showed as jitter on the phone).
+    val reveal = remember { Animatable(if (frame.animate) 0f else 1f) }
+    LaunchedEffect(Unit) { reveal.animateTo(1f, tween(UNROLL_MS, easing = FastOutSlowInEasing)) }
     OverlayPanelScaffold(
         header = { LiveHeader(model, actions, model.examining) },
         footer = { OverlayPanelFooter("Drag header to move") },
-        modifier = modifier,
+        modifier = modifier.drawWithContent {
+            val start = UNROLL_START_DP.dp.toPx().coerceAtMost(size.height)
+            val bottom = start + (size.height - start) * reveal.value
+            val corner = CornerRadius(PANEL_CORNER_DP.dp.toPx())
+            val visible = Path().apply {
+                addRoundRect(RoundRect(0f, 0f, size.width, bottom, corner))
+            }
+            clipPath(visible) { this@drawWithContent.drawContent() }
+        },
         spec = OverlayPanelSpec(
             frame.width,
             frame.maxHeight,
@@ -363,3 +386,8 @@ internal fun PanelIconButton(
         OverlayGlyph(glyph, Modifier.size(18.dp))
     }
 }
+
+/** The expanded panel's unroll: length, start height (about the pill's) and glass corner. */
+private const val UNROLL_MS = 150
+private const val UNROLL_START_DP = 56
+private const val PANEL_CORNER_DP = 28
