@@ -1,5 +1,6 @@
 package app.ovrly.ui
 
+import android.content.Context
 import app.ovrly.data.ApiFailure
 
 /** Everything the Inbox and Library show. */
@@ -91,7 +92,8 @@ internal sealed interface CheckCommand {
     data class OpenSaved(val reportId: String) : CheckCommand
 
     /** Starts the optional Google account link (BC-D07); never needed for checking. */
-    data object LinkAccount : CheckCommand
+    /** [activity] is the screen the Google account picker is shown over. */
+    class LinkAccount(val activity: Context?) : CheckCommand
 }
 
 /** Plain-language text for a failed call; never shown as a result. */

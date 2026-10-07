@@ -8,6 +8,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -29,6 +30,7 @@ internal fun AccountSection(
     onCommand: (CheckCommand) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(SMALL_GAP)) {
         Text(
             "Account",
@@ -46,7 +48,7 @@ internal fun AccountSection(
         )
         if (!state.linked) {
             OutlinedButton(
-                { onCommand(CheckCommand.LinkAccount) },
+                { onCommand(CheckCommand.LinkAccount(context)) },
                 enabled = state.available && !state.busy
             ) { Text("Sign in with Google") }
             if (!state.available) Muted(SIGN_IN_UNAVAILABLE)
@@ -77,7 +79,8 @@ internal fun linkNotice(outcome: LinkOutcome): String? = when (outcome) {
             val moved = outcome.merged
             append("Signed in to your existing account. ")
             append(if (moved == 1) "1 saved report" else "$moved saved reports")
-            append(" from this device moved to it. This device's check history is not merged.")
+            append(" from this device moved to it. Checks started on this device before ")
+            append("signing in are not merged and are no longer shown.")
         } else {
             append("Linked. Reports you save are kept for your Google account.")
         }

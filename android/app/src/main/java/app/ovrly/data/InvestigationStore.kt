@@ -209,6 +209,8 @@ internal abstract class OvrlyDatabase : RoomDatabase() {
 
     abstract fun savedReports(): SavedReportDao
 
+    abstract fun localHistory(): LocalHistoryDao
+
     companion object {
         /** No destructive fallback: a missing migration fails loudly instead of losing data. */
         fun open(context: Context): OvrlyDatabase =

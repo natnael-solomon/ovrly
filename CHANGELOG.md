@@ -4,6 +4,14 @@
 
 ### Added
 
+- Google sign-in on Android (AN-10, #36). With the backend's Web client ID set in
+  `api.local.properties` (`googleWebClientId`), the account section's Sign in with Google uses
+  Android Credential Manager to link the guest to a Google account (BC-D07). Signing in on a
+  second device with an account linked elsewhere shows that account's saved reports there,
+  and the checks the previous guest started on that device are removed from it. Setup is in
+  the Android README. Second-device recovery stays disclosed as incomplete (decision 0003)
+  until it is verified on two physical devices.
+
 - Quote-grounded extraction prompt (BE-08, #25): `claim-window-v2` asks hosted
   models to quote source text verbatim, and the backend resolves quotes to
   character spans. The single extraction or reconciliation repair now states a
