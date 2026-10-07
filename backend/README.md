@@ -1598,6 +1598,17 @@ your checkout, contact providers or trust a stale/missing artifact as a baseline
 It checks the 2 GiB headroom before measurement and before installing baseline
 dependencies; baseline caches can remain in uv's cache.
 
+In CI a passing `main` push also saves its own `coverage.json`/`coverage.xml` and a
+`baseline.json` identity (commit, coverage version, hash of `[tool.coverage]`) to the
+Actions cache as `backend-coverage-main-<sha>` (`--save-baseline`). A later run
+restores only the exact key for its baseline commit and passes it with
+`--cached-baseline`; the runner uses it only when the identity matches and the report
+lists exactly that commit's `backend/services/**/*.py`, and then skips the second
+suite. A missing, mismatched or invalid cache prints a `::warning::` and falls back
+to remeasuring main as above, so it never becomes a pass. `summary.md` and
+`comparison.json` (`baseline_source`) say which baseline was used. Validate backend
+has a 40-minute timeout for that fallback.
+
 The overall line-coverage regression limit is a drop of **at most 1 percentage
 point**, calculated from exact counts without rounding. If main genuinely has
 no backend manifest yet, the report says the baseline is unavailable; it does

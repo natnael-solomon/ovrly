@@ -4,6 +4,11 @@
 
 ### Added
 
+- Backend CI reuses main's cached coverage baseline (#125): a passing `main` push
+  caches its coverage report by commit, and PRs compare against that exact report
+  instead of rerunning main's suite. A missing or mismatched cache warns and
+  remeasures main as before. Validate backend's timeout rises from 25 to 40 minutes.
+
 - Shared provider budgets and the global intake stop (BE-12, #22): BC-D06 now
   records limits derived from the cited Scholarxiv and Groq Free plans, accepted
   on 7 October 2026 where a source backs them (6 daily and 2 active checks per
