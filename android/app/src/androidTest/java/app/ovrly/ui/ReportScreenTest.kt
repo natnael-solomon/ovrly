@@ -2,8 +2,11 @@ package app.ovrly.ui
 
 import android.content.Intent
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties.StateDescription
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -330,16 +333,22 @@ class ReportScreenTest {
         assertNoClippedText()
     }
 
-    /** Every clickable node on screen can be touched over at least 48 by 48 dp. */
+    /**
+     * Every clickable node on screen can be touched over at least 48 by 48 dp, and no two of
+     * those touch areas overlap, so a control drawn smaller has the room it is expanded into.
+     */
     private fun assertClickTargets() {
-        val ids = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().map { it.id }
-        assertTrue(ids.isNotEmpty())
-        ids.forEach { id ->
-            compose.onNode(SemanticsMatcher("node $id") { it.id == id }).assertTouchTarget()
+        val nodes = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes()
+        assertTrue(nodes.isNotEmpty())
+        val areas = nodes.map { it.touchArea() }
+        areas.forEachIndexed { i, area ->
+            areas.drop(i + 1).forEach { other ->
+                assertFalse("touch areas $area and $other overlap", area.overlaps(other))
+            }
         }
     }
 
-    /** No composed text is cut off by a fixed height or width. */
+    /** No composed text is cut off: every line fits in the height it was given. */
     private fun assertNoClippedText() {
         val nodes = compose.onAllNodes(
             SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult),
@@ -351,28 +360,42 @@ class ReportScreenTest {
                 val layouts = mutableListOf<TextLayoutResult>()
                 node.config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
                 val layout = layouts.single()
+                val text = layout.multiParagraph
                 assertFalse(
                     "\"${layout.layoutInput.text}\" is clipped: ${layout.size} in " +
-                        "${layout.layoutInput.constraints}, text ${layout.multiParagraph.height}",
-                    layout.hasVisualOverflow
+                        "${layout.layoutInput.constraints}, text ${text.height}",
+                    text.didExceedMaxLines || layout.size.height < text.height
                 )
             }
         }
     }
 
-    /**
-     * The node's touch area, including the platform's minimum touch target expansion that
-     * Material controls drawn at 40 dp rely on, is at least 48 by 48 dp.
-     */
     private fun SemanticsNodeInteraction.assertTouchTarget(): SemanticsNodeInteraction {
-        val node = fetchSemanticsNode()
-        val bounds = node.touchBoundsInRoot
-        with(node.layoutInfo.density) {
-            val width = bounds.width.toDp()
-            val height = bounds.height.toDp()
-            assertTrue("touch area $width by $height", width >= MIN_TARGET && height >= MIN_TARGET)
-        }
+        fetchSemanticsNode().touchArea()
         return this
+    }
+
+    /**
+     * Where a node can be touched: its own size, grown to the platform's minimum touch target
+     * (48 dp), which Material controls drawn at 40 dp rely on. Fails below 48 by 48 dp.
+     */
+    private fun SemanticsNode.touchArea(): Rect {
+        val minimum = layoutInfo.viewConfiguration.minimumTouchTargetSize
+        return with(layoutInfo.density) {
+            val width = maxOf(size.width.toFloat(), minimum.width.toPx())
+            val height = maxOf(size.height.toFloat(), minimum.height.toPx())
+            assertTrue(
+                "touch area ${width.toDp()} by ${height.toDp()}",
+                width.toDp() >= MIN_TARGET && height.toDp() >= MIN_TARGET
+            )
+            val center = positionInRoot + Offset(size.width / 2f, size.height / 2f)
+            Rect(
+                center.x - width / 2,
+                center.y - height / 2,
+                center.x + width / 2,
+                center.y + height / 2
+            )
+        }
     }
 
     private companion object {

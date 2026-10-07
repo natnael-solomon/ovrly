@@ -242,5 +242,5 @@ internal val CARD_RADIUS = 16.dp
 internal val CARD_PADDING = 16.dp
 private val SECTION_GAP = 12.dp
 private val ROW_GAP = 8.dp
-internal val TONE_BAR = 4.dp
+private val TONE_BAR = 4.dp
 private const val RULE_ALPHA = 0.7f

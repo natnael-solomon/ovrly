@@ -531,7 +531,6 @@ Accessibility on the Report and Settings screens:
 | Claims | Each claim card is one TalkBack stop that reads the claim first, then its assessment, correction, where it appeared, its time in words ("from 12 seconds to 18 seconds in the video", or "after capture started, not a time in the original video") and its source count, with "Detail shown" or "Detail hidden". The visible text is unchanged. |
 | Detail | Each label and value ("When", "Original wording", ...) is one stop; "When" reads the time in words. Each evidence card is one stop, and its link button reads "Open source: <title>". |
 | Targets | Every control has a touch area of at least 48 by 48 dp, including the full-video sheet's video and confirmation rows (Material buttons drawn at 40 dp get the rest from the platform's minimum touch target). |
-| Cards | Report, claim and evidence cards measure their content directly (no intrinsic or fixed height), so their tone bar follows the text at any size. |
 | Text size | Report cards and evidence cards have no fixed heights; at 200% text they grow and the list scrolls. |
 | Motion | The Report screen has no animation of its own; sheets and the voice dock follow the system animator scale, so "Remove animations" makes them immediate. |
 | Capture | Settings' recording timer reads "Recording, 12 seconds of 3 minutes" instead of "REC 0:12 / 3:00". |
