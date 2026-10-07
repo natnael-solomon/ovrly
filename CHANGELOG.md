@@ -4,7 +4,7 @@
 
 ### Added
 
-- Live overlay forms (#31): the overlay now starts as a small "Examining m:ss" pill with the
+- Live overlay forms (#31): the overlay now starts as a small "Live m:ss" pill with the
   ovrly mark, the claim count, an update dot and Stop. Tapping it, or a capture's first
   claims (once), opens the claims panel instantly below the pill, which stays put; tapping the
   pill again closes it, and the panel repeats nothing from the pill. Untouched, the overlay

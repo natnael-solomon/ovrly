@@ -129,6 +129,9 @@ class OverlayService :
 
     /** The pill's screen x while the panel is open below it; the window then spans the panel. */
     private val pillX = MutableStateFlow(compactPosition.first)
+
+    /** The open panel window's screen x, so the pill can be placed inside it. */
+    private val panelX = MutableStateFlow(0)
     private var pillWidth = 0
 
     /**
@@ -355,6 +358,7 @@ class OverlayService :
                         val geometry =
                             livePanelGeometry(usableSize.width, usableSize.height, density)
                         val pillAt by pillX.collectAsState()
+                        val panelAt by panelX.collectAsState()
                         LiveWindow(
                             shown,
                             LiveOverlayModel(
@@ -372,8 +376,7 @@ class OverlayService :
                                 (geometry.width / density).dp,
                                 (geometry.height / density).dp,
                                 opaque,
-                                pillOffset =
-                                    ((pillAt - geometry.margin).coerceAtLeast(0) / density).dp
+                                pillOffset = ((pillAt - panelAt).coerceAtLeast(0) / density).dp
                             )
                         )
                     }
@@ -707,12 +710,11 @@ class OverlayService :
         }
         // The demo is always its full height; the live panel is as tall as its content.
         val height = if (demo && geometry != null) geometry.height else view?.height ?: 0
-        val newX = if (geometry !=
-            null
-        ) {
-            margin
-        } else {
-            x.coerceIn(0, (usableSize.width - width).coerceAtLeast(0))
+        // The live panel may start left of its margin, so the pill above it keeps its own x.
+        val newX = when {
+            geometry == null -> x.coerceIn(0, (usableSize.width - width).coerceAtLeast(0))
+            demo -> margin
+            else -> x.coerceIn(0, margin)
         }
         val newY = y.coerceIn(margin, (usableSize.height - height - margin).coerceAtLeast(margin))
         params.x = newX
@@ -745,8 +747,9 @@ class OverlayService :
 
             // The live panel keeps its top where the pill was; moveTo lifts it to stay on screen.
             geometry != null && !demo -> {
-                params.x = geometry.margin
+                params.x = minOf(geometry.margin, compactPosition.first.coerceAtLeast(0))
                 params.y = panelTop
+                panelX.value = params.x
             }
 
             resetPosition -> {

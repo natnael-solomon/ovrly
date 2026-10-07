@@ -288,9 +288,9 @@ private fun PillReadout(
     ) {
         OverlayMark(Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
+        // Only the claim count gives way when space is short, so the label is never cut.
         Text(
-            state.status ?: "Examining",
-            modifier = Modifier.weight(1f, fill = false),
+            state.status ?: "Live",
             style = MaterialTheme.typography.labelMedium,
             color = p.muted,
             maxLines = 1,

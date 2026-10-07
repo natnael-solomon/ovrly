@@ -184,7 +184,7 @@ private fun UpdateNotice(
             Text(
                 claim.text ?: PENDING_CLAIM_TEXT,
                 style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
         }
