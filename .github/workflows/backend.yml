@@ -41,7 +41,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Runs the backend suite twice: this change, then main's coverage baseline.
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: backend
