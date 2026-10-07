@@ -436,7 +436,7 @@ private const val EXPAND_LABEL = "Expand live results"
 internal const val BUBBLE_DP = 64
 private const val BUBBLE_INSET_DP = 4
 
-private const val FORM_MS = 220
+private const val FORM_MS = 150
 private const val FORM_EXIT_MS = FORM_MS / 2
 private const val FORM_START_SCALE = 0.85f
 private const val FORM_END_SCALE = 0.92f
