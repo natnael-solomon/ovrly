@@ -1,0 +1,92 @@
+name: Deployment smoke
+
+# Post-deploy smoke for the BE-11 environment (#21). Run it by hand after each deploy.
+# It never opens a Voxide session and needs no secret: it mints its own guest.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Deployed HTTPS origin; empty uses the OVRLY_BASE_URL repository variable
+        required: false
+        type: string
+      wake_seconds:
+        description: Cold-start bound for the first readiness answer (seconds)
+        required: false
+        default: '180'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployment-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Deployment smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      BASE_URL: ${{ inputs.base_url || vars.OVRLY_BASE_URL }}
+      WAKE_SECONDS: ${{ inputs.wake_seconds }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.9.21'
+          python-version: '3.11'
+          working-directory: backend
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false
+      - name: Install locked runtime dependencies
+        run: uv sync --frozen --no-dev
+      - name: Run smoke
+        run: |
+          set -o pipefail
+          if [[ -z "$BASE_URL" ]]; then
+            echo "::error::Pass base_url or set the OVRLY_BASE_URL repository variable."
+            exit 2
+          fi
+          mkdir -p reports
+          uv run --frozen --no-dev python -m services.smoke \
+            --base-url "$BASE_URL" --wake-seconds "$WAKE_SECONDS" \
+            --report reports/smoke.json 2>&1 | tee reports/smoke.log
+      - name: Check smoke output for credentials and fixture text
+        if: ${{ always() }}
+        run: |
+          # -q keeps any match out of this log as well.
+          for file in reports/smoke.log reports/smoke.json; do
+            [[ -f "$file" ]] || continue
+            if grep -q -E 'ovk_|sxv_|ovrly-smoke-canary-|Bearer ' "$file"; then
+              echo "::error::Secret or fixture text found in $file"
+              exit 1
+            fi
+          done
+          {
+            echo "### Deployment smoke"
+            echo
+            echo '```'
+            cat reports/smoke.log 2>/dev/null || echo "No smoke output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload smoke report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deployment-smoke
+          path: |
+            backend/reports/smoke.json
+            backend/reports/smoke.log
+          retention-days: 7
+          if-no-files-found: warn

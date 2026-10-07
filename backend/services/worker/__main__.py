@@ -32,6 +32,7 @@ async def serve() -> None:
         maintenance=retention.schedule if settings.retention_enabled else None,
         lease_seconds=settings.job_lease_seconds,
         poll_seconds=settings.job_poll_seconds,
+        idle_poll_max_seconds=settings.job_idle_poll_max_seconds,
         retry_policy=RetryPolicy.from_settings(settings),
     )
     loop = asyncio.get_running_loop()
