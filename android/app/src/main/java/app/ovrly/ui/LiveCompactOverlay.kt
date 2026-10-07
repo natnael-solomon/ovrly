@@ -228,11 +228,17 @@ internal fun ExaminingPill(
     frame: LivePanelFrame = LivePanelFrame()
 ) {
     CompositionLocalProvider(LocalContentColor provides LocalOvrlyPalette.current.ink) {
+        // One fixed width in every state (the panel's width when that is narrower, so it is
+        // the same with the panel open), so the pill never resizes as the timer, the count,
+        // the dot or the open panel change.
         Row(
-            modifier.mockGlass(frame.higherOpacity).sizeIn(minHeight = 52.dp),
+            modifier
+                .width(minOf(PILL_DP.dp, frame.width))
+                .mockGlass(frame.higherOpacity)
+                .sizeIn(minHeight = 52.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            PillReadout(state, onExpand, frame.animate, Modifier.weight(1f, fill = false))
+            PillReadout(state, onExpand, frame.animate, Modifier.weight(1f))
             if (onStop != null) {
                 Spacer(
                     Modifier.width(
@@ -288,9 +294,12 @@ private fun PillReadout(
     ) {
         OverlayMark(Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
-        // Only the claim count gives way when space is short, so the label is never cut.
+        // "Live" and the timer never give way; after Stop a long session state shortens
+        // before the claim count does.
+        val flexible = Modifier.weight(1f, fill = false)
         Text(
             state.status ?: "Live",
+            modifier = if (state.status != null) flexible else Modifier,
             style = MaterialTheme.typography.labelMedium,
             color = p.muted,
             maxLines = 1,
@@ -312,7 +321,7 @@ private fun PillReadout(
         Spacer(Modifier.width(10.dp))
         Text(
             claimLabel(state.claims),
-            modifier = Modifier.weight(1f, fill = false),
+            modifier = if (state.status == null) flexible else Modifier,
             style = MaterialTheme.typography.labelLarge,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -451,6 +460,9 @@ private const val COLLAPSE_LABEL = "Collapse live results"
 
 /** The pill's row above the open panel: its height plus the gap, taken off the panel's cap. */
 private const val PILL_ROW_DP = 60
+
+/** The pill's one width: "Live 3:00", "99 claims", the dot and Stop at default text size. */
+private const val PILL_DP = 272
 internal const val BUBBLE_DP = 64
 private const val BUBBLE_INSET_DP = 4
 

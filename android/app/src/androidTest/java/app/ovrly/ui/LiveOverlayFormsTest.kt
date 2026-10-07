@@ -175,7 +175,7 @@ class LiveOverlayFormsTest {
         bubble.performClick()
         compose.onNodeWithContentDescription("Dismiss overlay. Research continues")
             .assertIsDisplayed()
-        compose.onNodeWithContentDescription("ovrly. Research continues", substring = true)
+        compose.onNodeWithContentDescription("ovrly. Researching", substring = true)
             .assertIsDisplayed()
             .performClick()
         panel().assertIsDisplayed()

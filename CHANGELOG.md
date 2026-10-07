@@ -16,7 +16,7 @@
   instant, because animating the window's size jittered. After Stop with "Continue research" the overlay becomes a small
   draggable bubble with one claim-count badge that snaps to the edge and is dismissed by a
   long-press drag onto a target (or a TalkBack action); tapping it opens a pill with
-  "Research continues" and Dismiss, which opens the panel. "Keep only available results" shows "Saved to Inbox" for 3 s, then
+  "Researching" and Dismiss, which opens the panel. The pill keeps one width in every state. "Keep only available results" shows "Saved to Inbox" for 3 s, then
   closes. A silent "Results ready" notification opens the capture's report when research that
   continued after Stop settles. "Keep recording" now reads "Keep examining".
 

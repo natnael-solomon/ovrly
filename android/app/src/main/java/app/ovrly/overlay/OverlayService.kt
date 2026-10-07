@@ -710,12 +710,7 @@ class OverlayService :
         }
         // The demo is always its full height; the live panel is as tall as its content.
         val height = if (demo && geometry != null) geometry.height else view?.height ?: 0
-        // The live panel may start left of its margin, so the pill above it keeps its own x.
-        val newX = when {
-            geometry == null -> x.coerceIn(0, (usableSize.width - width).coerceAtLeast(0))
-            demo -> margin
-            else -> x.coerceIn(0, margin)
-        }
+        val newX = windowX(x, geometry, demo, width)
         val newY = y.coerceIn(margin, (usableSize.height - height - margin).coerceAtLeast(margin))
         params.x = newX
         params.y = newY
@@ -734,6 +729,17 @@ class OverlayService :
             }
         }
     }
+
+    /**
+     * The window's x: compact forms stay on screen, the demo sits at its margin, and the live
+     * panel may start left of its margin so the pill above it keeps its own x.
+     */
+    private fun windowX(x: Int, geometry: DemoPanelGeometry?, demo: Boolean, width: Int): Int =
+        when {
+            geometry == null -> x.coerceIn(0, (usableSize.width - width).coerceAtLeast(0))
+            demo -> geometry.margin
+            else -> x.coerceIn(0, geometry.margin)
+        }
 
     private fun configureWindow(resetPosition: Boolean = false) {
         val geometry = panelGeometry()

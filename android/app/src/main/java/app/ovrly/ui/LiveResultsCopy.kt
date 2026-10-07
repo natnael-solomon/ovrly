@@ -44,7 +44,7 @@ internal fun livePhaseLabel(phase: LiveSessionPhase): String = when (phase) {
 
 /** The pill's text after Stop, in place of the timer. */
 internal fun afterStopLabel(phase: LiveSessionPhase): String =
-    if (phase == LiveSessionPhase.CONTINUING) "Research continues" else livePhaseLabel(phase)
+    if (phase == LiveSessionPhase.CONTINUING) "Researching" else livePhaseLabel(phase)
 
 /** Phase line, plus the connection state when the source is retrying or gave up. */
 internal fun liveStatusLabel(results: LiveResults): String {
