@@ -1,6 +1,7 @@
 package app.ovrly.data
 
 import android.content.Context
+import android.util.Base64
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -29,7 +30,7 @@ class GoogleSignInDeviceTest {
         var asked: GetCredentialRequest? = null
         val google = GoogleIdTokenCredential.Builder()
             .setId("synthetic.user@example.com")
-            .setIdToken("synthetic.google.id-token")
+            .setIdToken(SYNTHETIC_TOKEN)
             .build()
         val fetcher = object : CredentialFetcher {
             override suspend fun fetch(activity: Context, request: GetCredentialRequest) =
@@ -37,9 +38,23 @@ class GoogleSignInDeviceTest {
         }
         val result = GoogleIdTokenSource(clientId, fetcher).idToken(Device.context)
 
-        assertEquals("synthetic.google.id-token", (result as IdTokenResult.Token).value)
+        assertEquals(SYNTHETIC_TOKEN, (result as IdTokenResult.Token).value)
         val option = asked?.credentialOptions?.single()
         assertTrue(option is GetSignInWithGoogleOption)
         assertEquals(clientId, (option as GetSignInWithGoogleOption).serverClientId)
+    }
+
+    private companion object {
+        /** An unsigned JWT-shaped token: the library reads its payload, nothing verifies it. */
+        val SYNTHETIC_TOKEN = listOf(
+            """{"alg":"none","typ":"JWT"}""",
+            """{"sub":"synthetic-subject","email":"synthetic.user@example.com"}""",
+            "synthetic-signature"
+        ).joinToString(".") {
+            Base64.encodeToString(
+                it.toByteArray(),
+                Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+            )
+        }
     }
 }
