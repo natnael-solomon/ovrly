@@ -57,10 +57,16 @@ def chunk_jobs(capture_id: UUID, sequences: Sequence[int]) -> ColumnElement[bool
 
 
 def claim_progress(
-    report: ReportVersion | None, continue_research: bool | None
+    report: ReportVersion | None,
+    continue_research: bool | None,
+    evidence_error: str | None = None,
 ) -> tuple[list[CaptureClaimState], CoverageStatus]:
+    """Per-claim states of the latest report. ``evidence_error`` is the safe code of a
+    terminally failed main-flow evidence stage (#127): it fails every current, unassessed
+    claim and makes the status final, so live polling ends."""
     if report is None:
         return [], "not_started"
+    final = not report.provisional or evidence_error is not None
     assessments = {item.claim_id: item for item in report.assessments}
     claims = []
     for claim in report.claims:
@@ -72,15 +78,15 @@ def claim_progress(
         elif continue_research is False or claim.superseded_by_occurrence_id is not None:
             # A superseded appearance is never assessed; its correction carries the result.
             state = "cancelled"
-        elif not report.provisional:
+        elif final:
             # A final version keeps a claim it could not assess visible, with the reason in
             # its change summary (#127), so polling ends instead of waiting for it.
             state = "failed"
-            error = SafeError.model_validate(safe_error("CLAIM_UNASSESSED"))
+            error = SafeError.model_validate(safe_error(evidence_error or "CLAIM_UNASSESSED"))
         else:
             state = "checking"
         claims.append(CaptureClaimState(claim_id=claim.id, processing_status=state, error=error))
-    return claims, "partial" if report.provisional else "complete"
+    return claims, "complete" if final else "partial"
 
 
 def interval(start: int, end: int) -> CaptureInterval:

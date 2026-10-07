@@ -417,3 +417,53 @@ async def test_a_failed_evidence_stage_fails_the_investigation_visibly(
     assert body["report"] is None
     assert body["error"]["code"] == "EVIDENCE_FAILED"
     assert body["job"]["stage"] == "retrieval" and body["job"]["state"] == "failed"
+
+
+async def test_a_failed_capture_evidence_stage_ends_polling_and_keeps_the_report(
+    harness, tmp_path, production_defaults, replay
+):
+    # Scholarxiv refuses the search plan: the capture's retrieval fails terminally.
+    replay.evidence.papers_status = 401
+    config = configured(harness, tmp_path)
+    worker = main_flow_worker(harness, config, replay)
+    app = create_app(config)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http,
+    ):
+        headers = await guest(http)
+        await worker.start()
+        try:
+            identifier = await start(http, headers)
+            assert (await send(http, headers, identifier, 0, package(0))).status_code == 200
+            await until(
+                http,
+                headers,
+                identifier,
+                lambda body: (
+                    len((body.get("extraction_progress") or {}).get("observations", [])) == 2
+                ),
+            )
+            await finish(http, headers, identifier)
+
+            async def status():
+                response = await http.get(f"/v1/captures/{identifier}", headers=headers)
+                assert response.status_code == 200, response.text
+                return response.json()
+
+            async with asyncio.timeout(60):
+                while True:
+                    polled = await status()
+                    if polled["claim_extraction_status"] == "complete":
+                        break
+                    await asyncio.sleep(0.1)
+            body = await read(http, headers, identifier)
+        finally:
+            await worker.stop()
+    [claim] = polled["claims"]
+    assert claim["processing_status"] == "failed"
+    assert claim["error"]["code"] == "EVIDENCE_FAILED"
+    # The investigation keeps its published claims instead of dropping them.
+    assert body["report"] is not None and body["error"] is None
+    assert [item["id"] for item in body["report"]["claims"]] == [claim["claim_id"]]
+    assert body["report"]["assessments"] == []

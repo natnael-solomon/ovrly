@@ -14,7 +14,8 @@
   research is not connected when a server is configured. Corrections and claims the
   evidence run could not assess (claim budget, provider gaps) no longer keep a report
   provisional, and a failed evidence stage fails the investigation with
-  `EVIDENCE_FAILED` or `EVIDENCE_UNAVAILABLE`, so polling always ends.
+  `EVIDENCE_FAILED` or `EVIDENCE_UNAVAILABLE` (a closed capture keeps its report and
+  marks its unassessed claims failed), so polling always ends.
 
 - Google sign-in on Android (AN-10, #36). With the backend's Web client ID set in
   `api.local.properties` (`googleWebClientId`), the account section's Sign in with Google uses

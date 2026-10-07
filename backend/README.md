@@ -38,7 +38,10 @@ A capture or upload runs these stages with production defaults:
 6. A terminally failed `retrieval` or `assessment` job of this flow ends the
    investigation as `failed` with `EVIDENCE_UNAVAILABLE` (no Scholarxiv key) or
    `EVIDENCE_FAILED` (for example a refused plan or failed citation check), so clients
-   stop polling. Reanalysis requests keep their own status and the published report.
+   stop polling. A closed capture keeps its published report instead; its capture status
+   marks every current, unassessed claim `failed` with that code and reports
+   `claim_extraction_status: complete`. Reanalysis requests keep their own status and the
+   published report.
 
 `OVRLY_ASR_ENABLED`, `OVRLY_EXTRACTION_ENABLED` and `OVRLY_RECONCILIATION_ENABLED`
 default to `1`. A stage left on without its provider configuration still starts and
