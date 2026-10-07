@@ -2,7 +2,7 @@
 name = "ovrly-backend"
 version = "0.1.0"
 description = "Ovrly API and worker foundation"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.16,<2",
     "fastapi>=0.115,<1",
@@ -52,7 +52,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
@@ -63,7 +63,7 @@ select = ["E", "F", "I", "B", "UP", "S", "ASYNC", "PGH003"]
 "tests/**/*.py" = ["S101"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 enable_error_code = ["ignore-without-code"]

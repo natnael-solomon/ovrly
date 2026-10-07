@@ -12,7 +12,7 @@ import wave
 from collections.abc import Coroutine
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 from sqlalchemy import select
 
@@ -26,7 +26,6 @@ from services.storage import LocalFilesystemStore
 
 MEDIA_STAGE = "media_validation"
 MEDIA_VERSION = 1
-_T = TypeVar("_T")
 # No playlists or image-sequence demuxers; MOV external data references remain disabled.
 _INPUT_OPTIONS = [
     "-protocol_whitelist",
@@ -59,28 +58,30 @@ def media_stage_key(investigation_id: uuid.UUID) -> StageKey:
     return StageKey(MEDIA_VERSION, MEDIA_STAGE, digest)
 
 
-async def _heartbeat_while(context: JobContext, work: Coroutine[Any, Any, _T]) -> _T:
-    async def maintain() -> None:
+async def _heartbeat_while[T](context: JobContext, work: Coroutine[Any, Any, T]) -> T:
+    """Run ``work`` while extending the lease every third of its length.
+
+    Heartbeats run inline in the stage's task and are never cancelled from outside: on
+    Python 3.11, cancelling a task during SQLAlchemy's pool checkout (``asyncio.wait_for``)
+    can be swallowed, which left a separate heartbeat task renewing the lease forever after
+    the work had ended (#130). A lost lease or a cancellation request stops the work.
+    """
+    task: asyncio.Task[T] = asyncio.create_task(work)
+    try:
         while True:
             await context.heartbeat()
-            await asyncio.sleep(context.lease_seconds / 3)
-
-    task: asyncio.Task[_T] = asyncio.create_task(work)
-    heartbeat = asyncio.create_task(maintain())
-    try:
-        done, _ = await asyncio.wait((task, heartbeat), return_when=asyncio.FIRST_COMPLETED)
-        if heartbeat in done:
-            await heartbeat
-        result = await task
+            done, _ = await asyncio.wait({task}, timeout=context.lease_seconds / 3)
+            if done:
+                break
+        result = task.result()
         await context.heartbeat()
         return result
     finally:
         task.cancel()
-        heartbeat.cancel()
-        await asyncio.gather(task, heartbeat, return_exceptions=True)
+        await asyncio.gather(task, return_exceptions=True)
 
 
-async def _finish_file_work(work: Coroutine[Any, Any, _T]) -> _T:
+async def _finish_file_work[T](work: Coroutine[Any, Any, T]) -> T:
     task = asyncio.create_task(work)
     try:
         return await asyncio.shield(task)

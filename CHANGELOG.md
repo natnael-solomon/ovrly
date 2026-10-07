@@ -435,6 +435,12 @@
 
 ### Changed
 
+- The backend moves to Python 3.12 (#130): `requires-python`, `backend/.python-version`,
+  the lockfile, every CI setup step and the Ruff/MyPy targets. uv provisions 3.12 for local
+  setup and single-service deploys (`uv sync --frozen`). Python 3.12's `asyncio.wait_for`
+  no longer loses a cancellation that arrives as its inner wait completes, which also
+  removes that hazard from the worker's forced shutdown. No dependency versions changed.
+
 - Tagged demo releases (REPO-07, #17): a pushed `v*` tag runs the **Release** workflow,
   which checks the changelog version, date and known limitations, builds the release APK
   twice and compares the builds, writes CycloneDX SBOMs for Android and the backend,
@@ -454,6 +460,11 @@
 - Added public-window background blur on supported Android 12+ devices, with opaque fallbacks.
 
 ### Fixed
+
+- A media preparation or speech job could stall until the worker was stopped when the
+  stage ended while a lease renewal was checking out a database connection: on Python
+  3.11 that renewal swallowed its cancellation and kept renewing the lease, so the job
+  was neither finished nor re-leased (#130). Renewals now run inline with the stage.
 
 - Android instrumented checks no longer hang or fail before testing on API 29
   (#76 follow-up): API 29 cold-boots instead of resuming a cached snapshot, the

@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Final, Literal, TypeVar
+from typing import Any, Final, Literal
 
 import httpx
 from pydantic import BaseModel, SecretStr, ValidationError
@@ -62,7 +62,6 @@ SCHOLARXIV_BUCKET: Final = "scholarxiv"
 MAX_EXPANSION_POLLS: Final = 12
 Depth = Literal["standard", "deeper"]
 logger = logging.getLogger(__name__)
-T = TypeVar("T")
 
 
 class EvidenceUnavailable(NonRetriableInput):
@@ -140,7 +139,7 @@ def expansion_delay(poll: int) -> float:
     return float(min(30 * 2**poll, 600))
 
 
-async def with_heartbeat(context: JobContext, work: Awaitable[T]) -> T:
+async def with_heartbeat[T](context: JobContext, work: Awaitable[T]) -> T:
     """Run ``work`` while extending the lease every third of its length. A lost lease or a
     cancellation request stops the work and propagates from the heartbeat."""
     task = asyncio.ensure_future(work)

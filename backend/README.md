@@ -1,6 +1,6 @@
 # Backend
 
-Python 3.11 / uv / FastAPI foundation with PostgreSQL, Alembic, a shared worker
+Python 3.12 / uv / FastAPI foundation with PostgreSQL, Alembic, a shared worker
 lifecycle and a durable PostgreSQL job queue with typed retry classes. The API
 mints guest principals, links them to a Google account (BC-D07), accepts
 uploads and records investigations behind bearer authentication (see
@@ -74,7 +74,7 @@ Use Linux tools and a Linux checkout in WSL. From the repository root:
 sh scripts/backend.sh
 ```
 
-This command resolves paths from the script, provisions Python 3.11 through uv,
+This command resolves paths from the script, provisions Python 3.12 through uv,
 installs `uv.lock` with `--frozen`, starts **only PostgreSQL** in Docker, waits for
 it, applies migrations, and runs the API with the embedded worker on
 `127.0.0.1:8000`. It does not build an API image, start a reloader, call providers,
@@ -1669,7 +1669,7 @@ detection or required validation fails/is cancelled; docs-only skips still
 produce that check. PostgreSQL and Python setup are not started for docs-only
 changes in this Backend CI workflow; the separate Quality checks job still runs.
 
-The validation job uses Python 3.11, pinned setup-uv, the frozen lockfile, Ruff,
+The validation job uses Python 3.12, pinned setup-uv, the frozen lockfile, Ruff,
 strict MyPy with the Pydantic plugin, the
 [contracts package](../packages/contracts/README.md#validation) validator and
 server round-trip check (the full contract gate, including OpenAPI, spectral,
@@ -2080,7 +2080,7 @@ The full PostgreSQL suite, migrations and the coverage comparison against
 
 This implements the infrastructure choice in
 [BE-02 / #12](https://github.com/natnael-solomon/ovrly/issues/12):
-Python 3.11, uv, FastAPI/Uvicorn, PostgreSQL 16, SQLAlchemy asyncio/Psycopg and
+Python 3.12, uv, FastAPI/Uvicorn, PostgreSQL 16, SQLAlchemy asyncio/Psycopg and
 Alembic, with a single Python codebase for API and worker. The issue associates
 this stack with `BC-D03` / `RFC-D41-D43`. This records the implemented stack,
 not approval of the remaining infrastructure or hosting decisions. The full
