@@ -262,9 +262,21 @@ async def test_guarded_backend_delegates_and_refuses_unix_sockets():
         await asyncio.sleep(10)
         return [PUBLIC]
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(httpcore.ConnectTimeout):
         await GuardedBackend(slow, inner).connect_tcp("arxiv.org", 443, timeout=0.01)
     assert isinstance(GuardedBackend().inner, httpcore.AnyIOBackend)
+
+
+async def test_slow_resolution_is_a_provider_error_not_a_stage_abort():
+    async def slow(host, port):
+        await asyncio.sleep(10)
+        return [PUBLIC]
+
+    transport = GuardedTransport(slow, RecordingBackend(OK))
+    async with httpx.AsyncClient(transport=transport, timeout=0.01) as client:
+        with pytest.raises(ProviderError, match="transport"):
+            await send(client, "arxiv", "GET", "https://arxiv.org/html/1")
+        assert await FullTextClient(client).arxiv("2601.00001v2") is None
 
 
 async def test_system_resolver_reads_getaddrinfo(monkeypatch):

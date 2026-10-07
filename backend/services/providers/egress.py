@@ -210,7 +210,11 @@ class GuardedBackend(httpcore.AsyncNetworkBackend):
         socket_options: Iterable[typing.Any] | None = None,
     ) -> httpcore.AsyncNetworkStream:
         lookup = pinned_address(host, port, self.resolve)
-        address = await (asyncio.wait_for(lookup, timeout) if timeout else lookup)
+        try:
+            address = await (asyncio.wait_for(lookup, timeout) if timeout else lookup)
+        except TimeoutError:
+            # Same class httpx maps to ConnectTimeout, so callers see a ProviderError.
+            raise httpcore.ConnectTimeout("name resolution timed out") from None
         return await self.inner.connect_tcp(
             address,
             port,
