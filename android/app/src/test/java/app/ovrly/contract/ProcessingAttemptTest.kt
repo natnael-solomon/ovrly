@@ -2,8 +2,10 @@ package app.ovrly.contract
 
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProcessingAttemptTest {
@@ -36,4 +38,54 @@ class ProcessingAttemptTest {
             }
         }
     }
+
+    @Test
+    fun directlyBuiltProvenanceKeepsEveryFieldAndRejectsInvalidValues() {
+        val value = attempt()
+        assertEquals("scholarxiv", value.provider)
+        assertEquals("synthetic-free", value.model)
+        assertEquals("decision-1", value.decisionId)
+        assertEquals("claim_extraction", value.task)
+        assertEquals("valid", value.outcome)
+        assertEquals(10, value.promptTokens)
+        assertEquals(5, value.completionTokens)
+        assertEquals(15, value.totalTokens)
+        assertFalse(value.thinkingLeaked)
+        assertTrue(value.fenced)
+        assertTrue(value.repair)
+        assertNull(value.feedback)
+        assertEquals(value, Json.decodeFromString<ProcessingAttempt>(Json.encodeToString(value)))
+        listOf(
+            { attempt(provider = " ") },
+            { attempt(task = "") },
+            { attempt(outcome = " ") },
+            { attempt(promptTokens = -1) },
+            { attempt(completionTokens = -1) },
+            { attempt(totalTokens = -1) }
+        ).forEach { build ->
+            assertThrows(IllegalArgumentException::class.java) { build() }
+        }
+    }
+
+    private fun attempt(
+        provider: String = "scholarxiv",
+        task: String = "claim_extraction",
+        outcome: String = "valid",
+        promptTokens: Int? = 10,
+        completionTokens: Int? = 5,
+        totalTokens: Int? = 15
+    ) = ProcessingAttempt(
+        provider = provider,
+        model = "synthetic-free",
+        decisionId = "decision-1",
+        task = task,
+        outcome = outcome,
+        promptTokens = promptTokens,
+        completionTokens = completionTokens,
+        totalTokens = totalTokens,
+        thinkingLeaked = false,
+        fenced = true,
+        repair = true,
+        feedback = null
+    )
 }

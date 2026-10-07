@@ -100,4 +100,48 @@ class ReconciliationTest {
             }
         }
     }
+
+    @Test
+    fun directlyBuiltSummaryAndProgressKeepTheirFields() {
+        val complete = ReconciliationSummary(
+            status = ReconciliationStatus.COMPLETE,
+            coverageLimited = false,
+            reassessmentClaimIds = listOf("clm_synthetic_0001")
+        )
+        assertFalse(complete.coverageLimited)
+        assertEquals(listOf("clm_synthetic_0001"), complete.reassessmentClaimIds)
+        assertEquals(
+            complete,
+            Json.decodeFromString<ReconciliationSummary>(Json.encodeToString(complete))
+        )
+        assertEquals(
+            ReconciliationStatus.UNKNOWN,
+            ReconciliationSummary(ReconciliationStatus.UNKNOWN, true, emptyList()).status
+        )
+        val error = InvestigationError("EXTRACTION_INVALID", "Invalid output", false)
+        val failed = ReconciliationProgress(ReconciliationStatus.FAILED, error)
+        assertEquals(error, failed.error)
+        assertEquals(
+            failed,
+            Json.decodeFromString<ReconciliationProgress>(Json.encodeToString(failed))
+        )
+        assertNull(ReconciliationProgress(ReconciliationStatus.CHECKING, null).error)
+    }
+
+    @Test
+    fun directlyBuiltInvalidSummariesAreRejected() {
+        listOf(
+            { ReconciliationSummary(ReconciliationStatus.WAITING, false, emptyList()) },
+            {
+                ReconciliationSummary(
+                    ReconciliationStatus.COMPLETE,
+                    false,
+                    listOf("clm_synthetic_0001", "clm_synthetic_0001")
+                )
+            },
+            { ReconciliationSummary(ReconciliationStatus.COMPLETE, false, listOf("")) }
+        ).forEach { build ->
+            assertThrows(IllegalArgumentException::class.java) { build() }
+        }
+    }
 }

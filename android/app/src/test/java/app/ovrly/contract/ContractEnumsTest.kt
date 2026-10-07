@@ -1,6 +1,9 @@
 package app.ovrly.contract
 
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -414,6 +417,49 @@ class ContractEnumsTest {
         assertEquals(version, ContractJson.CONTRACT_VERSION)
         assertEquals(version, VoiceActionCodec.CONTRACT_VERSION)
         assertTrue(version, Regex("0\\.\\d+\\.\\d+-draft").matches(version))
+    }
+
+    @Test
+    fun wireSerializersRoundTripKnownNamesAndNeverEncodeUnknown() {
+        assertWireRoundTrip(SourceKindSerializer, SourceKind.CAPTURE, SourceKind.UNKNOWN)
+        assertWireRoundTrip(
+            MediaSpeechStatusSerializer,
+            MediaSpeechStatus.UNAVAILABLE,
+            MediaSpeechStatus.UNKNOWN
+        )
+        assertWireRoundTrip(
+            MediaTextStatusSerializer,
+            MediaTextStatus.PENDING,
+            MediaTextStatus.UNKNOWN
+        )
+        assertWireRoundTrip(
+            SpeechUnavailableReasonSerializer,
+            SpeechUnavailableReason.NO_AUDIO_TRACK,
+            SpeechUnavailableReason.UNKNOWN
+        )
+        assertWireRoundTrip(
+            ExtractionCoverageStatusSerializer,
+            ExtractionCoverageStatus.PROCESSED,
+            ExtractionCoverageStatus.UNKNOWN
+        )
+        assertWireRoundTrip(
+            ReconciliationStatusSerializer,
+            ReconciliationStatus.CANCELLED,
+            ReconciliationStatus.UNKNOWN
+        )
+    }
+
+    private fun <E : Enum<E>> assertWireRoundTrip(
+        serializer: KSerializer<E>,
+        known: E,
+        unknown: E
+    ) {
+        val encoded = Json.encodeToString(serializer, known)
+        assertEquals(known, Json.decodeFromString(serializer, encoded))
+        assertEquals(unknown, Json.decodeFromString(serializer, "\"$FUTURE\""))
+        assertThrows(SerializationException::class.java) {
+            Json.encodeToString(serializer, unknown)
+        }
     }
 
     private fun schemaNode(file: String, pointer: String): JsonObject {

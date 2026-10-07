@@ -19,6 +19,8 @@ class ClaimInterpretationTest {
         }
     """.trimIndent()
 
+    private val reference = ClaimSourceRef("speech-1", 0, 10)
+
     @Test
     fun normativeInterpretationRemainsAnOpinion() {
         val value = Json.decodeFromString<ClaimInterpretation>(input)
@@ -46,4 +48,80 @@ class ClaimInterpretationTest {
             )
         }
     }
+
+    @Test
+    fun directlyBuiltInterpretationsRoundTripThroughTheWireShape() {
+        val factual = interpretation(
+            attributedTo = "Synthetic speaker",
+            uncertaintyFlags = listOf(ClaimUncertainty.MISSING_CONTEXT)
+        )
+        assertEquals("Synthetic speaker", factual.attributedTo)
+        assertEquals(0, factual.sourceRefs.single().startChar)
+        assertEquals(10, factual.sourceRefs.single().endChar)
+        assertEquals(listOf(reference), factual.contextRefs)
+        assertEquals(AssertionMode.ASSERTED, factual.assertionMode)
+        assertEquals(SpeakerCommitment.ENDORSED, factual.speakerCommitment)
+        assertEquals(listOf(ClaimUncertainty.MISSING_CONTEXT), factual.uncertaintyFlags)
+        assertEquals(
+            factual,
+            Json.decodeFromString<ClaimInterpretation>(Json.encodeToString(factual))
+        )
+        val quoted = interpretation(
+            speakerCommitment = SpeakerCommitment.UNCOMMITTED,
+            eligibilityReason = EligibilityReason.QUOTED_NOT_ENDORSED,
+            uncertaintyFlags = listOf(ClaimUncertainty.UNKNOWN, ClaimUncertainty.UNKNOWN)
+        )
+        assertEquals(EligibilityReason.QUOTED_NOT_ENDORSED, quoted.eligibilityReason)
+        val premise = interpretation(eligibilityReason = EligibilityReason.FACTUAL_PREMISE)
+        assertEquals(ClaimTaxonomy.EMPIRICAL, premise.taxonomy)
+    }
+
+    @Test
+    fun directlyBuiltInvalidInterpretationsAreRejected() {
+        listOf(
+            { ClaimSourceRef(" ", 0, 1) },
+            { ClaimSourceRef("speech-1", -1, 1) },
+            { ClaimSourceRef("speech-1", 2, 2) },
+            { interpretation(sourceRefs = emptyList()) },
+            { interpretation(attributedTo = " ") },
+            {
+                interpretation(
+                    uncertaintyFlags = listOf(
+                        ClaimUncertainty.MISSING_CONTEXT,
+                        ClaimUncertainty.MISSING_CONTEXT
+                    )
+                )
+            },
+            { interpretation(taxonomy = ClaimTaxonomy.NORMATIVE) },
+            { interpretation(assertionMode = AssertionMode.QUESTIONED) },
+            {
+                interpretation(
+                    eligibilityReason = EligibilityReason.FACTUAL_PREMISE,
+                    assertionMode = AssertionMode.HYPOTHETICAL
+                )
+            },
+            { interpretation(eligibilityReason = EligibilityReason.QUOTED_NOT_ENDORSED) }
+        ).forEach { build ->
+            assertThrows(IllegalArgumentException::class.java) { build() }
+        }
+    }
+
+    private fun interpretation(
+        taxonomy: ClaimTaxonomy = ClaimTaxonomy.EMPIRICAL,
+        sourceRefs: List<ClaimSourceRef> = listOf(reference),
+        assertionMode: AssertionMode = AssertionMode.ASSERTED,
+        speakerCommitment: SpeakerCommitment = SpeakerCommitment.ENDORSED,
+        attributedTo: String? = null,
+        eligibilityReason: EligibilityReason = EligibilityReason.FACTUAL_CLAIM,
+        uncertaintyFlags: List<ClaimUncertainty> = emptyList()
+    ) = ClaimInterpretation(
+        taxonomy = taxonomy,
+        sourceRefs = sourceRefs,
+        contextRefs = listOf(reference),
+        assertionMode = assertionMode,
+        speakerCommitment = speakerCommitment,
+        attributedTo = attributedTo,
+        eligibilityReason = eligibilityReason,
+        uncertaintyFlags = uncertaintyFlags
+    )
 }
