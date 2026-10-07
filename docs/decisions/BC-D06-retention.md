@@ -1,12 +1,16 @@
-# BC-D06: proposed demo retention windows
+# BC-D06: demo retention windows and admission budgets
 
-**Decision ID and question:** BC-D06 (retention portion only). How long should
-the current demo backend retain a workspace and its execution receipts?
+**Decision ID and question:** BC-D06. How long should the current demo backend
+retain a workspace and its execution receipts? The admission and provider budget
+portion (#22) is recorded in its own section below.
 
-**Status:** Proposed. Implementation does not establish approval.
+**Status:** Retention portion: Proposed. Implementation does not establish
+approval. Budget portion: Accepted in part on 7 October 2026, see
+[Admission and provider budgets](#admission-and-provider-budgets-22).
 
 **Owner and participants:** Product owner @natnael-solomon must accept or revise.
-Backend implementation: @Nattyy-1. No acceptance is recorded.
+Backend implementation: @Nattyy-1. No acceptance of the retention portion is
+recorded.
 
 **Options considered:** Indefinite retention; rolling per-object/inactivity
 windows; an explicit, fixed-lifetime demo workspace.
@@ -52,8 +56,8 @@ Proposed host log retention is seven days and must be configured by the operator
 settings and storage mounts, and the operational transfer
 checklist. #81 (owner-scoped job actions) and #80 (account linking) are on
 `main`; the sweep reuses `JobQueue.delete` and honours `principals.kind`.
-No quotas, token buckets or global intake stop are approved here.
-The opt-in proposal below remains subject to owner acceptance under #22.
+The quota, token bucket and global intake stop decisions are in the budget
+section below, with their own status.
 
 **Rejected alternatives and why:** Indefinite retention is unsuitable for a
 privacy-oriented demo. Per-object rolling windows require product decisions
@@ -68,48 +72,119 @@ measured demo needs, or provider deletion/backup constraints.
 [data map](../operations/data-map.md);
 [PDP checklist](../operations/pdp-checklist.md).
 
-## Proposed admission and provider budgets (#22)
+## Admission and provider budgets (#22)
 
-**Status: Proposed, not accepted.** The implementation is opt-in with
-`OVRLY_QUOTAS_ENABLED=1`; it does not change a deployment or enable retention.
-The existing #77 privacy implementation is retained. Product-owner acceptance,
-actual account entitlements and the missing provider-stage integrations remain
-requirements for closing #22.
+**Status: Accepted in part on 7 October 2026.** The product owner
+@natnael-solomon directed on 7 October 2026, while taking over the remaining
+#22 work, that a number is Accepted only when a cited upstream source backs
+it, and that every other number stays an explicit assumption until the owner
+confirms it on the provider or host dashboard. The table below applies that
+rule. Enforcement stays opt-in per deployment with `OVRLY_QUOTAS_ENABLED=1`;
+acceptance does not enable it. The #77 retention portion above is unchanged
+and still Proposed.
 
-| Proposed limit | Rationale and boundary |
-| --- | --- |
-| 2 active checks per principal | Counts distinct investigations with queued/leased/running work, plus unexpired open captures. Chunk fan-out remains one check. Two checks allow a comparison without an unbounded queue on the small host. It is an admission limit, not a worker-job or account-wide concurrency guarantee. |
-| 6 new checks/reanalyses per UTC day per principal | At the existing 10-minute shared-input cap, six inputs represent at most 60 declared audio-minutes before retries, below the issue's reported 120 audio-minutes/hour. This is not ASR enforcement: missing durations, retries, other principals and the unverified Groq entitlement prevent that claim. |
-| 256 MiB of upload reservations per UTC day per principal | Reuses the existing per-input byte budget as a daily aggregate instead of multiplying local storage by an unlimited number of uploads. Ordinary upload declarations and new capture-chunk reservations share it. Failed/abandoned accepted reservations are not refunded; retransmitting the same capture reservation costs no additional bytes. |
-| 5 claims researched per run | With the current standard evidence budget, up to 4 router calls, 3 searches and up to 4 feedback calls per claim gives a planning envelope of 330 requests for six five-claim runs, before provider retries, claim extraction and expansions. Deeper searches increase this; actual outbound attempts still pass through the shared bucket. Unreached claims remain visible and unassessed. |
-| 2 concurrent Scholarxiv requests | Bounds simultaneous Papers, Router and feedback requests across workers without holding database connections during network calls. Each request has the configured hard evidence-provider timeout and a slot lease lasting five seconds longer; the slot is fenced by a unique lease id. A further request waits for a free slot with jittered backoff and is rescheduled only after the bucket's maximum wait. |
-| Pause new intake below 50 local Scholarxiv tokens | A 5% reserve under the existing 1000/hour application budget leaves room for already accepted work. `Retry-After` estimates recovery to the reserve, not a guaranteed start time: accepted work can consume tokens meanwhile. |
+### Upstream sources (read 7 October 2026)
+
+| Ref | Source | Limit used |
+| --- | --- | --- |
+| S1 | [Scholarxiv Rate Limits & Quotas](https://scholarxiv.com/developers/docs/papers-api/limits.md) | Free plan: 1,200 requests per rolling hour, shared by every key on the account; a 429 carries `Retry-After` |
+| S2 | [Scholarxiv Router API](https://scholarxiv.com/developers/docs/router-api.md) | Routing decisions count against the same regular API rate limit; no separate router quota |
+| S3 | [Groq rate limits](https://console.groq.com/docs/rate-limits), Free plan table | `whisper-large-v3` and `whisper-large-v3-turbo`: 20 RPM, 2,000 RPD, 7,200 audio-seconds/hour, 28,800 audio-seconds/day. `openai/gpt-oss-20b`: 30 RPM, 1,000 RPD, 8,000 TPM, 200,000 TPD. Limits are per organization |
+| S4 | [Groq speech-to-text](https://console.groq.com/docs/speech-to-text) | 25 MB per file on the free tier; a request is billed for at least 10 seconds |
+| S5 | [BC-D04](BC-D04-voxide-route.md) | 100 Voxide sessions, client-managed, dashboard is the only ledger |
+| S6 | [BC-D03](BC-D03-provider-hosting.md) | EthioDeploy Free: web disk allowance and body limit unanswered |
+
+These figures match the dated assumptions in [0004](0004-asr-ocr-benchmarks.md)
+(7,200 audio-seconds per hour, 2,000 requests per day, 10 s minimum) and the
+8,000 TPM rejection observed in BC-D03. Public documentation is not the
+account's dashboard: the Groq page says exact limits are on the organization's
+Limits page, and nothing here reads a live balance.
+
+### Worst-case upstream cost of one check under the current caps
+
+| Provider | One check at most | Derived from |
+| --- | --- | --- |
+| Groq speech, upload | 1 request, 600 audio-seconds | `OVRLY_MAX_SHARED_DURATION_SECONDS=600`; a 16 kHz mono WAV of 600 s is 19.2 MB, under S4's 25 MB, so one request |
+| Groq speech, capture | 18 requests, 180 audio-seconds | 3-minute capture in 10 s chunks (0004); each chunk is at the S4 10 s minimum |
+| Scholarxiv | 79 requests | Extraction and reconciliation share `OVRLY_EXTRACTION_BUDGET_REQUESTS=24`; evidence uses up to 4 router calls, 3 searches and 4 feedback calls per claim, 55 for 5 claims (S2 counts router calls) |
+| Groq extraction fallback | inside the same 24 requests | Fallback only after Scholarxiv availability failure (BC-D03) |
+
+Provider retries after a 429 also spend local units; these figures are before
+retries.
+
+### Decided numbers
+
+| Limit | Value | Status | Derivation |
+| --- | --- | --- | --- |
+| Daily checks per principal (UTC day) | 6 | **Accepted** (S1, S3) | 6 uploads x 600 s = 3,600 audio-seconds: 50% of the hourly and 12.5% of the daily Groq speech limit. 6 captures x 18 = 108 requests: 5.4% of 2,000 RPD. 6 x 79 = 474 Scholarxiv requests: under half of one hour's application budget. One principal at the maximum cannot exhaust the team's day; speech per day is the binding limit (28,800 / 3,600 = 8 principals at the maximum). |
+| Active checks per principal | 2 | **Accepted** (S3) | Two concurrent captures send one 10 s chunk every 10 s each: 12 requests/minute against Groq's 20 RPM. Three would reach 18, the configured ceiling, leaving nothing for uploads or retries. Two concurrent uploads hold 1,200 audio-seconds, a sixth of the hourly limit. |
+| Claims researched per run | 5 | **Accepted** (S1, S2) | 79 Scholarxiv requests per check against 950 usable requests per hour (1,000 application budget less the 50 reserve) allows 12 complete checks per hour across all users. Ten claims would cost 134 and allow 7. Unreached claims stay visible and unassessed. |
+| Scholarxiv application budget | 1,000 requests/hour | Ceiling **Accepted** (S1); headroom is an **assumption** | The 200-request headroom for other keys on the shared account (experiments, S1 "shared per user") is not measured. Confirm on the Scholarxiv Usage page. |
+| Groq speech settings (operator-entered) | 18 RPM, 1,800 RPD, 6,480 audio-seconds/hour, 25,920 audio-seconds/day, 10 s minimum | Ceilings and minimum **Accepted** (S3, S4); 10% headroom is an **assumption** | Recommended values for the required `OVRLY_ASR_*` limits. They are 90% of the Free limits for other users of the organization. `OVRLY_ASR_LIMITS_VERIFIED_ON` still requires a dated dashboard check before activation. |
+| Groq extraction fallback buckets | 27 RPM, 900 RPD, 7,200 TPM, 180,000 TPD | Ceilings **Accepted** (S3); 10% headroom is an **assumption** | Defaults of the new `OVRLY_GROQ_LLM_*` settings. Tokens are the conservative local approximation (escaped request bytes + output cap + 256), not Groq's tokenizer; a request larger than a bucket waits for the full bucket. |
+| Daily upload bytes per principal | 256 MiB | **Assumption**, pending the owner's EthioDeploy dashboard | No upstream limit governs local storage. S4's 25 MB is per Groq request, not per day, and the web disk allowance is unanswered (S6). The value equals one maximum upload. |
+| Concurrent Scholarxiv requests | 2 | **Assumption**, pending owner confirmation | No provider concurrency limit is documented (S1 states only an hourly limit). The value bounds the 0.5 CPU host and holds no database connection during calls. |
+| Intake reserve | 50 Scholarxiv units; 5% of each Groq limit | **Assumption**, a policy threshold | Not an upstream number. Configurable with `OVRLY_QUOTA_PROVIDER_RESERVE` and `OVRLY_QUOTA_PROVIDER_RESERVE_FRACTION`. |
+| Voxide sessions | 100 (BC-D04) | Accepted in BC-D04, not enforced by the backend | Sessions are client-managed; the summary reports the balance as unknown and points at the dashboard. |
+
+Per-principal limits are not per-human anti-abuse protection: creating another
+guest principal obtains another allowance. The provider buckets and the speech
+ledger are account-wide, so they still bound the team's total spend.
+
+### Enforcement
 
 Counters are charged in the same transaction as admission, after idempotent
 replay checks. Cancel, delete and failed processing do not refund daily checks.
-Failed admission transactions do not spend budget. A new reanalysis counts
-as a check, including a correction, but it does not count as a second active
+Failed admission transactions do not spend budget. A new reanalysis counts as a
+check, including a correction, but it does not count as a second active
 investigation when that investigation already has active work. The counters
-start when enforcement is enabled; historical usage is not backfilled.
-
-The shared global stop covers new investigations, captures, upload targets and
-reanalyses when Scholarxiv is configured. Already accepted capture chunks and
-uploads can finish, and reads, Stop/cancel and saves remain available. A closed
-capture can still consume an active slot while its queued research is unfinished.
-Expired open captures without active jobs no longer count. Payloads not yet
+start when enforcement is enabled; historical usage is not backfilled. Expired
+open captures without active jobs no longer count; a closed capture can still
+hold an active slot while its queued research is unfinished. Payloads not yet
 recognized by the quota code count conservatively as separate active jobs.
 
-All API and worker processes must use the same quota flag and limits; mixed
-enabled/disabled workers or different concurrency limits cannot enforce a shared
-policy. Deploy only after owner review. Per-principal limits are not per-human
-anti-abuse protection: creating another guest principal can obtain another
-allowance. No provider entitlement, account-wide cost ceiling or paid overage
-protection is inferred from these local counters.
+Every provider limit is shared across processes in PostgreSQL and checked
+before the expensive call:
 
-**Still pending:** Groq ASR duration/retry reservations in #20; claim-extraction
-and fallback/router-specific limits in #25; Voxide client-side session accounting;
-observed upstream remaining balances; approved per-provider rates, concurrency
-and account-wide budgets. The generic weighted bucket can meter other units,
-but its existence is not integration. The operator summary reports these
-providers as unintegrated with unknown balances. It is a local refill estimate,
-not a rolling-hour provider dashboard or a measured daily allowance.
+| Provider | Mechanism | Where it is taken |
+| --- | --- | --- |
+| Scholarxiv | `provider_buckets` token bucket `scholarxiv`, 2 request slots | Evidence Papers and Router calls (existing); with quotas on, also every extraction and reconciliation routing, completion and feedback request before it is recorded |
+| Groq speech | `asr_requests` rolling minute/day request and hour/day audio windows (BE-07) | Before every speech request, unchanged; refusal is `ASR_QUOTA_EXHAUSTED` |
+| Groq extraction fallback | `provider_buckets` `groq_llm:*` minute/day request and token buckets, charged all or nothing | With quotas on, before every fallback request is recorded |
+
+With quotas on, a Scholarxiv or Groq 429 seen by extraction or reconciliation
+holds that provider's shared buckets for its `Retry-After`, as the evidence stages already
+do. A request refused afterwards by the per-input extraction budget or by
+cancellation is refunded because it was never sent. Admission refusals are HTTP
+429 `QUOTA_EXCEEDED`; a paused provider is HTTP 429 `PROVIDER_QUOTA_EXHAUSTED`.
+
+### Global stop
+
+New investigations, captures, upload targets and reanalyses pause while any
+configured provider is near exhaustion: the Scholarxiv bucket below its
+reserve, any Groq speech window within 5% of its limit or under a recorded
+`Retry-After`, or any Groq fallback bucket below 5%. The `Retry-After` header
+is the longest time until every paused provider is back at its reserve: bucket
+refill, the age-out of the oldest speech reservations, or a provider hold. It
+is an estimate, since accepted work keeps spending. Already accepted capture
+chunks and uploads can finish, and reads, Stop/cancel and saves remain
+available. No status endpoint exists for the Android app, so the visible status
+is the typed 429 with its message and `Retry-After`; no contract changed.
+
+All API and worker processes must use the same quota flag and limits; mixed
+enabled/disabled workers cannot enforce a shared policy. No provider
+entitlement, account-wide cost ceiling or paid overage protection is inferred
+from these local counters.
+
+### Demo-day summary
+
+`python -m services.quota_summary` (JSON) or `--text` prints, per provider, the
+local remaining units of every limit, the reserve, whether it pauses intake and
+the time to recover. Upstream balances are never read: Scholarxiv and Groq show
+`unknown (local estimate: ...)`, and Voxide shows `unknown (local estimate:
+none; ...)` with a pointer to its dashboard. It needs database credentials, so
+it is operator-only; no public endpoint is added.
+
+**Still pending:** owner confirmation of the assumptions above on the
+Scholarxiv, Groq and EthioDeploy dashboards; observed upstream balances; Voxide
+session accounting stays client-side under BC-D04.
