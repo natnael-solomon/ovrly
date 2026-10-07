@@ -60,24 +60,26 @@ def media_stage_key(investigation_id: uuid.UUID) -> StageKey:
 
 
 async def _heartbeat_while(context: JobContext, work: Coroutine[Any, Any, _T]) -> _T:
-    async def maintain() -> None:
+    """Run ``work`` while extending the lease every third of its length.
+
+    Heartbeats run inline in the stage's task and are never cancelled from outside: on
+    Python 3.11, cancelling a task during SQLAlchemy's pool checkout (``asyncio.wait_for``)
+    can be swallowed, which left a separate heartbeat task renewing the lease forever after
+    the work had ended (#130). A lost lease or a cancellation request stops the work.
+    """
+    task: asyncio.Task[_T] = asyncio.create_task(work)
+    try:
         while True:
             await context.heartbeat()
-            await asyncio.sleep(context.lease_seconds / 3)
-
-    task: asyncio.Task[_T] = asyncio.create_task(work)
-    heartbeat = asyncio.create_task(maintain())
-    try:
-        done, _ = await asyncio.wait((task, heartbeat), return_when=asyncio.FIRST_COMPLETED)
-        if heartbeat in done:
-            await heartbeat
-        result = await task
+            done, _ = await asyncio.wait({task}, timeout=context.lease_seconds / 3)
+            if done:
+                break
+        result = task.result()
         await context.heartbeat()
         return result
     finally:
         task.cancel()
-        heartbeat.cancel()
-        await asyncio.gather(task, heartbeat, return_exceptions=True)
+        await asyncio.gather(task, return_exceptions=True)
 
 
 async def _finish_file_work(work: Coroutine[Any, Any, _T]) -> _T:

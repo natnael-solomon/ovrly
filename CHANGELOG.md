@@ -442,6 +442,11 @@
 
 ### Fixed
 
+- A media preparation or speech job could stall until the worker was stopped when the
+  stage ended while a lease renewal was checking out a database connection: on Python
+  3.11 that renewal swallowed its cancellation and kept renewing the lease, so the job
+  was neither finished nor re-leased (#130). Renewals now run inline with the stage.
+
 - Android instrumented checks no longer hang or fail before testing on API 29
   (#76 follow-up): API 29 cold-boots instead of resuming a cached snapshot, the
   device must publish its system services before any test, the emulator is
