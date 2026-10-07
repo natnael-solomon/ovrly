@@ -91,8 +91,10 @@ internal sealed interface CheckCommand {
     /** Opens a saved report: its check when it is on this device, otherwise the saved copy. */
     data class OpenSaved(val reportId: String) : CheckCommand
 
-    /** Starts the optional Google account link (BC-D07); never needed for checking. */
-    /** [activity] is the screen the Google account picker is shown over. */
+    /**
+     * Starts the optional Google account link (BC-D07); never needed for checking.
+     * [activity] is the screen the Google account picker is shown over.
+     */
     class LinkAccount(val activity: Context?) : CheckCommand
 }
 

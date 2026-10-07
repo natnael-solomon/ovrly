@@ -152,7 +152,8 @@ class AccountLinkTest {
     }
 
     @Test
-    fun everyRefusalIsReportedWithoutChangingTheIdentity() {        val refusals = listOf(
+    fun everyRefusalIsReportedWithoutChangingTheIdentity() {
+        val refusals = listOf(
             Triple(409, "ACCOUNT_ALREADY_LINKED", "none"),
             Triple(401, "INVALID_ID_TOKEN", "authenticate"),
             Triple(503, "ACCOUNT_LINK_UNAVAILABLE", "none"),

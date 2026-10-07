@@ -28,10 +28,7 @@ internal interface CredentialFetcher {
 
 /** The real fetcher: the account picker shown over [activity]. */
 internal object CredentialManagerFetcher : CredentialFetcher {
-    override suspend fun fetch(
-        activity: Context,
-        request: GetCredentialRequest
-    ): CustomCredential {
+    override suspend fun fetch(activity: Context, request: GetCredentialRequest): CustomCredential {
         val credential = CredentialManager.create(activity).getCredential(activity, request)
             .credential
         return credential as? CustomCredential
