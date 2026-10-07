@@ -1,6 +1,7 @@
 """Lease-safe provider waits and durable invalid-output feedback shared by LLM stages."""
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Awaitable
 from datetime import UTC, datetime
@@ -24,16 +25,24 @@ logger = logging.getLogger(__name__)
 async def wait_for_provider(pending: Awaitable[T], context: JobContext) -> T:
     """Await a provider call while keeping its lease alive.
 
-    The lease is renewed as soon as the call starts, then every third of the lease measured
-    from the start of each renewal, so database latency cannot stretch the gap. Renewal is
-    strictly fenced on an unexpired lease, which leaves at least two thirds of the lease for
-    renewal latency and scheduling delay.
+    The lease is renewed just before the call starts, then every third of the lease measured
+    from the start of each renewal, so database latency cannot stretch the gap. The first
+    renewal completes before the call begins, so it never competes with the call's own
+    accounting transaction for a pooled connection. Renewal is strictly fenced on an
+    unexpired lease, which leaves at least two thirds of the lease for renewal latency and
+    scheduling delay.
     """
-    task = asyncio.ensure_future(pending)
     loop = asyncio.get_running_loop()
     interval = context.lease_seconds / 3
+    next_renewal = loop.time() + interval
     try:
-        next_renewal = loop.time()
+        await context.heartbeat()
+    except BaseException:
+        if inspect.iscoroutine(pending):
+            pending.close()
+        raise
+    task = asyncio.ensure_future(pending)
+    try:
         while not task.done():
             delay = next_renewal - loop.time()
             if delay > 0:

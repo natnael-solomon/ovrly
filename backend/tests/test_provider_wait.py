@@ -55,3 +55,15 @@ async def test_lost_renewal_cancels_the_pending_call():
         await wait_for_provider(provider(), context)
     assert cancelled.is_set()
     assert len(context.starts) == 2
+
+
+async def test_lost_renewal_before_the_call_never_sends_it():
+    context = Context(lease_seconds=0.3, latency=0, fail_after=0)
+    started = []
+
+    async def provider():
+        started.append(True)
+
+    with pytest.raises(LeaseLost):
+        await wait_for_provider(provider(), context)
+    assert started == []
