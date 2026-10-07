@@ -99,17 +99,62 @@ class TokenBucket:
         """Take the requested units, or return the seconds until they are available."""
         async with self.database.engine.begin() as connection:
             tokens, now = await self._locked(connection)
-            if tokens >= amount:
+            held = await self._held(connection, now)
+            if held == 0 and tokens >= amount:
                 tokens -= amount
                 wait = 0.0
             else:
-                wait = (amount - tokens) / self.per_second
+                wait = max(held, (amount - tokens) / self.per_second if tokens < amount else 0.0)
             await connection.execute(
                 update(provider_buckets)
                 .where(provider_buckets.c.name == self.name)
                 .values(tokens=tokens, updated_at=now)
             )
         return wait
+
+    async def _held(self, connection: AsyncConnection, now: datetime) -> float:
+        """Seconds left of a provider hold on this (already locked) bucket."""
+        until = await connection.scalar(
+            select(provider_buckets.c.held_until).where(provider_buckets.c.name == self.name)
+        )
+        return 0.0 if until is None else max(0.0, (until - now).total_seconds())
+
+    @staticmethod
+    async def held_seconds(connection: AsyncConnection, name: str) -> float:
+        """Seconds left of a provider hold set by :meth:`hold`; 0 when none."""
+        row = (
+            await connection.execute(
+                select(provider_buckets.c.held_until, func.clock_timestamp().label("now")).where(
+                    provider_buckets.c.name == name
+                )
+            )
+        ).first()
+        if row is None or row.held_until is None:
+            return 0.0
+        return max(0.0, float((row.held_until - row.now).total_seconds()))
+
+    async def hold(self, seconds: float | None) -> None:
+        """Pause every user for a provider ``Retry-After`` without discarding the balance.
+
+        Unlike :meth:`block`, the units refilled so far survive the pause, so a short
+        per-minute 429 cannot empty a day-long budget.
+        """
+        pause = DEFAULT_BLOCK_SECONDS if seconds is None else max(seconds, 0.0)
+        async with self.database.engine.begin() as connection:
+            tokens, now = await self._locked(connection)
+            until = now + timedelta(seconds=pause)
+            current = await connection.scalar(
+                select(provider_buckets.c.held_until).where(provider_buckets.c.name == self.name)
+            )
+            await connection.execute(
+                update(provider_buckets)
+                .where(provider_buckets.c.name == self.name)
+                .values(
+                    tokens=tokens,
+                    updated_at=now,
+                    held_until=until if current is None or current < until else current,
+                )
+            )
 
     async def acquire(self, amount: float = 1) -> None:
         await self._wait_tokens(amount, None)
@@ -264,12 +309,16 @@ class SharedBudget:
     async def _take(self, charged: list[tuple[TokenBucket, float]]) -> float:
         async with self.database.engine.begin() as connection:
             states = [(bucket, cost, *await bucket._locked(connection)) for bucket, cost in charged]
+            held = [await bucket._held(connection, now) for bucket, _, _, now in states]
             wait = max(
-                (
-                    (cost - tokens) / bucket.per_second
-                    for bucket, cost, tokens, _ in states
-                    if tokens < cost
-                ),
+                [
+                    *held,
+                    *(
+                        (cost - tokens) / bucket.per_second
+                        for bucket, cost, tokens, _ in states
+                        if tokens < cost
+                    ),
+                ],
                 default=0.0,
             )
             for bucket, cost, tokens, now in states:
@@ -298,6 +347,6 @@ class SharedBudget:
             await bucket._refund(cost)
 
     async def block(self, seconds: float | None) -> None:
-        """Hold every bucket of the provider for its ``Retry-After``."""
+        """Hold every bucket of the provider for its ``Retry-After``, keeping balances."""
         for bucket in self.buckets:
-            await bucket.block(seconds)
+            await bucket.hold(seconds)

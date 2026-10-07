@@ -330,10 +330,11 @@ class ReconciliationStage:
                     if operation != "feedback":
                         data["in_flight"] = True
                     await context.queue.save_stage_data(job.lease, data, connection=connection)
-            except (ExtractionBudgetExceeded, CancellationRequested) as refused:
+            except BaseException as refused:
+                # Nothing was sent: any failure before the send returns the shared units.
                 if self.admission is not None and costs is not None:
-                    await self.admission.refund(context.queue.database, provider, costs)
-                if isinstance(refused, CancellationRequested):
+                    await self.admission.release(context.queue.database, provider, costs)
+                if not isinstance(refused, ExtractionBudgetExceeded):
                     raise
                 data["requests"].pop()
                 data.update(in_flight=False, budget_exhausted=True)

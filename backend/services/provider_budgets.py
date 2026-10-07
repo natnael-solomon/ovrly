@@ -9,6 +9,8 @@ including any provider ``Retry-After`` still in force. Every figure is a local e
 No provider balance is read, so none is claimed.
 """
 
+import asyncio
+import contextlib
 import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -88,6 +90,7 @@ async def _bucket(
         select(provider_buckets.c.name).where(provider_buckets.c.name == name)
     )
     balance = await TokenBucket.balance(connection, name, capacity, period)
+    held = await TokenBucket.held_seconds(connection, name)
     return LimitStatus(
         name,
         unit,
@@ -95,7 +98,7 @@ async def _bucket(
         period,
         balance if observed is not None else None,
         reserve,
-        max(0.0, (reserve - balance) * period / capacity),
+        max(0.0, held, (reserve - balance) * period / capacity),
     )
 
 
@@ -241,6 +244,16 @@ class LlmAdmission:
 
     async def refund(self, database: Database, provider: str, costs: list[float]) -> None:
         await self.budget(database, provider).refund(costs)
+
+    async def release(self, database: Database, provider: str, costs: list[float]) -> None:
+        """Refund units of a request that was never sent, even while being cancelled.
+
+        The refund runs shielded so a cancellation (for example lease loss) cannot leak the
+        units; a failed refund is suppressed so the original error stays visible.
+        """
+        refund = asyncio.ensure_future(self.refund(database, provider, costs))
+        with contextlib.suppress(Exception, asyncio.CancelledError):
+            await asyncio.shield(refund)
 
     async def block(self, database: Database, provider: str, seconds: float | None) -> None:
         """Hold the provider's shared buckets for a provider-issued ``Retry-After``."""

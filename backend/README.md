@@ -338,7 +338,8 @@ sessions and chunk reservations/receipts. `0008_reports` adds immutable
 buckets, and `0011_quotas` adds daily admission counters and expiring provider
 request slots. `0016_stage_data` adds durable JSONB extraction checkpoints to
 `jobs`; `0017_extraction_runs` stores accepted observations, window assignments
-and cumulative reservations per investigation. Future schema changes require a
+and cumulative reservations per investigation; `0018_provider_bucket_holds` adds a
+nullable `held_until` to `provider_buckets` for provider holds that keep the balance. Future schema changes require a
 reviewed migration and upgrade/downgrade coverage, not `create_all()` during API
 startup.
 
@@ -1379,7 +1380,12 @@ stage records the request, so a refusal never leaves an unknown outcome; a reque
 then refused by the per-input budget or by cancellation is refunded. Groq tokens
 use the same conservative approximation as the per-input ledger (escaped request
 bytes + output cap + 256), clamped to a bucket's capacity. A Scholarxiv or Groq
-429 seen by these stages holds that provider's buckets for its `Retry-After`.
+429 seen by these stages holds that provider's buckets for its `Retry-After` with
+`held_until` (migration `0018_provider_bucket_holds`): nothing is taken during the hold,
+but the balance is kept, so a short per-minute 429 pauses for its own length instead of
+draining a day budget. Any failure between taking units and recording the request
+(budget refusal, cancellation, lease loss, database error) returns the units, shielded
+from cancellation, because nothing was sent.
 
 The global stop covers new checks, captures, upload targets and reanalyses. It
 pauses while any **configured** provider is near exhaustion: the Scholarxiv

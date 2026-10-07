@@ -32,6 +32,7 @@ from services.models import (
     report_versions,
 )
 from services.pipeline.capture import publish_capture_stage
+from services.provider_budgets import LlmAdmission
 from services.providers.budget import SharedBudget, TokenBucket
 from services.providers.http import ProviderError
 from services.quota_summary import summary
@@ -725,16 +726,18 @@ async def test_groq_fallback_bucket_pauses_intake_and_summary_covers_every_provi
         assert fallback["remaining"][0] == "unknown (local estimate: 27 of 27 requests/minute)"
         assert state["providers"]["groq"]["speech"]["status"] == "not_configured"
         assert state["providers"]["voxide"]["remaining"][0].startswith("unknown (local estimate:")
-        await TokenBucket(
-            app.state.database, "groq_llm:tokens_day", 180000, period_seconds=86400
-        ).block(120)
+        # A short Groq 429 holds every fallback bucket without draining the day budget.
+        await LlmAdmission(config).block(app.state.database, "groq", 30)
         denied = await check(client, headers, "fallback-paused")
         assert_error(denied, 429, "PROVIDER_QUOTA_EXHAUSTED", "retry")
-        # The 120 s hold plus the refill of the 9000-token reserve at 180000 tokens/day.
-        assert 4435 <= int(denied.headers["Retry-After"]) <= 4441
+        assert 28 <= int(denied.headers["Retry-After"]) <= 30
         state = await summary(app.state.database, config)
         assert state["paused_by"] == ["groq_llm"]
-        assert 4435 <= state["retry_after_seconds"] <= 4441
+        assert 28 <= state["retry_after_seconds"] <= 30
+        async with app.state.database.engine.connect() as connection:
+            day = await TokenBucket.balance(connection, "groq_llm:tokens_day", 180000, 86400)
+            assert day == 180000
+            assert 28 <= await TokenBucket.held_seconds(connection, "groq_llm:tokens_day") <= 30
         assert (await usage(app, owner_id)).checks == 1
     finally:
         config.groq_extraction_enabled = False
@@ -770,9 +773,11 @@ async def test_shared_budget_takes_every_bucket_or_none(database_url):
         first, second = await balances()
         assert 2 <= first <= 3 and 60 <= second < 60.1
         await budget.block(30)
-        first, second = await balances()
-        assert first < 0 and second < 0
-        with pytest.raises(RateLimited):
+        held_first, held_second = await balances()
+        # A hold pauses both buckets but keeps what they had.
+        assert held_first >= first and held_second >= second
+        with pytest.raises(RateLimited) as limited:
             await budget.acquire([0, 1])
+        assert 28 <= limited.value.retry_after_seconds <= 30
     finally:
         await database.close()

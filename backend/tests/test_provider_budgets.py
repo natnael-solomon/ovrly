@@ -1,6 +1,7 @@
 """Database-free checks of the shared provider budgets (#22). PostgreSQL cases are in
 ``test_quotas.py`` and ``recovery/test_claim_extraction.py``."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -169,3 +170,29 @@ def test_demo_text_names_the_paused_providers_and_every_unknown_balance():
     assert VOXIDE_REMAINING.startswith("unknown (local estimate:")
     result.update(intake_paused=False, paused_by=[])
     assert "Intake: open" in render_text(result)
+
+
+async def test_release_refunds_even_when_the_caller_is_cancelled(monkeypatch):
+    started = asyncio.Event()
+    refunded = []
+
+    async def refund(self, database, provider, costs):
+        started.set()
+        await asyncio.sleep(0.05)
+        refunded.append((provider, costs))
+
+    monkeypatch.setattr(LlmAdmission, "refund", refund)
+    admission = LlmAdmission(settings(quotas_enabled=True))
+    task = asyncio.create_task(admission.release(SimpleNamespace(), "scholarxiv", [1.0]))
+    await started.wait()
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    await asyncio.sleep(0.1)
+    assert refunded == [("scholarxiv", [1.0])]
+
+    async def broken(self, database, provider, costs):
+        raise OSError("database unavailable")
+
+    monkeypatch.setattr(LlmAdmission, "refund", broken)
+    # A failed refund never hides the caller's original error.
+    await admission.release(SimpleNamespace(), "groq", [1.0, 1.0, 5.0, 5.0])

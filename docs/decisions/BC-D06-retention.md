@@ -153,9 +153,10 @@ before the expensive call:
 | Groq extraction fallback | `provider_buckets` `groq_llm:*` minute/day request and token buckets, charged all or nothing | With quotas on, before every fallback request is recorded |
 
 With quotas on, a Scholarxiv or Groq 429 seen by extraction or reconciliation
-holds that provider's shared buckets for its `Retry-After`, as the evidence stages already
-do. A request refused afterwards by the per-input extraction budget or by
-cancellation is refunded because it was never sent. Admission refusals are HTTP
+holds that provider's shared buckets for its `Retry-After` without discarding their
+balance, so a short per-minute 429 pauses intake only for its own length. Any
+failure between taking units and recording the request (per-input budget,
+cancellation, lease loss, database error) refunds them because nothing was sent. Admission refusals are HTTP
 429 `QUOTA_EXCEEDED`; a paused provider is HTTP 429 `PROVIDER_QUOTA_EXHAUSTED`.
 
 ### Global stop
