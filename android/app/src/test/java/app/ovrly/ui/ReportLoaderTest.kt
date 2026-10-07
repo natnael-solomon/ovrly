@@ -159,6 +159,39 @@ class ReportLoaderTest {
     }
 
     @Test
+    fun theRetrievalTimeIsWhenTheShownVersionWasStoredOrFirstRead() = withServer { server ->
+        server.credentials.write("synthetic-token-1")
+        server.json(200, versionList())
+        server.json(200, versionOne())
+        var now = 5_000L
+        val loader = ReportLoader(
+            ChecksService(server.services()),
+            retrieved = { 1_000L },
+            clock = { now }
+        ) { false }
+        val complete = fixture("complete")
+        val latest = runBlocking { loader.load(complete, null, emptyList()) }
+        assertEquals("the stored read of the latest version", 1_000L, latest.retrievedAt)
+        val earlier = runBlocking { loader.load(complete, 1, emptyList()) }
+        assertEquals("an earlier version: when it was first read", 5_000L, earlier.retrievedAt)
+        now = 9_000L
+        val again = runBlocking { loader.load(complete, 1, emptyList()) }
+        assertEquals(5_000L, again.retrievedAt)
+    }
+
+    @Test
+    fun theRetrievalTimeFallsBackToNowAndComesFromTheStore() = withServer { server ->
+        val failed = fixture("failed")
+        val noReport = runBlocking { server.loader().load(failed, null, emptyList()) }
+        assertNull("nothing to date without a version", noReport.retrievedAt)
+        val partial = fixture("partial")
+        val retrieved = ReportLoader.retrievedFrom(server.jobs)
+        assertNull(runBlocking { retrieved(partial.id) })
+        runBlocking { server.jobs.recordRead(partial) }
+        assertEquals(server.wall.get(), runBlocking { retrieved(partial.id) })
+    }
+
+    @Test
     fun stalenessComesFromTheCachedLatestVersion() = withServer { server ->
         val partial = fixture("partial")
         val stale = ReportLoader.staleFrom(server.jobs)

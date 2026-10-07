@@ -4,6 +4,25 @@
 
 ### Added
 
+- Report export and accessibility (AN-11, #39): the Report screen's "Share report" action
+  sends the shown version to the Android share sheet as plain text with the claim summary,
+  source links, limitations, provisional label, version, publication date and the date
+  this device retrieved it. It is built on the device and never includes media, the
+  transcript or a claim's original wording. Claim cards read the claim first with times in
+  words for TalkBack, detail and evidence cards are single TalkBack stops, every Report
+  control has a 48 dp target, report and evidence cards grow with 200% text, and the
+  Settings recording timer has a spoken description.
+
+- Explicit saved reports and the optional account on Android (AN-10, #36). The Report
+  screen saves or removes the shown version only when you tap Save report or Remove from
+  saved, Your space lists Saved reports below the Library (readable offline, opening the
+  check or the saved copy), and the copy states that only saved reports are kept. The
+  backend adds `DELETE /v1/reports/{report_id}/save` (204, owner-scoped, idempotent). The
+  device side of the BC-D07 account link is implemented and tested against a fake token
+  source, but sign-in is not available in this build: Google OAuth web and Android clients
+  are needed (owner action). Per decision 0003, a report saved on one device cannot yet be
+  restored on another device.
+
 - REPO-06 security tests (#28): outbound evidence fetches now go through an SSRF
   guard that resolves each host once, dials only the checked public address (private,
   loopback, link-local and metadata, shared, IPv6 unique-local and IPv4-embedding
@@ -297,6 +316,13 @@
 - Reduced-scope eleven-clip local evaluation snapshot `res01-local-frozen-2026-10-04` in `evaluation/corpus-local/` (`kind: frozen-local`) with the owner's 2026-10-04 local-use acceptance, preserved 259 original/264 final decisions and 7/4 split, plus the intermediate `reviewed-draft/` and `freeze-candidate/` revisions it builds on. A new explicit `--frozen-local` validation mode checks it with the draft rules and additional modality/negative checks; strict full-coverage `--frozen` validation is unchanged and rejects it. Rights clearance remains pending on every clip and RES-01 stays open.
 
 ### Changed
+
+- Tagged demo releases (REPO-07, #17): a pushed `v*` tag runs the **Release** workflow,
+  which checks the changelog version, date and known limitations, builds the release APK
+  twice and compares the builds, writes CycloneDX SBOMs for Android and the backend,
+  attests build provenance and, after owner approval, signs with a demo key (or a
+  throwaway debug key when none is configured). Nothing is published automatically. See
+  [release signing](docs/release-signing.md#tagged-demo-releases).
 
 - Evaluation contract v2 requires exactly one occurrence pass and one final adjudication per clip, without a second annotator. Explicit provenance replaces mandatory blind-human attestations; original-occurrence traceability, rights, scenario coverage and split-isolation safeguards remain. Version-1 snapshots require explicit migration, not silent relabeling.
 - Added manual Telegram APK distribution: an exact merged `main` commit builds without credentials, then signs and delivers after owner approval. An immutable ledger supplies version codes; redelivery resends the current issued bytes. Release builds use R8 and resource shrinking. See [release signing](docs/release-signing.md).

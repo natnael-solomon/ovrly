@@ -15,10 +15,16 @@ import app.ovrly.data.cachedReport
  */
 internal class ReportLoader(
     private val checks: ChecksService,
+    /** When this device last stored the latest version of an investigation, if it did. */
+    private val retrieved: suspend (String) -> Long? = { null },
+    private val clock: () -> Long = System::currentTimeMillis,
     /** Reads the cached staleness of the latest version of an investigation. */
     private val stale: suspend (String) -> Boolean
 ) {
     private var summaries: Pair<String, List<ReportVersionSummary>>? = null
+
+    /** When each earlier version was first read; versions never change once published. */
+    private val earlierRead = mutableMapOf<Pair<String, Int>, Long>()
 
     /** Forgets the version list so the next [load] reads it again (after a reanalysis). */
     fun invalidate() {
@@ -50,9 +56,17 @@ internal class ReportLoader(
             },
             comparedWith = earlier?.version,
             changes = shown?.let { changes(it, earlier) }.orEmpty(),
-            candidates = candidates
+            candidates = candidates,
+            retrievedAt = shown?.let { retrievedAt(investigation.id, it, latest) }
         )
     }
+
+    private suspend fun retrievedAt(id: String, shown: ReportVersion, latest: ReportVersion?) =
+        if (shown == latest) {
+            retrieved(id) ?: clock()
+        } else {
+            earlierRead.getOrPut(id to shown.version, clock)
+        }
 
     private suspend fun versionList(investigation: Investigation): List<ReportVersionSummary>? {
         val cached = summaries?.takeIf { (id, items) ->
@@ -91,5 +105,8 @@ internal class ReportLoader(
     companion object {
         fun staleFrom(jobs: LocalJobs): suspend (String) -> Boolean =
             { id -> jobs.cachedReport(id)?.stale == true }
+
+        fun retrievedFrom(jobs: LocalJobs): suspend (String) -> Long? =
+            { id -> jobs.cachedReport(id)?.fetchedAt }
     }
 }
