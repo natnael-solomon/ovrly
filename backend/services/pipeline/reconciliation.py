@@ -2,9 +2,9 @@
 
 import hashlib
 import uuid
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -38,9 +38,11 @@ from services.pipeline.llm import (
     parse_typed_completion,
 )
 from services.pipeline.provider_recovery import invalid_feedback, wait_for_provider
+from services.provider_budgets import LlmAdmission
 from services.reports import NextVersion, latest_reports, publish_report_version
 
 STAGE = "reconciliation"
+T = TypeVar("T")
 TERMINAL = {"published", "failed", "cancelled", "deleted"}
 
 
@@ -240,10 +242,22 @@ async def reconciliation_progress(
 
 
 class ReconciliationStage:
-    def __init__(self, llm: LlmAdapter):
+    def __init__(self, llm: LlmAdapter, admission: LlmAdmission | None = None):
         if llm.task != STAGE or llm.provider != "scholarxiv":
             raise ValueError("Reconciliation requires Scholarxiv quality routing")
         self.llm = llm
+        self.admission = admission
+
+    async def _wait(self, pending: Awaitable[T], context: JobContext) -> T:
+        try:
+            return await wait_for_provider(pending, context)
+        except ProviderCooldown as cooldown:
+            # A provider 429 limits the whole account: hold its shared bucket too.
+            if self.admission is not None:
+                await self.admission.block(
+                    context.queue.database, self.llm.provider, cooldown.retry_after_seconds
+                )
+            raise
 
     async def run(self, job: ClaimedJob, context: JobContext) -> StageResult:
         try:
@@ -292,6 +306,12 @@ class ReconciliationStage:
         data = dict(job.stage_data)
 
         async def account(provider: str, operation: str, size: int, output: int) -> None:
+            # Shared provider units are taken first and may wait; nothing is recorded yet.
+            costs = (
+                await self.admission.acquire(context.queue.database, provider, size, output)
+                if self.admission is not None
+                else None
+            )
             data.setdefault("requests", []).append(
                 {
                     "provider": provider,
@@ -310,7 +330,11 @@ class ReconciliationStage:
                     if operation != "feedback":
                         data["in_flight"] = True
                     await context.queue.save_stage_data(job.lease, data, connection=connection)
-            except ExtractionBudgetExceeded:
+            except (ExtractionBudgetExceeded, CancellationRequested) as refused:
+                if self.admission is not None and costs is not None:
+                    await self.admission.refund(context.queue.database, provider, costs)
+                if isinstance(refused, CancellationRequested):
+                    raise
                 data["requests"].pop()
                 data.update(in_flight=False, budget_exhausted=True)
                 await context.queue.save_stage_data(job.lease, data)
@@ -332,9 +356,7 @@ class ReconciliationStage:
                 raise ProviderCooldown(remaining)
             if data.get("needs_route"):
                 try:
-                    models = await wait_for_provider(
-                        self.llm.fallbacks(source, account=account), context
-                    )
+                    models = await self._wait(self.llm.fallbacks(source, account=account), context)
                     await context.checkpoint(Checkpoint.AFTER_PROVIDER_CALL, job)
                 except (RateLimited, GatewayFailure):
                     data["in_flight"] = False
@@ -362,7 +384,7 @@ class ReconciliationStage:
                     "repair": repair,
                 }
                 try:
-                    completion = await wait_for_provider(
+                    completion = await self._wait(
                         self.llm.complete(
                             source,
                             repair=repair,

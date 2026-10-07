@@ -37,6 +37,7 @@ from services.pipeline.llm import (
     parse_completion,
 )
 from services.pipeline.provider_recovery import invalid_feedback, wait_for_provider
+from services.provider_budgets import LlmAdmission
 from services.reports import NextVersion, latest_reports, publish_report_version
 
 STAGE = "claim_extraction"
@@ -217,7 +218,12 @@ def grounded_claims(
 
 
 class ExtractionStage:
-    def __init__(self, llm: LlmAdapter, groq: LlmAdapter | None = None):
+    def __init__(
+        self,
+        llm: LlmAdapter,
+        groq: LlmAdapter | None = None,
+        admission: LlmAdmission | None = None,
+    ):
         if (
             llm.task != STAGE
             or llm.provider != "scholarxiv"
@@ -226,6 +232,7 @@ class ExtractionStage:
             raise ValueError("Extraction route policy does not permit this task or provider")
         self.llm = llm
         self.groq = groq
+        self.admission = admission
 
     def _use_groq(self, data: dict[str, Any], window: ObservationWindow) -> LlmAdapter:
         if (
@@ -238,8 +245,18 @@ class ExtractionStage:
         data.update(provider="groq", model=None, needs_route=False, availability_failures=0)
         return self.groq
 
-    async def _wait(self, pending: Awaitable[T], context: JobContext) -> T:
-        return await wait_for_provider(pending, context)
+    async def _wait(
+        self, pending: Awaitable[T], context: JobContext, provider: str | None = None
+    ) -> T:
+        try:
+            return await wait_for_provider(pending, context)
+        except ProviderCooldown as cooldown:
+            # A provider 429 limits the whole account: hold its shared buckets too.
+            if self.admission is not None and provider is not None:
+                await self.admission.block(
+                    context.queue.database, provider, cooldown.retry_after_seconds
+                )
+            raise
 
     async def _feedback(
         self,
@@ -289,6 +306,14 @@ class ExtractionStage:
         async def account(
             provider: str, operation: str, input_bytes: int, output_tokens: int
         ) -> None:
+            # Shared provider units are taken first and may wait; nothing is recorded yet.
+            costs = (
+                await self.admission.acquire(
+                    context.queue.database, provider, input_bytes, output_tokens
+                )
+                if self.admission is not None
+                else None
+            )
             data.setdefault("requests", []).append(
                 {
                     "provider": provider,
@@ -314,7 +339,11 @@ class ExtractionStage:
                     if operation != "feedback":
                         data["in_flight"] = True
                     await context.queue.save_stage_data(job.lease, data, connection=connection)
-            except ExtractionBudgetExceeded:
+            except (ExtractionBudgetExceeded, CancellationRequested) as refused:
+                if self.admission is not None and costs is not None:
+                    await self.admission.refund(context.queue.database, provider, costs)
+                if isinstance(refused, CancellationRequested):
+                    raise
                 data["requests"].pop()
                 data.update(in_flight=False, budget_exhausted=True)
                 await context.queue.save_stage_data(job.lease, data)
@@ -354,6 +383,7 @@ class ExtractionStage:
                         data["fallbacks"] = await self._wait(
                             self.llm.fallbacks(window.model_dump(mode="json"), account=account),
                             context,
+                            self.llm.provider,
                         )
                         await context.checkpoint(Checkpoint.AFTER_PROVIDER_CALL, job)
                     except (RateLimited, GatewayFailure) as unavailable:
@@ -388,6 +418,7 @@ class ExtractionStage:
                             repair_reason=reasons[-1] if repair and reasons else None,
                         ),
                         context,
+                        active.provider,
                     )
                     await context.checkpoint(Checkpoint.AFTER_PROVIDER_CALL, job)
                     attempt.update(

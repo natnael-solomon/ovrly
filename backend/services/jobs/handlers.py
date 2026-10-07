@@ -94,19 +94,23 @@ def default_handlers(
     from services.pipeline.producers import admit_upload_speech, build_capture_extraction
     from services.pipeline.reconciliation import ReconciliationStage
     from services.pipeline.speech import ASR_STAGE, build_speech
+    from services.provider_budgets import llm_admission
 
+    admission = llm_admission(settings)
     handlers: dict[str, JobHandler] = {INTAKE_STAGE: intake_stage}
     if store is not None:
         handlers[CAPTURE_STAGE] = CaptureProcessor(store).run
     extraction = ExtractionStage(
         llm if llm is not None else configured_llm(settings),
         fallback_llm if fallback_llm is not None else configured_groq(settings),
+        admission,
     ).run
     handlers["claim_extraction"] = extraction
     handlers["reconciliation"] = ReconciliationStage(
         reconciliation_llm
         if reconciliation_llm is not None
-        else configured_llm(settings, task="reconciliation")
+        else configured_llm(settings, task="reconciliation"),
+        admission,
     ).run
     if settings is not None:
         upload_media = admit_upload_speech(build_media_validation(settings), settings)

@@ -9,7 +9,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 from recovery.test_captures import DATA, close, create, put
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import delete, func, insert, select, text, update
 from test_intake_api import URL_BODY, assert_error, guest
 from test_reports_api import publish
 
@@ -21,6 +21,7 @@ from services.jobs.models import DEVICE_TEXT_FENCE_STAGE, jobs
 from services.jobs.queue import JobQueue, StageKey
 from services.jobs.retries import RateLimited
 from services.models import (
+    asr_requests,
     capture_chunks,
     capture_sessions,
     investigations,
@@ -31,7 +32,7 @@ from services.models import (
     report_versions,
 )
 from services.pipeline.capture import publish_capture_stage
-from services.providers.budget import TokenBucket
+from services.providers.budget import SharedBudget, TokenBucket
 from services.providers.http import ProviderError
 from services.quota_summary import summary
 from services.quotas import active_checks, lock_owner
@@ -630,3 +631,148 @@ def test_quota_configuration_requires_valid_limits():
             scholarxiv_requests_per_hour=50,
             quota_provider_reserve=50,
         )
+
+
+def speech_row(account, created_at, audio_seconds, *, outcome="completed", retry_after=None):
+    return {
+        "id": uuid.uuid4(),
+        "job_id": None,
+        "account_id": account,
+        "model": "whisper-large-v3-turbo",
+        "audio_seconds": audio_seconds,
+        "created_at": created_at,
+        "outcome": outcome,
+        "retry_index": 0,
+        "retry_after": retry_after,
+    }
+
+
+async def test_groq_speech_ledger_pauses_intake_until_reservations_age_out(app, client):
+    headers, owner_id, _ = await owner(client, app)
+    await clear_active(app, owner_id)
+    config = app.state.settings
+    account = "ledger-" + uuid.uuid4().hex
+    changes = {
+        "asr_enabled": True,
+        "groq_account_id": account,
+        "groq_model": "whisper-large-v3-turbo",
+        "asr_requests_per_minute": 18,
+        "asr_requests_per_day": 1800,
+        "asr_audio_seconds_per_hour": 600,
+        "asr_audio_seconds_per_day": 25920,
+    }
+    saved = {key: getattr(config, key) for key in changes}
+    for key, value in changes.items():
+        setattr(config, key, value)
+    try:
+        async with app.state.database.engine.begin() as connection:
+            now = await connection.scalar(select(func.clock_timestamp()))
+            await connection.execute(
+                insert(asr_requests),
+                [
+                    speech_row(account, now - timedelta(minutes=50), 300),
+                    speech_row(account, now - timedelta(minutes=10), 300),
+                ],
+            )
+        denied = await check(client, headers, "speech-paused")
+        assert_error(denied, 429, "PROVIDER_QUOTA_EXHAUSTED", "retry")
+        # The 5% reserve returns when the 50-minute-old reservation leaves the hour window.
+        assert 590 <= int(denied.headers["Retry-After"]) <= 600
+        state = await summary(app.state.database, config)
+        assert state["intake_paused"] and state["paused_by"] == ["groq_asr"]
+        speech = state["providers"]["groq"]["speech"]
+        hour = next(i for i in speech["limits"] if i["name"] == "groq_asr:audio_seconds_hour")
+        assert hour["local_available_units"] == 0 and hour["reserve"] == 30
+        assert "unknown (local estimate: 0 of 600 audio seconds/hour)" in speech["remaining"]
+        assert state["providers"]["groq"]["upstream_remaining"] is None
+        async with app.state.database.engine.begin() as connection:
+            await connection.execute(
+                insert(asr_requests),
+                speech_row(account, now, 1, outcome="RateLimited", retry_after=900),
+            )
+        # A provider Retry-After recorded by the speech stage holds intake longer.
+        held = await check(client, headers, "speech-held")
+        assert_error(held, 429, "PROVIDER_QUOTA_EXHAUSTED")
+        assert 880 <= int(held.headers["Retry-After"]) <= 900
+        async with app.state.database.engine.begin() as connection:
+            await connection.execute(
+                delete(asr_requests).where(asr_requests.c.account_id == account)
+            )
+        assert (await check(client, headers, "speech-open")).status_code == 202
+    finally:
+        for key, value in saved.items():
+            setattr(config, key, value)
+        async with app.state.database.engine.begin() as connection:
+            await connection.execute(
+                delete(asr_requests).where(asr_requests.c.account_id == account)
+            )
+
+
+async def test_groq_fallback_bucket_pauses_intake_and_summary_covers_every_provider(app, client):
+    headers, owner_id, _ = await owner(client, app)
+    await clear_active(app, owner_id)
+    config = app.state.settings
+    config.groq_extraction_enabled = True
+    async with app.state.database.engine.begin() as connection:
+        await connection.execute(
+            delete(provider_buckets).where(provider_buckets.c.name.like("groq_llm:%"))
+        )
+    try:
+        state = await summary(app.state.database, config)
+        assert not state["intake_paused"] and state["paused_by"] == []
+        fallback = state["providers"]["groq"]["extraction_fallback"]
+        assert fallback["status"] == "configured"
+        assert fallback["remaining"][0] == "unknown (local estimate: 27 of 27 requests/minute)"
+        assert state["providers"]["groq"]["speech"]["status"] == "not_configured"
+        assert state["providers"]["voxide"]["remaining"][0].startswith("unknown (local estimate:")
+        await TokenBucket(
+            app.state.database, "groq_llm:tokens_day", 180000, period_seconds=86400
+        ).block(120)
+        denied = await check(client, headers, "fallback-paused")
+        assert_error(denied, 429, "PROVIDER_QUOTA_EXHAUSTED", "retry")
+        # The 120 s hold plus the refill of the 9000-token reserve at 180000 tokens/day.
+        assert 4435 <= int(denied.headers["Retry-After"]) <= 4441
+        state = await summary(app.state.database, config)
+        assert state["paused_by"] == ["groq_llm"]
+        assert 4435 <= state["retry_after_seconds"] <= 4441
+        assert (await usage(app, owner_id)).checks == 1
+    finally:
+        config.groq_extraction_enabled = False
+        async with app.state.database.engine.begin() as connection:
+            await connection.execute(
+                delete(provider_buckets).where(provider_buckets.c.name.like("groq_llm:%"))
+            )
+
+
+async def test_shared_budget_takes_every_bucket_or_none(database_url):
+    database = Database(Settings(database_url=database_url, _env_file=None))
+    prefix = "shared-" + uuid.uuid4().hex
+    minute = TokenBucket(database, prefix + ":minute", 3, period_seconds=60)
+    day = TokenBucket(database, prefix + ":day", 100, period_seconds=86400)
+    budget = SharedBudget(database, (minute, day), max_wait_seconds=0)
+
+    async def balances():
+        async with database.engine.connect() as connection:
+            return (
+                await TokenBucket.balance(connection, minute.name, 3, 60),
+                await TokenBucket.balance(connection, day.name, 100, 86400),
+            )
+
+    try:
+        await budget.acquire([1, 40])
+        await budget.acquire([1, 40])
+        with pytest.raises(RateLimited):
+            await budget.acquire([1, 40])
+        first, second = await balances()
+        # The refused request took nothing from either bucket.
+        assert 1 <= first < 1.5 and 20 <= second < 20.1
+        await budget.refund([1, 40])
+        first, second = await balances()
+        assert 2 <= first <= 3 and 60 <= second < 60.1
+        await budget.block(30)
+        first, second = await balances()
+        assert first < 0 and second < 0
+        with pytest.raises(RateLimited):
+            await budget.acquire([0, 1])
+    finally:
+        await database.close()

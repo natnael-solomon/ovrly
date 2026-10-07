@@ -499,6 +499,95 @@ async def test_exhausted_quota_uses_separately_authorized_groq_extraction(
                 assert body["report"]["processing_attempts"][1]["feedback"] == "not_applicable"
 
 
+async def test_quota_admission_charges_shared_buckets_and_provider_cooldown_pauses_intake(
+    harness, database_url
+):
+    from sqlalchemy import delete
+
+    from services.models import provider_buckets
+    from services.pipeline.extraction import ExtractionStage
+    from services.pipeline.llm import GroqAdapter
+    from services.provider_budgets import LlmAdmission, provider_statuses
+    from services.providers.budget import TokenBucket
+    from services.settings import Settings
+
+    def scholarxiv(request):
+        return httpx.Response(429, headers={"Retry-After": "120"})
+
+    groq_requests = []
+
+    def groq(request):
+        groq_requests.append(request)
+        return httpx.Response(200, json={**completion(extraction()), "model": "openai/gpt-oss-20b"})
+
+    config = Settings(
+        database_url=database_url,
+        quotas_enabled=True,
+        scholarxiv_api_key="synthetic-key",
+        groq_extraction_enabled=False,
+        _env_file=None,
+    )
+    names = [
+        "scholarxiv",
+        "groq_llm:requests_minute",
+        "groq_llm:requests_day",
+        "groq_llm:tokens_minute",
+        "groq_llm:tokens_day",
+    ]
+
+    async def reset():
+        async with harness.control.engine.begin() as connection:
+            await connection.execute(
+                delete(provider_buckets).where(provider_buckets.c.name.in_(names))
+            )
+
+    await reset()
+    try:
+        async with (
+            httpx.AsyncClient(
+                transport=httpx.MockTransport(scholarxiv), base_url="https://router.example"
+            ) as primary,
+            httpx.AsyncClient(
+                transport=httpx.MockTransport(groq), base_url="https://groq.example"
+            ) as fallback,
+        ):
+            adapter = ScholarxivAdapter(
+                primary, allowed_models=["fixture-free-model"], max_tokens=2048
+            )
+            groq_adapter = GroqAdapter(fallback, max_tokens=2048)
+            handlers = dict(default_handlers(llm=adapter, fallback_llm=groq_adapter))
+            handlers["claim_extraction"] = ExtractionStage(
+                adapter, groq_adapter, LlmAdmission(config)
+            ).run
+            app = harness.app(None, stages=handlers)
+            async with app.router.lifespan_context(app), harness.client(app) as client:
+                investigation_id = await create_investigation(client)
+                source = window().model_copy(update={"groq_processing_approved": True})
+                async with harness.control.engine.begin() as connection:
+                    queued = await enqueue_extraction(
+                        connection, harness.queue, investigation_id, harness.owner.id, source
+                    )
+                terminal = await harness.wait_for_state(queued.job_id, "published", "failed")
+                assert terminal.status.state.value == "published"
+        assert len(groq_requests) == 1
+        async with harness.control.engine.connect() as connection:
+            # The Scholarxiv 429 held the account-wide bucket for its Retry-After.
+            assert await TokenBucket.balance(connection, "scholarxiv", 1000) < -30
+            # The Groq fallback took one request and its token estimate from shared buckets.
+            day = await TokenBucket.balance(connection, "groq_llm:requests_day", 900, 86400)
+            assert 899 <= day < 899.5
+            tokens = await TokenBucket.balance(connection, "groq_llm:tokens_day", 180000, 86400)
+            assert tokens <= 180000 - 2048 - 256
+            statuses = {s.provider: s for s in await provider_statuses(connection, config)}
+        scholarxiv_status = statuses["scholarxiv"]
+        assert scholarxiv_status.pauses_intake
+        # (50 reserve + 33.3 held units) at 1000 units/hour is about 300 s.
+        assert 280 <= scholarxiv_status.retry_after_seconds <= 300
+        assert not statuses["groq_llm"].pauses_intake
+    finally:
+        await reset()
+
+
 async def test_feedback_failure_is_observable_without_hiding_the_repaired_result(harness, caplog):
     inference = []
     feedback = []

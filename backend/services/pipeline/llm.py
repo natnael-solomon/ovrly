@@ -19,6 +19,15 @@ PROMPT_VERSION = "claim-window-v2"
 MAX_RESPONSE_BYTES = 1_048_576
 REPAIR_REASON_LIMIT = 200
 RequestAccount = Callable[[str, str, int, int], Awaitable[None]]
+FRAMING_TOKENS = 256
+
+
+def reserved_tokens(input_bytes: int, output_tokens: int) -> int:
+    """Conservative local token approximation: escaped request bytes, output cap and framing.
+
+    Not a provider tokenizer or billing measurement.
+    """
+    return input_bytes + output_tokens + FRAMING_TOKENS
 
 
 class ExtractionInvalid(NonRetriableInput):
