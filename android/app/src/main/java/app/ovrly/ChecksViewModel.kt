@@ -125,13 +125,13 @@ internal class ChecksViewModel(application: Application) : AndroidViewModel(appl
 
             is CheckCommand.Unsave -> changeSave(command.reportId, save = false)
 
-            CheckCommand.LinkAccount -> {
+            is CheckCommand.LinkAccount -> {
                 val account = services?.account ?: return
                 if (mutableState.value.account.busy) return
                 mutableState.update { it.copy(account = it.account.copy(busy = true)) }
                 viewModelScope.launch {
                     val notice = try {
-                        linkNotice(account.link())
+                        linkNotice(account.link(command.activity))
                     } finally {
                         mutableState.update { it.copy(account = it.account.copy(busy = false)) }
                     }

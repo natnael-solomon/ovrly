@@ -34,7 +34,7 @@ through Gradle plugin 14.2.0. It checks application/test Kotlin and Gradle scrip
 Detekt runs source analysis at the root, independent of AGP's variant API; it is
 not type-resolved analysis. Existing findings are recorded in `config/*baseline.xml`,
 not silently fixed or excluded. New findings fail; baseline changes need review.
-`app/lint.xml` documents the existing narrow lint annotations and disables no rules.
+`app/lint.xml` documents the existing narrow lint annotations. It disables only the online "newer version available" checks (`AndroidGradlePluginVersion`, `GradleDependency`, `NewerVersionAvailable`): they query the network at build time, so a fixed commit could start failing when a new version is published. Version bumps are deliberate, through the verification metadata.
 `settings.gradle.kts` pins patched transitive build-tool dependencies; those
 overrides do not apply to the app's runtime dependencies.
 
@@ -572,7 +572,8 @@ parse the shared fixtures in place; release builds do not contain them.
 
 AN-10 (#36, AC08) within the scope of decision
 [0003](../docs/decisions/0003-scope-review-cp2.md): guest checking and explicit saves
-are complete; recovery on a second device is disclosed as incomplete.
+are complete. Google sign-in and second-device recovery are implemented, but stay
+disclosed as incomplete until they are verified on two physical devices.
 
 | Concern | Behaviour |
 | --- | --- |
@@ -581,18 +582,39 @@ are complete; recovery on a second device is disclosed as incomplete.
 | Saved reports | Below the Library, `GET /v1/reports/saved` (every Inbox poll) fills the `saved_reports` table, newest save first, so the list reads offline. A row opens its check at the saved version when the check is on this device, otherwise the saved copy, read-only and labelled "Saved copy". One unreadable save fails the whole list read and the stored list is kept. |
 | What is kept | The copy says so on screen: only reports the user saves are kept; check history, captures, shared files and checks still running are not. |
 | Account link | `AccountLinker` sends a Google ID token from an `IdTokenSource` to `POST /v1/principals/link` with the current credential (BC-D07). Upgrade in place keeps the credential. On a second device the account's new credential is written to the credential file (one rename replaces the revoked guest one) before it is used in memory; if it cannot be stored the user is told. `ACCOUNT_ALREADY_LINKED`, `INVALID_ID_TOKEN`, `ACCOUNT_LINK_UNAVAILABLE` and a refused credential each have their own message, and a refused credential is never replaced by a new guest during a link. A linked flag sits next to the credential in `no_backup` and is cleared when a new guest replaces it. A refusal clears the credential only if it was sent with the current one, so a request still in flight with the revoked guest token never drops the account. |
-| Sign-in in this build | **Not available.** No Google OAuth web and Android clients are registered for the app yet (owner action), so the build uses `NoIdTokenSource`, adds no Credential Manager dependency, and the account section shows "Sign-in isn't available in this build." with the 0003 disclosure below. |
+| Google sign-in | **Sign in with Google** in the account section asks Android Credential Manager (`androidx.credentials` 1.6.0 with `credentials-play-services-auth` and `googleid` 1.2.1) for a Google ID token through `GetSignInWithGoogleOption`, issued for the backend's Web client ID (`GoogleIdTokenSource`). No client secret is on the device and the token is sent once, never stored. Closing the picker changes nothing; no Google account, a failed picker or an unusable credential each say so. A build without a Web client ID uses no source, and the section shows "Sign-in isn't available in this build." |
+| Second device | After signing in with an account first linked on another device, this device continues as that account: the reports saved there (and any this guest had saved, moved by the server) appear under Saved reports at once and open as saved copies. Checks this guest started here can no longer be read, so their rows and cached report versions are removed (`LocalHistoryDao`); shares not yet sent stay, lose the revoked guest's declared or completed upload, and are uploaded again as the account. The notice says this history is not merged. |
 
 Disclosure shown in the account section, from decision 0003: "This submission does not
 yet complete AC08 recovery of saved reports on a second Android device. It demonstrates
 guest checking and explicitly saved reports for one owner. A report saved on one device
 cannot yet be restored on another device."
 
+### Setting up Google sign-in
+
+1. In the Google Cloud project, create an OAuth **Web** client. Its client ID (ending in
+   `.apps.googleusercontent.com`) is used twice: as `OVRLY_GOOGLE_CLIENT_ID` on the backend
+   (see the [backend README](../backend/README.md)), and as `googleWebClientId` in the
+   ignored `api.local.properties` (or the `OVRLY_GOOGLE_WEB_CLIENT_ID` environment variable)
+   for the app build. It is configuration, not a secret, but it is kept out of Git like the
+   base URL. A malformed value fails the build.
+2. Create one OAuth **Android** client per signing certificate, each with package
+   `app.ovrly` and that certificate's SHA-1. For the debug key:
+   `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`.
+   For release, the owner reads the SHA-1 of the production key ([release signing](../docs/release-signing.md)).
+   Google matches the app by package and certificate; the Android client IDs are not in
+   the build.
+3. Rebuild. The account section's **Sign in with Google** is enabled. The device needs
+   Google Play services and a Google account.
+
 | Test | What it proves |
 | --- | --- |
 | `SavedReportsTest` | Save posts no body and stores the server's copy; removal sends `DELETE` and forgets only that save; failures change nothing on the device; a list read replaces the stored saves newest first; offline or an unreadable list keeps the stored ones; a save must carry the version it names; the version 3 export matches `MIGRATION_2_3`. |
 | `AccountLinkTest` | In-place upgrade keeps the credential; a second-device link swaps to the account credential before the next call, also when it cannot be stored; every refusal leaves the identity unchanged without minting a guest; a stale guest-token refusal arriving after a second-device link retries with the account credential and keeps the link; no token means no request; a refused linked credential becomes a guest again; malformed answers are not success; the ID token is never printed. |
 | `SavedReportsStateTest` | Saved rows, the save control per shown version, the read-only saved copy and the plain-language link results. |
+| `GoogleIdTokenSourceTest` | Only a Web client ID enables sign-in; no client ID or no screen asks nothing; a closed picker, no account and a failed picker map to their results; a credential that is not a Google ID token is refused. |
+| `LocalHistoryTest` (instrumented) | Against Room, a switch removes accepted checks and cached reports, and an unsent share keeps its staged copy and key but loses the guest's upload. |
+| `GoogleSignInDeviceTest` (instrumented) | The request is "Sign in with Google" for the Web client ID, and the returned credential's ID token is what the link sends. |
 | `CredentialStoreTest` (instrumented) | The credential is encrypted with the Keystore in `no_backup`, survives a new instance, is replaced in place by an account credential, and a damaged file is dropped; the linked flag. |
 | `SavedReportsScreenTest` (instrumented, dark theme) | Save only by the button, Remove while saved and disabled while busy, the saved copy, the Saved reports list and the account section with this build's sign-in state and the disclosure. |
 ## Gallery and demo
