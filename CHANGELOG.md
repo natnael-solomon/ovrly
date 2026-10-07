@@ -4,6 +4,16 @@
 
 ### Added
 
+- Explicit saved reports and the optional account on Android (AN-10, #36). The Report
+  screen saves or removes the shown version only when you tap Save report or Remove from
+  saved, Your space lists Saved reports below the Library (readable offline, opening the
+  check or the saved copy), and the copy states that only saved reports are kept. The
+  backend adds `DELETE /v1/reports/{report_id}/save` (204, owner-scoped, idempotent). The
+  device side of the BC-D07 account link is implemented and tested against a fake token
+  source, but sign-in is not available in this build: Google OAuth web and Android clients
+  are needed (owner action). Per decision 0003, a report saved on one device cannot yet be
+  restored on another device.
+
 - REPO-06 security tests (#28): outbound evidence fetches now go through an SSRF
   guard that resolves each host once, dials only the checked public address (private,
   loopback, link-local and metadata, shared, IPv6 unique-local and IPv4-embedding

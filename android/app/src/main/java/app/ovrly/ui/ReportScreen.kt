@@ -102,6 +102,7 @@ private fun ReportList(
         if (view.version != null) {
             item { VersionSection(report, { onCommand(CheckCommand.ShowVersion(it)) }) }
         }
+        report.save?.let { save -> item { SaveCard(save, report.busy, onCommand) } }
         if (view.captured && view.canCorrect && report.candidates.isNotEmpty()) {
             item { FullVideoCard(report.busy, onFullVideo) }
         }

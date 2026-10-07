@@ -76,6 +76,10 @@ internal fun ChecksSections(
         state.library.forEach { item ->
             CheckRow(item, item.localId in state.busy, { onCommand(it.command(item)) })
         }
+        if (state.available) {
+            SavedSection(state.saved, state.loaded, onCommand)
+            AccountSection(state.account, onCommand)
+        }
         confirmCancel?.let { localId ->
             CancelDialog(
                 onConfirm = {
