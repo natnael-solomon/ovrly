@@ -92,7 +92,8 @@ class Settings(BaseSettings):
     evidence_provider_timeout_seconds: float = Field(default=20, gt=0, le=120)
     # Optional contact address for the Crossref polite pool; never required.
     crossref_mailto: str = Field(default="", max_length=200)
-    # Proposed BC-D06 demo policy; opt-in until the product owner approves the limits.
+    # BC-D06 admission policy (#22); see the decision for which numbers are accepted and
+    # which remain owner-dashboard assumptions. Still opt-in per deployment.
     quotas_enabled: bool = False
     quota_daily_checks: int = Field(default=6, ge=1, le=1000)
     quota_active_checks: int = Field(default=2, ge=1, le=100)
@@ -100,6 +101,16 @@ class Settings(BaseSettings):
     quota_claims_per_run: int = Field(default=5, ge=1, le=100)
     quota_provider_concurrency: int = Field(default=2, ge=1, le=10)
     quota_provider_reserve: int = Field(default=50, ge=1, le=1200)
+    # Intake pauses when a Groq speech window or fallback bucket has less than this
+    # fraction of its capacity left (Scholarxiv keeps the absolute reserve above).
+    quota_provider_reserve_fraction: float = Field(default=0.05, gt=0, lt=1)
+    # Groq openai/gpt-oss-20b Free plan: 30 RPM, 1K RPD, 8K TPM, 200K TPD
+    # (console.groq.com/docs/rate-limits, read 7 October 2026). Defaults keep 10% headroom
+    # for other users of the organization; enforced only with quotas enabled.
+    groq_llm_requests_per_minute: int = Field(default=27, ge=1, le=100000)
+    groq_llm_requests_per_day: int = Field(default=900, ge=1, le=10000000)
+    groq_llm_tokens_per_minute: int = Field(default=7200, ge=1, le=100000000)
+    groq_llm_tokens_per_day: int = Field(default=180000, ge=1, le=1000000000)
     extraction_enabled: bool = False
     extraction_free_routes_verified: bool = False
     extraction_models: list[str] = Field(default_factory=list, max_length=20)

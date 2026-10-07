@@ -28,12 +28,18 @@ def line_counts(summary):
 
 
 def read_report(path, source_root):
-    report = json.loads(path.read_text(encoding="utf-8"))
+    expected = {p.relative_to(source_root).as_posix()
+                for p in (source_root / "services").rglob("*.py")}
+    return validate_report(json.loads(path.read_text(encoding="utf-8")), expected)
+
+
+def validate_report(report, expected):
+    """Check a coverage JSON report against the exact services/*.py inventory."""
+    if not isinstance(report, dict):
+        raise InvalidCoverage("Coverage report must be an object")
     files = report.get("files")
     if not isinstance(files, dict) or not files:
         raise InvalidCoverage("Coverage report has no source files")
-    expected = {p.relative_to(source_root).as_posix()
-                for p in (source_root / "services").rglob("*.py")}
     if set(files) != expected:
         raise InvalidCoverage("Coverage file inventory does not match services/*.py")
     covered = statements = 0

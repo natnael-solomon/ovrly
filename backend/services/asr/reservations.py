@@ -120,6 +120,44 @@ async def replay_safe(
     return not any(outcome in UNSAFE_TO_RESEND for outcome in outcomes)
 
 
+def windows(settings: Settings) -> tuple[tuple[int, int | None, bool], ...]:
+    """(seconds, limit, counts audio seconds) for each configured Groq speech window."""
+    return (
+        (60, settings.asr_requests_per_minute, False),
+        (86400, settings.asr_requests_per_day, False),
+        (3600, settings.asr_audio_seconds_per_hour, True),
+        (86400, settings.asr_audio_seconds_per_day, True),
+    )
+
+
+def window_filter(
+    settings: Settings, seconds: int, timestamp: datetime, model: str | None = None
+) -> list[Any]:
+    """Rows in one rolling window for ``model`` (default: the primary model)."""
+    return [
+        asr_requests.c.account_id == settings.groq_account_id,
+        asr_requests.c.model == (model or settings.groq_model),
+        asr_requests.c.created_at > timestamp - timedelta(seconds=seconds),
+    ]
+
+
+async def window_usage(
+    connection: AsyncConnection,
+    settings: Settings,
+    seconds: int,
+    audio: bool,
+    timestamp: datetime,
+    model: str | None = None,
+) -> int:
+    """Requests or audio seconds reserved for this account/model in the rolling window."""
+    used = await connection.scalar(
+        select(func.coalesce(func.sum(asr_requests.c.audio_seconds), 0) if audio else func.count())
+        .select_from(asr_requests)
+        .where(*window_filter(settings, seconds, timestamp, model))
+    )
+    return int(used or 0)
+
+
 async def reserve_in(
     connection: AsyncConnection,
     job_id: uuid.UUID,
@@ -140,24 +178,9 @@ async def reserve_in(
     seconds = max(math.ceil(duration_seconds), settings.asr_minimum_billable_seconds or 1)
     await connection.execute(select(func.pg_advisory_xact_lock(lock)))
     timestamp = timestamp if timestamp is not None else now()
-    for window, limit, audio in (
-        (60, settings.asr_requests_per_minute, False),
-        (86400, settings.asr_requests_per_day, False),
-        (3600, settings.asr_audio_seconds_per_hour, True),
-        (86400, settings.asr_audio_seconds_per_day, True),
-    ):
-        used = await connection.scalar(
-            select(
-                func.coalesce(func.sum(asr_requests.c.audio_seconds), 0) if audio else func.count()
-            )
-            .select_from(asr_requests)
-            .where(
-                asr_requests.c.account_id == account,
-                asr_requests.c.model == model,
-                asr_requests.c.created_at > timestamp - timedelta(seconds=window),
-            )
-        )
-        if limit is None or int(used or 0) + (seconds if audio else 1) > limit:
+    for window, limit, audio in windows(settings):
+        used = await window_usage(connection, settings, window, audio, timestamp, model)
+        if limit is None or used + (seconds if audio else 1) > limit:
             raise ASRQuotaExhausted
     request_id = uuid.uuid4()
     await connection.execute(

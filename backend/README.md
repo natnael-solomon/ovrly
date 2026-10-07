@@ -371,7 +371,8 @@ sessions and chunk reservations/receipts. `0008_reports` adds immutable
 buckets, and `0011_quotas` adds daily admission counters and expiring provider
 request slots. `0016_stage_data` adds durable JSONB extraction checkpoints to
 `jobs`; `0017_extraction_runs` stores accepted observations, window assignments
-and cumulative reservations per investigation. Future schema changes require a
+and cumulative reservations per investigation; `0018_provider_bucket_holds` adds a
+nullable `held_until` to `provider_buckets` for provider holds that keep the balance. Future schema changes require a
 reviewed migration and upgrade/downgrade coverage, not `create_all()` during API
 startup.
 
@@ -474,7 +475,8 @@ It is not a provider tokenizer or billing measurement. Unknown outcomes,
 cancelled calls and provider-reported lower usage receive no refunds; restarts
 cannot reset spending. The reconciliation reserve is never available to these
 calls. Reconciliation can spend the remaining total, including its protected reserve.
-Limits are per investigation, not an account-wide provider rate limiter.
+Limits are per investigation. With `OVRLY_QUOTAS_ENABLED=1` every request also
+takes account-wide provider units first (see [provider budgets](#provider-budgets-and-the-global-stop)).
 
 Published windows merge into immutable cumulative provisional reports. Exact
 source-span rediscovery retains the first occurrence and interpretation; a later
@@ -1348,19 +1350,31 @@ real redacted recordings need an authorized key and rights review first.
 
 ## Opt-in admission quotas (#22)
 
-The quota portion of [BC-D06](../docs/decisions/BC-D06-retention.md) is **proposed,
-not accepted**. Nothing is enabled by this implementation; retention has its own
-independent opt-in. All API and worker processes must have the same configuration.
+The budget portion of [BC-D06](../docs/decisions/BC-D06-retention.md#admission-and-provider-budgets-22)
+is **accepted in part** (7 October 2026): numbers backed by the cited Scholarxiv
+and Groq Free limits are accepted, and the byte cap, Scholarxiv concurrency,
+headroom and reserves remain assumptions until the owner confirms them on the
+dashboards. The decision holds the derivation. Nothing is enabled by default;
+retention has its own independent opt-in. All API and worker processes must
+have the same configuration.
 
-| Setting | Proposed default / meaning |
+| Setting | Default / meaning |
 | --- | --- |
-| `OVRLY_QUOTAS_ENABLED` | `0`; opt in only after reviewing the proposed policy |
-| `OVRLY_QUOTA_ACTIVE_CHECKS` | 2 per principal; distinct checks with active queued/leased/running jobs (never-claimed `upload_device_text` fences excluded), plus unexpired open captures |
-| `OVRLY_QUOTA_DAILY_CHECKS` | 6 new investigations, captures or reanalyses per principal per UTC day |
-| `OVRLY_QUOTA_DAILY_UPLOAD_BYTES` | 268435456 (256 MiB); shared daily reservation budget for uploads and capture chunks |
-| `OVRLY_QUOTA_CLAIMS_PER_RUN` | 5; further caps `OVRLY_EVIDENCE_MAX_CLAIMS` for retrieval, including deeper searches; remaining claims stay unassessed |
-| `OVRLY_QUOTA_PROVIDER_CONCURRENCY` | 2 simultaneous Scholarxiv requests across workers, including Papers, Router, retries and feedback |
-| `OVRLY_QUOTA_PROVIDER_RESERVE` | 50 local tokens; must be less than `OVRLY_SCHOLARXIV_REQUESTS_PER_HOUR` when enabled |
+| `OVRLY_QUOTAS_ENABLED` | `0`; opt in per deployment |
+| `OVRLY_QUOTA_ACTIVE_CHECKS` | 2 per principal (accepted); distinct checks with active queued/leased/running jobs (never-claimed `upload_device_text` fences excluded), plus unexpired open captures |
+| `OVRLY_QUOTA_DAILY_CHECKS` | 6 new investigations, captures or reanalyses per principal per UTC day (accepted) |
+| `OVRLY_QUOTA_DAILY_UPLOAD_BYTES` | 268435456 (256 MiB, assumption); shared daily reservation budget for uploads and capture chunks |
+| `OVRLY_QUOTA_CLAIMS_PER_RUN` | 5 (accepted); further caps `OVRLY_EVIDENCE_MAX_CLAIMS` for retrieval, including deeper searches; remaining claims stay unassessed |
+| `OVRLY_QUOTA_PROVIDER_CONCURRENCY` | 2 simultaneous evidence Scholarxiv requests across workers, including Papers, Router, retries and feedback (assumption) |
+| `OVRLY_QUOTA_PROVIDER_RESERVE` | 50 local Scholarxiv tokens; must be less than `OVRLY_SCHOLARXIV_REQUESTS_PER_HOUR` when enabled |
+| `OVRLY_QUOTA_PROVIDER_RESERVE_FRACTION` | 0.05; intake pauses when a Groq speech window or fallback bucket has less than this fraction left |
+| `OVRLY_GROQ_LLM_REQUESTS_PER_MINUTE` / `_PER_DAY` | 27 / 900; shared Groq `openai/gpt-oss-20b` fallback request buckets (90% of the Free 30 RPM / 1K RPD) |
+| `OVRLY_GROQ_LLM_TOKENS_PER_MINUTE` / `_PER_DAY` | 7200 / 180000; fallback token buckets (90% of the Free 8K TPM / 200K TPD) |
+
+For hosted speech, BC-D06 recommends `OVRLY_ASR_REQUESTS_PER_MINUTE=18`,
+`OVRLY_ASR_REQUESTS_PER_DAY=1800`, `OVRLY_ASR_AUDIO_SECONDS_PER_HOUR=6480`,
+`OVRLY_ASR_AUDIO_SECONDS_PER_DAY=25920` and `OVRLY_ASR_MINIMUM_BILLABLE_SECONDS=10`
+(90% of the Groq Free whisper limits). They stay required, operator-entered values.
 
 Admission is serialized on the principal before locking owned records. The
 admission lock is `FOR NO KEY UPDATE`: it serializes admissions and conflicts
@@ -1376,52 +1390,94 @@ declarations reserve their full declared size, including abandoned declarations;
 failed admissions are not charged. Deleting content does not refund counters.
 The one counter row per principal resets on its next admission after UTC midnight.
 
-A local budget refusal is HTTP 429 `QUOTA_EXCEEDED`. A configured Scholarxiv
-bucket below the reserve gives HTTP 429 `PROVIDER_QUOTA_EXHAUSTED`. Both use the
-existing error shape, `retryable: true`, `action: retry` and a numeric
-`Retry-After` header. For active-check limits, 30 seconds is a suggested polling
-delay, not a predicted completion time. The provider delay estimates refill
-to the reserve and can increase while accepted research continues.
+A local budget refusal is HTTP 429 `QUOTA_EXCEEDED`. A paused provider gives
+HTTP 429 `PROVIDER_QUOTA_EXHAUSTED`. Both use the existing error shape,
+`retryable: true`, `action: retry` and a numeric `Retry-After` header. For
+active-check limits, 30 seconds is a suggested polling delay, not a predicted
+completion time.
 
-The provider stop covers new checks, captures, upload targets and reanalyses;
-existing capture uploads, reads, saves and Stop/cancel remain usable. On the
-worker, opt-in Scholarxiv calls take a token and then a DB-backed request slot.
-Normal contention waits instead of failing the stage: the token refills with
-jittered sleeps and a busy slot is polled with capped exponential backoff and
-jitter. Only a total wait longer than `max_wait_seconds` (300 seconds) raises
-`RateLimited`, and a token taken for a request that got no slot is refunded.
-Calls exceeding the
-configured evidence-provider timeout fail with a typed provider error; slots
-release on success, failure and cancellation, and expired crash leases can be
-reclaimed without a sweeper. No database connection is held while waiting or
-during the call.
-Without the opt-in, the existing waiting token-bucket behavior is unchanged.
+### Provider budgets and the global stop
 
-Operator summary, from `backend/` with the usual database configuration:
+`services/provider_budgets.py` reads every provider limit from PostgreSQL, so all
+API and worker processes share it:
+
+| Provider | Shared mechanism | Taken before |
+| --- | --- | --- |
+| Scholarxiv | `provider_buckets` row `scholarxiv` (1000/hour) plus request slots | Evidence Papers/Router calls; with quotas on, every extraction and reconciliation routing, completion and feedback request |
+| Groq speech | The BE-07 `asr_requests` rolling windows (requests per minute/day, audio seconds per hour/day), kept per model since RFC-D27 | Every speech request to either model (`ASR_QUOTA_EXHAUSTED` when both are full) |
+| Groq extraction fallback | `provider_buckets` rows `groq_llm:requests_minute`, `:requests_day`, `:tokens_minute`, `:tokens_day` | With quotas on, every fallback request |
+
+`TokenBucket` now takes a `period_seconds` (an hour by default), and
+`SharedBudget` charges several buckets all or nothing in one transaction, waiting
+with jitter like a single bucket and raising `RateLimited` only past
+`max_wait_seconds`. Extraction and reconciliation take shared units before their
+stage records the request, so a refusal never leaves an unknown outcome; a request
+then refused by the per-input budget or by cancellation is refunded. Groq tokens
+use the same conservative approximation as the per-input ledger (escaped request
+bytes + output cap + 256), clamped to a bucket's capacity. A Scholarxiv or Groq
+429 seen by these stages holds that provider's buckets for its `Retry-After` with
+`held_until` (migration `0018_provider_bucket_holds`): nothing is taken during the hold,
+but the balance is kept, so a short per-minute 429 pauses for its own length instead of
+draining a day budget. Any failure between taking units and recording the request
+(budget refusal, cancellation, lease loss, database error) returns the units, shielded
+from cancellation, because nothing was sent.
+
+The global stop covers new checks, captures, upload targets and reanalyses. It
+pauses while any **configured** provider is near exhaustion: the Scholarxiv
+bucket below its reserve, a primary-model Groq speech window (with `OVRLY_ASR_ENABLED`; the
+fallback model's windows are left as headroom) within
+the reserve fraction of its limit or under a `Retry-After` recorded in the
+ledger, or a Groq fallback bucket (with `OVRLY_GROQ_EXTRACTION_ENABLED`) below
+the fraction. `Retry-After` is the longest time until every paused provider is
+back at its reserve (bucket refill, the age-out of the oldest speech
+reservations, or the provider hold). It can grow while accepted work continues.
+Existing capture uploads, reads, saves and Stop/cancel remain usable. The
+Android app reads no status endpoint, so the typed 429 is the visible status;
+no contract changed.
+
+On the worker, opt-in evidence Scholarxiv calls take a token and then a
+DB-backed request slot. Normal contention waits instead of failing the stage: the
+token refills with jittered sleeps and a busy slot is polled with capped
+exponential backoff and jitter. Only a total wait longer than `max_wait_seconds`
+(300 seconds) raises `RateLimited`, and a token taken for a request that got no
+slot is refunded. Calls exceeding the configured evidence-provider timeout fail
+with a typed provider error; slots release on success, failure and cancellation,
+and expired crash leases can be reclaimed without a sweeper. No database
+connection is held while waiting or during the call. Extraction calls do not
+use slots. Without the opt-in, the existing waiting token-bucket behavior is
+unchanged.
+
+### Demo-day summary
+
+From `backend/` with the usual database configuration:
 
 ```sh
-uv run --frozen python -m services.quota_summary
+uv run --frozen python -m services.quota_summary          # JSON
+uv run --frozen python -m services.quota_summary --text   # short plain text
 ```
 
-This read-only command prints JSON with the proposed policy, enforcement flag,
-intake pause and retry estimate, local Scholarxiv refill balance and active
-request slots. It never calls a provider or prints credentials, principal ids,
-media or claims; database failures exit nonzero without connection details.
-An unobserved bucket has a null displayed balance. Upstream balances are always
-unknown, and Groq and Voxide explicitly say they are not integrated. No new
-public administration endpoint is exposed.
+The read-only command reports the policy, enforcement flag, whether intake is
+paused, by which providers and for about how long, and per provider every limit's
+local remaining units, reserve and recovery time, plus active Scholarxiv request
+slots. Upstream balances are never read: Scholarxiv and Groq lines read
+`unknown (local estimate: N of M ...)` and Voxide reads `unknown (local
+estimate: none; ...)` because its sessions are client-managed (BC-D04). It never
+calls a provider or prints credentials, principal ids, media or claims; database
+failures exit nonzero without connection details. It needs the database
+credential, so it is operator-only; no public administration endpoint is exposed.
 
-This does **not** complete #22: approved limits, Groq audio/retry and fallback
-integration (#20/#25), Voxide session accounting and measured account-wide
-budgets remain pending. Guest creation can obtain another principal allowance;
-these are not per-person abuse controls. The weighted `TokenBucket.acquire(amount)`
-primitive is available for future adapters, not proof that those adapters use it.
-The existing per-input size/duration caps and #77 retention policy are unchanged.
-Tests in `tests/test_quotas.py` cover atomic admission, replay, daily reset, shared
-byte reservations, provider pause, multi-process capacity, waiting for a busy
-request slot, the admission lock against a concurrent capture-stage publish
-and failure cleanup using synthetic data and local PostgreSQL.
-
+Guest creation can obtain another principal allowance; per-principal limits are
+not per-person abuse controls, while the provider budgets are account-wide.
+The local buckets cannot observe other users of the same provider account, which
+is why the defaults keep headroom. The existing per-input size/duration caps and
+#77 retention policy are unchanged. Tests in `tests/test_quotas.py` cover atomic
+admission, replay, daily reset, shared byte reservations, the Scholarxiv, Groq
+speech and Groq fallback pauses with their ETAs, all-or-nothing shared budgets,
+multi-process capacity, waiting for a busy request slot, the admission lock
+against a concurrent capture-stage publish and failure cleanup using synthetic
+data and local PostgreSQL. `tests/recovery/test_claim_extraction.py` checks that
+extraction charges the shared buckets and that a provider 429 pauses intake;
+`tests/test_provider_budgets.py` is database-free.
 ## Security tests (REPO-06, #28)
 
 The RFC section 15 threat-model controls are negative tests in CI:
@@ -1432,7 +1488,7 @@ The RFC section 15 threat-model controls are negative tests in CI:
 | Object authorization | Owner-scoped loaders; other owners get the same 404 as a missing object. | `tests/test_security_authz.py`: every OpenAPI route with a path parameter x {owner, other owner, fresh guest, unauthenticated, unknown credential}; a new object route without a case fails the test. Every non-public route requires a credential; lists and voice actions never reveal another owner's objects. |
 | Prompt injection | Content is data in every prompt; no tools; replies are schema-checked; citations validated before publish; credential-shaped text in a rationale is redacted. | `tests/test_security_prompt_injection.py` runs `evaluation/adversarial/prompt-injection.json` (database-free). |
 | Media intake limits | Declared and streamed byte limits, raw (never decoded) bodies, hash verification, multipart limits, worker byte re-check. `MEDIA_INVALID` from a codec stage is **blocked by #20** and skipped with that reason. | `tests/test_security_media.py` |
-| Quota abuse | Opt-in #22 quotas, policy unchanged. | `tests/test_security_quotas.py`: N+1 concurrent checks, oversize and racing uploads, idempotency replay storms for investigations, reanalyses and captures with exactly one record and one charge. |
+| Quota abuse | Opt-in #22 quotas (BC-D06, accepted in part). | `tests/test_security_quotas.py`: N+1 concurrent checks, oversize and racing uploads, idempotency replay storms for investigations, reanalyses and captures with exactly one record and one charge. |
 | Safe errors | `services/api/errors.py`; validation messages name paths, never unknown client keys. | `tests/test_security_errors.py` drives crashes, database and timeout failures, framework errors and hostile validation input; its `assert_safe_error` (no traceback, internal host, prompt or credential) is applied to every error the other security tests provoke. |
 
 ```sh
@@ -1577,6 +1633,17 @@ version/configuration, then removes only its own worktree. It does not mutate
 your checkout, contact providers or trust a stale/missing artifact as a baseline.
 It checks the 2 GiB headroom before measurement and before installing baseline
 dependencies; baseline caches can remain in uv's cache.
+
+In CI a passing `main` push also saves its own `coverage.json`/`coverage.xml` and a
+`baseline.json` identity (commit, coverage version, hash of `[tool.coverage]`) to the
+Actions cache as `backend-coverage-main-<sha>` (`--save-baseline`). A later run
+restores only the exact key for its baseline commit and passes it with
+`--cached-baseline`; the runner uses it only when the identity matches and the report
+lists exactly that commit's `backend/services/**/*.py`, and then skips the second
+suite. A missing, mismatched or invalid cache prints a `::warning::` and falls back
+to remeasuring main as above, so it never becomes a pass. `summary.md` and
+`comparison.json` (`baseline_source`) say which baseline was used. Validate backend
+has a 40-minute timeout for that fallback.
 
 The overall line-coverage regression limit is a drop of **at most 1 percentage
 point**, calculated from exact counts without rounding. If main genuinely has

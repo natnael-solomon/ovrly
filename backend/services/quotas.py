@@ -13,7 +13,7 @@ from services.api.auth.dependency import lock_active_principal
 from services.api.errors import ApiError
 from services.jobs.models import FENCE_STAGES, jobs
 from services.models import capture_sessions, quota_usage
-from services.providers.budget import TokenBucket
+from services.provider_budgets import provider_statuses
 from services.settings import Settings
 
 
@@ -36,19 +36,21 @@ def exhausted(code: str, message: str, seconds: float) -> ApiError:
 
 
 async def provider_gate(connection: AsyncConnection, config: Settings) -> None:
-    if not config.quotas_enabled or config.scholarxiv_api_key is None:
+    """Global stop: pause new intake while any configured provider budget is near exhaustion.
+
+    The delay is the longest refill (or provider ``Retry-After``) back to the reserve among
+    the paused providers; accepted work can consume units meanwhile, so it is an estimate.
+    """
+    if not config.quotas_enabled:
         return
-    balance = await TokenBucket.balance(
-        connection, "scholarxiv", config.scholarxiv_requests_per_hour
-    )
-    if balance < config.quota_provider_reserve:
-        wait = (
-            (config.quota_provider_reserve - balance) * 3600 / config.scholarxiv_requests_per_hour
-        )
+    paused = [
+        status for status in await provider_statuses(connection, config) if status.pauses_intake
+    ]
+    if paused:
         raise exhausted(
             "PROVIDER_QUOTA_EXHAUSTED",
             "New checks are paused while the shared provider budget recovers",
-            wait,
+            max(status.retry_after_seconds for status in paused),
         )
 
 

@@ -319,6 +319,8 @@ provider_buckets = Table(
     Column("name", String(64), primary_key=True),
     Column("tokens", Float, nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+    # A provider Retry-After pause that keeps the balance (migration 0018).
+    Column("held_until", DateTime(timezone=True)),
 )
 
 asr_requests = Table(
