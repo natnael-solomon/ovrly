@@ -285,6 +285,13 @@
 
 ### Changed
 
+- Tagged demo releases (REPO-07, #17): a pushed `v*` tag runs the **Release** workflow,
+  which checks the changelog version, date and known limitations, builds the release APK
+  twice and compares the builds, writes CycloneDX SBOMs for Android and the backend,
+  attests build provenance and, after owner approval, signs with a demo key (or a
+  throwaway debug key when none is configured). Nothing is published automatically. See
+  [release signing](docs/release-signing.md#tagged-demo-releases).
+
 - Evaluation contract v2 requires exactly one occurrence pass and one final adjudication per clip, without a second annotator. Explicit provenance replaces mandatory blind-human attestations; original-occurrence traceability, rights, scenario coverage and split-isolation safeguards remain. Version-1 snapshots require explicit migration, not silent relabeling.
 - Added manual Telegram APK distribution: an exact merged `main` commit builds without credentials, then signs and delivers after owner approval. An immutable ledger supplies version codes; redelivery resends the current issued bytes. Release builds use R8 and resource shrinking. See [release signing](docs/release-signing.md).
 - Reserved Instrument Serif for editorial report/gallery headings and the text-based wordmark. Functional headings, including capture dialogs and demo claims, use Lexend without changing type sizes.
