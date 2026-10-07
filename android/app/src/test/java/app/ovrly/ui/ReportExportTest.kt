@@ -3,12 +3,12 @@ package app.ovrly.ui
 import app.ovrly.contract.ContractFixtures
 import app.ovrly.contract.Investigation
 import app.ovrly.contract.InvestigationCodec
+import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.ZoneOffset
 
 /** The on-device report export (AN-11, #39; decision 0003) from the shared result fixtures. */
 class ReportExportTest {
@@ -19,10 +19,8 @@ class ReportExportTest {
             .investigationPayload()
     )
 
-    private fun export(
-        view: ReportView,
-        retrievedAt: Long? = retrieved
-    ): ReportExport = reportExport(OpenReport(view, retrievedAt = retrievedAt), ZoneOffset.UTC)!!
+    private fun export(view: ReportView, retrievedAt: Long? = retrieved): ReportExport =
+        reportExport(OpenReport(view, retrievedAt = retrievedAt), ZoneOffset.UTC)!!
 
     @Test
     fun aCompleteReportCarriesClaimsSourcesVersionAndDates() {

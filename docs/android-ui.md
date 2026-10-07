@@ -14,7 +14,7 @@ The compact overlay's live results panel, Stop choice and "Show live results" bu
 
 ## Report export and accessibility
 
-The Report screen's share action and its TalkBack, touch-target and text-size rules (#39) are in the [Android README](../android/README.md#export-and-accessibility-an-11-39). Spoken forms of compact text (claim times, the recording timer) live in `ui/ReportLabels.kt` and `ui/Accessibility.kt`; use them instead of a `contentDescription` on a child of a merged node, which would replace the merged text for TalkBack.
+The Report screen's share action and its TalkBack, touch-target and text-size rules (#39) are in the [Android README](../android/README.md#export-and-accessibility-an-11-39). Spoken forms of compact text (claim times, the recording timer) live in `ui/Accessibility.kt`; use them instead of a `contentDescription` on a child of a merged node, which would replace the merged text for TalkBack.
 
 ## App icon
 

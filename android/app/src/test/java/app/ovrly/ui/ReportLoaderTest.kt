@@ -159,26 +159,25 @@ class ReportLoaderTest {
     }
 
     @Test
-    fun theRetrievalTimeIsWhenThisDeviceStoredOrFirstReadTheShownVersion() =
-        withServer { server ->
-            server.credentials.write("synthetic-token-1")
-            server.json(200, versionList())
-            server.json(200, versionOne())
-            var now = 5_000L
-            val loader = ReportLoader(
-                ChecksService(server.services()),
-                retrieved = { 1_000L },
-                clock = { now }
-            ) { false }
-            val complete = fixture("complete")
-            val latest = runBlocking { loader.load(complete, null, emptyList()) }
-            assertEquals("the stored read of the latest version", 1_000L, latest.retrievedAt)
-            val earlier = runBlocking { loader.load(complete, 1, emptyList()) }
-            assertEquals("an earlier version: when it was first read", 5_000L, earlier.retrievedAt)
-            now = 9_000L
-            val again = runBlocking { loader.load(complete, 1, emptyList()) }
-            assertEquals(5_000L, again.retrievedAt)
-        }
+    fun theRetrievalTimeIsWhenTheShownVersionWasStoredOrFirstRead() = withServer { server ->
+        server.credentials.write("synthetic-token-1")
+        server.json(200, versionList())
+        server.json(200, versionOne())
+        var now = 5_000L
+        val loader = ReportLoader(
+            ChecksService(server.services()),
+            retrieved = { 1_000L },
+            clock = { now }
+        ) { false }
+        val complete = fixture("complete")
+        val latest = runBlocking { loader.load(complete, null, emptyList()) }
+        assertEquals("the stored read of the latest version", 1_000L, latest.retrievedAt)
+        val earlier = runBlocking { loader.load(complete, 1, emptyList()) }
+        assertEquals("an earlier version: when it was first read", 5_000L, earlier.retrievedAt)
+        now = 9_000L
+        val again = runBlocking { loader.load(complete, 1, emptyList()) }
+        assertEquals(5_000L, again.retrievedAt)
+    }
 
     @Test
     fun theRetrievalTimeFallsBackToNowAndComesFromTheStore() = withServer { server ->

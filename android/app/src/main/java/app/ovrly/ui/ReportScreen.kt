@@ -111,11 +111,7 @@ private class ReportActions(
 )
 
 @Composable
-private fun ReportList(
-    report: OpenReport,
-    actions: ReportActions,
-    modifier: Modifier = Modifier
-) {
+private fun ReportList(report: OpenReport, actions: ReportActions, modifier: Modifier = Modifier) {
     val onCommand = actions.onCommand
     val view = report.view
     var expanded by rememberSaveable(view.investigationId) {
