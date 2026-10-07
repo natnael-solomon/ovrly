@@ -38,7 +38,7 @@ chat, workflow logs or the APK.
 | `PORT` | Provided by the host | Do not set `OVRLY_API_PORT`; it only configures the development helper |
 | `OVRLY_EMBED_WORKER` | `1` | Readiness fails with reason `worker` if the worker stops |
 | `OVRLY_RETENTION_ENABLED` | `1` | Proposed [BC-D06](../decisions/BC-D06-retention.md) demo policy: every guest workspace, including uploads, is deleted 24 hours after the guest was created |
-| `OVRLY_QUOTAS_ENABLED` | `1` | Proposed BC-D06 admission limits (6 checks per guest per UTC day, 2 active, 256 MiB uploads); see the [backend README](../../backend/README.md#opt-in-admission-quotas-22) |
+| `OVRLY_QUOTAS_ENABLED` | `1` | BC-D06 admission limits, accepted in part (6 checks per guest per UTC day, 2 active; 256 MiB uploads is still an assumption) and the global provider stop; see the [backend README](../../backend/README.md#opt-in-admission-quotas-22) |
 | `OVRLY_SCHOLARXIV_API_KEY` | Secret, `sxv_...` | Needed by claim extraction, reconciliation and the evidence stages; without it they fail visibly (`EXTRACTION_UNAVAILABLE`, `EvidenceUnavailable`). Never logged |
 | Groq speech settings | See the [backend README](../../backend/README.md#hosted-uploaded-speech) | Speech is on by default; without its key, model, account label and verified limits it reports `provider_unavailable` |
 | Extraction and reconciliation pools | See the [backend README](../../backend/README.md#main-flow-127) | On by default; set the verified model pools and route flags to produce reports |

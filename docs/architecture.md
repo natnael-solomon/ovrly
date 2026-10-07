@@ -208,24 +208,29 @@ Hosted model weights stay with the provider. Credentials stay on the server; pro
 
 ## Opt-in backend admission budgets
 
-`services/quotas.py` applies the proposed #22 daily checks/upload reservations
+`services/quotas.py` applies the BC-D06 (#22) daily checks/upload reservations
 and active-check admission limits in the API's existing transactions, serialized
 by principal before owned-object locks. The principal admission lock is
 `FOR NO KEY UPDATE`, so it never blocks a worker's foreign-key insert of a
 principal-owned job; the lock order is principal, owned objects, reanalysis
 request, jobs. `quota_usage` retains one UTC-day row
 per principal; deletion of content does not refund it. Existing replays and
-accepted chunk retries do not spend quota again. The same gate pauses new intake
-when the configured Scholarxiv local bucket is below its reserve.
-`services/providers/budget.py` reuses the shared bucket and adds expiring,
-lease-fenced `provider_slots` for opt-in outbound concurrency; a busy slot or an
+accepted chunk retries do not spend quota again. The same gate is the global stop:
+`services/provider_budgets.py` pauses new intake while any configured provider
+is near exhaustion (the Scholarxiv bucket, the Groq speech `asr_requests`
+windows or the Groq fallback `groq_llm:*` buckets) and derives `Retry-After`
+from refill, reservation age-out or a provider hold.
+`services/providers/budget.py` reuses the shared bucket, adds a per-bucket
+period, all-or-nothing `SharedBudget` charges and expiring, lease-fenced
+`provider_slots` for opt-in outbound concurrency; a busy slot or an
 empty bucket is waited for with jittered backoff up to the bucket's maximum wait
 before the stage is rescheduled, and no connection is
-held while waiting or over the network. Papers, Router and feedback all use that path.
-`services/quota_summary.py` is an operator-only read command, not an API endpoint
-or provider dashboard. Groq/Voxide and the missing stage integrations remain
-explicitly unintegrated. See the [backend quota setup](../backend/README.md#opt-in-admission-quotas-22)
-and the proposed [BC-D06 policy](decisions/BC-D06-retention.md).
+held while waiting or over the network. Papers, Router and feedback all use that path;
+with quotas on, extraction and reconciliation take their provider units before
+recording each request. `services/quota_summary.py` is an operator-only read
+command, not an API endpoint or provider dashboard; upstream balances are reported
+as unknown with a local estimate. See the [backend quota setup](../backend/README.md#opt-in-admission-quotas-22)
+and the [BC-D06 policy](decisions/BC-D06-retention.md#admission-and-provider-budgets-22).
 
 ## Evaluation-data boundary
 

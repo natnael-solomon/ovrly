@@ -13,6 +13,25 @@
   responses runs in **Backend recovery**. The live capture status no longer says
   research is not connected when a server is configured.
 
+- Backend CI reuses main's cached coverage baseline (#125): a passing `main` push
+  caches its coverage report by commit, and PRs compare against that exact report
+  instead of rerunning main's suite. A missing or mismatched cache warns and
+  remeasures main as before. Validate backend's timeout rises from 25 to 40 minutes.
+
+- Shared provider budgets and the global intake stop (BE-12, #22): BC-D06 now
+  records limits derived from the cited Scholarxiv and Groq Free plans, accepted
+  on 7 October 2026 where a source backs them (6 daily and 2 active checks per
+  principal, 5 claims per run); the byte cap, Scholarxiv concurrency, headroom
+  and reserves stay dashboard assumptions. With `OVRLY_QUOTAS_ENABLED=1`,
+  extraction and reconciliation take account-wide Scholarxiv units, and the Groq
+  fallback takes minute/day request and token buckets, before each request; a
+  provider 429 holds the shared buckets for its `Retry-After` without draining
+  their balance (migration `0018_provider_bucket_holds`). New intake pauses with
+  `PROVIDER_QUOTA_EXHAUSTED` and a `Retry-After` estimate when any configured
+  provider (Scholarxiv, Groq speech windows, Groq fallback) is near exhaustion.
+  `python -m services.quota_summary [--text]` reports every provider's local
+  estimate and shows upstream balances, including Voxide, as unknown.
+
 - Quote-grounded extraction prompt (BE-08, #25): `claim-window-v2` asks hosted
   models to quote source text verbatim, and the backend resolves quotes to
   character spans. The single extraction or reconciliation repair now states a
