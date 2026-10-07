@@ -51,7 +51,7 @@ class ClaimInterpretationTest {
 
     @Test
     fun directlyBuiltInterpretationsRoundTripThroughTheWireShape() {
-        val factual = interpretation(
+        val factual = valid.copy(
             attributedTo = "Synthetic speaker",
             uncertaintyFlags = listOf(ClaimUncertainty.MISSING_CONTEXT)
         )
@@ -66,13 +66,13 @@ class ClaimInterpretationTest {
             factual,
             Json.decodeFromString<ClaimInterpretation>(Json.encodeToString(factual))
         )
-        val quoted = interpretation(
+        val quoted = valid.copy(
             speakerCommitment = SpeakerCommitment.UNCOMMITTED,
             eligibilityReason = EligibilityReason.QUOTED_NOT_ENDORSED,
             uncertaintyFlags = listOf(ClaimUncertainty.UNKNOWN, ClaimUncertainty.UNKNOWN)
         )
         assertEquals(EligibilityReason.QUOTED_NOT_ENDORSED, quoted.eligibilityReason)
-        val premise = interpretation(eligibilityReason = EligibilityReason.FACTUAL_PREMISE)
+        val premise = valid.copy(eligibilityReason = EligibilityReason.FACTUAL_PREMISE)
         assertEquals(ClaimTaxonomy.EMPIRICAL, premise.taxonomy)
     }
 
@@ -82,46 +82,38 @@ class ClaimInterpretationTest {
             { ClaimSourceRef(" ", 0, 1) },
             { ClaimSourceRef("speech-1", -1, 1) },
             { ClaimSourceRef("speech-1", 2, 2) },
-            { interpretation(sourceRefs = emptyList()) },
-            { interpretation(attributedTo = " ") },
+            { valid.copy(sourceRefs = emptyList()) },
+            { valid.copy(attributedTo = " ") },
             {
-                interpretation(
+                valid.copy(
                     uncertaintyFlags = listOf(
                         ClaimUncertainty.MISSING_CONTEXT,
                         ClaimUncertainty.MISSING_CONTEXT
                     )
                 )
             },
-            { interpretation(taxonomy = ClaimTaxonomy.NORMATIVE) },
-            { interpretation(assertionMode = AssertionMode.QUESTIONED) },
+            { valid.copy(taxonomy = ClaimTaxonomy.NORMATIVE) },
+            { valid.copy(assertionMode = AssertionMode.QUESTIONED) },
             {
-                interpretation(
+                valid.copy(
                     eligibilityReason = EligibilityReason.FACTUAL_PREMISE,
                     assertionMode = AssertionMode.HYPOTHETICAL
                 )
             },
-            { interpretation(eligibilityReason = EligibilityReason.QUOTED_NOT_ENDORSED) }
+            { valid.copy(eligibilityReason = EligibilityReason.QUOTED_NOT_ENDORSED) }
         ).forEach { build ->
             assertThrows(IllegalArgumentException::class.java) { build() }
         }
     }
 
-    private fun interpretation(
-        taxonomy: ClaimTaxonomy = ClaimTaxonomy.EMPIRICAL,
-        sourceRefs: List<ClaimSourceRef> = listOf(reference),
-        assertionMode: AssertionMode = AssertionMode.ASSERTED,
-        speakerCommitment: SpeakerCommitment = SpeakerCommitment.ENDORSED,
-        attributedTo: String? = null,
-        eligibilityReason: EligibilityReason = EligibilityReason.FACTUAL_CLAIM,
-        uncertaintyFlags: List<ClaimUncertainty> = emptyList()
-    ) = ClaimInterpretation(
-        taxonomy = taxonomy,
-        sourceRefs = sourceRefs,
+    private val valid = ClaimInterpretation(
+        taxonomy = ClaimTaxonomy.EMPIRICAL,
+        sourceRefs = listOf(reference),
         contextRefs = listOf(reference),
-        assertionMode = assertionMode,
-        speakerCommitment = speakerCommitment,
-        attributedTo = attributedTo,
-        eligibilityReason = eligibilityReason,
-        uncertaintyFlags = uncertaintyFlags
+        assertionMode = AssertionMode.ASSERTED,
+        speakerCommitment = SpeakerCommitment.ENDORSED,
+        attributedTo = null,
+        eligibilityReason = EligibilityReason.FACTUAL_CLAIM,
+        uncertaintyFlags = emptyList()
     )
 }

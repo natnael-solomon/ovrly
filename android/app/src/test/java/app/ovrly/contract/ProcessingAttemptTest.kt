@@ -41,7 +41,7 @@ class ProcessingAttemptTest {
 
     @Test
     fun directlyBuiltProvenanceKeepsEveryFieldAndRejectsInvalidValues() {
-        val value = attempt()
+        val value = built
         assertEquals("scholarxiv", value.provider)
         assertEquals("synthetic-free", value.model)
         assertEquals("decision-1", value.decisionId)
@@ -56,33 +56,26 @@ class ProcessingAttemptTest {
         assertNull(value.feedback)
         assertEquals(value, Json.decodeFromString<ProcessingAttempt>(Json.encodeToString(value)))
         listOf(
-            { attempt(provider = " ") },
-            { attempt(task = "") },
-            { attempt(outcome = " ") },
-            { attempt(promptTokens = -1) },
-            { attempt(completionTokens = -1) },
-            { attempt(totalTokens = -1) }
+            { built.copy(provider = " ") },
+            { built.copy(task = "") },
+            { built.copy(outcome = " ") },
+            { built.copy(promptTokens = -1) },
+            { built.copy(completionTokens = -1) },
+            { built.copy(totalTokens = -1) }
         ).forEach { build ->
             assertThrows(IllegalArgumentException::class.java) { build() }
         }
     }
 
-    private fun attempt(
-        provider: String = "scholarxiv",
-        task: String = "claim_extraction",
-        outcome: String = "valid",
-        promptTokens: Int? = 10,
-        completionTokens: Int? = 5,
-        totalTokens: Int? = 15
-    ) = ProcessingAttempt(
-        provider = provider,
+    private val built = ProcessingAttempt(
+        provider = "scholarxiv",
         model = "synthetic-free",
         decisionId = "decision-1",
-        task = task,
-        outcome = outcome,
-        promptTokens = promptTokens,
-        completionTokens = completionTokens,
-        totalTokens = totalTokens,
+        task = "claim_extraction",
+        outcome = "valid",
+        promptTokens = 10,
+        completionTokens = 5,
+        totalTokens = 15,
         thinkingLeaked = false,
         fenced = true,
         repair = true,

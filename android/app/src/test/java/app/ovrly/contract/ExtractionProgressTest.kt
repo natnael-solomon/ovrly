@@ -53,7 +53,7 @@ class ExtractionProgressTest {
 
     @Test
     fun directlyBuiltProgressKeepsEveryCounterAndCoverageState() {
-        val value = progress()
+        val value = built
         assertTrue(value.closed)
         assertEquals(1, value.requestsUsed)
         assertEquals(5954, value.tokensReserved)
@@ -79,12 +79,12 @@ class ExtractionProgressTest {
         listOf(
             { observation(startMs = -1) },
             { observation(endMs = 0) },
-            { progress(requestsUsed = -1) },
-            { progress(tokensReserved = -1) },
-            { progress(maxRequests = 0) },
-            { progress(maxTokens = 0) },
-            { progress(reconciliationRequests = 0) },
-            { progress(reconciliationTokens = 0) }
+            { built.copy(requestsUsed = -1) },
+            { built.copy(tokensReserved = -1) },
+            { built.copy(maxRequests = 0) },
+            { built.copy(maxTokens = 0) },
+            { built.copy(reconciliationRequests = 0) },
+            { built.copy(reconciliationTokens = 0) }
         ).forEach { build ->
             assertThrows(IllegalArgumentException::class.java) { build() }
         }
@@ -99,21 +99,14 @@ class ExtractionProgressTest {
         reason = null
     )
 
-    private fun progress(
-        requestsUsed: Int = 1,
-        tokensReserved: Int = 5954,
-        maxRequests: Int = 2,
-        maxTokens: Int = 200000,
-        reconciliationRequests: Int = 1,
-        reconciliationTokens: Int = 20000
-    ) = ExtractionProgress(
+    private val built = ExtractionProgress(
         closed = true,
-        requestsUsed = requestsUsed,
-        tokensReserved = tokensReserved,
-        maxRequests = maxRequests,
-        maxTokens = maxTokens,
-        reconciliationRequests = reconciliationRequests,
-        reconciliationTokens = reconciliationTokens,
+        requestsUsed = 1,
+        tokensReserved = 5954,
+        maxRequests = 2,
+        maxTokens = 200000,
+        reconciliationRequests = 1,
+        reconciliationTokens = 20000,
         observations = listOf(observation())
     )
 }
