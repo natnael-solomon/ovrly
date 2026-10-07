@@ -115,18 +115,24 @@ internal fun LiveOverlay(
         modifier = modifier,
         contentAlignment = Alignment.TopStart,
         transitionSpec = {
-            // Forms grow from and shrink into the pill's corner, where the window stays. One
-            // eased tween drives size and scale: springs settle in tiny steps, and each step
-            // relays out the overlay window, which showed as jitter at the end.
+            // Forms grow from and shrink into the pill's corner, where the window stays. Only
+            // scale and fade animate (drawn on the GPU); the size never animates, because each
+            // size step relays out the overlay window, which showed as jitter on the phone.
+            // Growing takes the new size at once; shrinking keeps the old size until the exit
+            // has faded, then takes the new one.
             if (frame.animate) {
                 val corner = TransformOrigin(0f, 0f)
                 val enter = fadeIn(tween(FORM_MS, delayMillis = FORM_MS / 3)) +
                     scaleIn(tween(FORM_MS, easing = FastOutSlowInEasing), FORM_START_SCALE, corner)
-                val exit = fadeOut(tween(FORM_MS / 2)) +
-                    scaleOut(tween(FORM_MS / 2), FORM_END_SCALE, corner)
+                val exit = fadeOut(tween(FORM_EXIT_MS)) +
+                    scaleOut(tween(FORM_EXIT_MS), FORM_END_SCALE, corner)
                 (enter togetherWith exit).using(
-                    SizeTransform(clip = false) { _, _ ->
-                        tween(FORM_MS, easing = FastOutSlowInEasing)
+                    SizeTransform(clip = false) { initial, target ->
+                        if (target.width * target.height >= initial.width * initial.height) {
+                            snap()
+                        } else {
+                            snap(delayMillis = FORM_EXIT_MS)
+                        }
                     }
                 )
             } else {
@@ -431,6 +437,7 @@ internal const val BUBBLE_DP = 64
 private const val BUBBLE_INSET_DP = 4
 
 private const val FORM_MS = 220
+private const val FORM_EXIT_MS = FORM_MS / 2
 private const val FORM_START_SCALE = 0.85f
 private const val FORM_END_SCALE = 0.92f
 private const val PULSE_MS = 220
