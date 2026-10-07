@@ -119,7 +119,7 @@ data class UploadProgress(
 data class CaptureState(
     val phase: CapturePhase = CapturePhase.IDLE,
     val seconds: Int = 0,
-    val message: String = "No capture yet. Research is not connected.",
+    val message: String = "No capture yet.",
     val bytes: Long = 0,
     val frames: Int = 0,
     val playbackSignal: Boolean = false,

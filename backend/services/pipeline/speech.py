@@ -99,6 +99,7 @@ def build_speech(
         owner = _identifier(job.payload, "owner_id")
         if (
             not settings.asr_enabled
+            or not settings.asr_configured
             or job.key != speech_stage_key(identifier)
             or job.payload.get("settings_sha256") != speech_settings_hash(settings)
         ):

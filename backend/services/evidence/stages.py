@@ -20,7 +20,7 @@ from datetime import timedelta
 from typing import Any, Final, Literal
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, SecretStr, ValidationError
 from sqlalchemy import Row, func, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -62,6 +62,10 @@ SCHOLARXIV_BUCKET: Final = "scholarxiv"
 MAX_EXPANSION_POLLS: Final = 12
 Depth = Literal["standard", "deeper"]
 logger = logging.getLogger(__name__)
+
+
+class EvidenceUnavailable(NonRetriableInput):
+    """The server Scholarxiv credential is missing; the job fails with this typed reason."""
 
 
 class StagePayload(BaseModel):
@@ -295,9 +299,7 @@ class EvidenceStages:
         )
 
     def _clients(self, client: httpx.AsyncClient) -> tuple[RouterClient, PapersClient]:
-        key = self.settings.scholarxiv_api_key
-        if key is None:
-            raise NonRetriableInput("evidence stages need OVRLY_SCHOLARXIV_API_KEY")
+        key = self._key()
         bucket = TokenBucket(
             self.database,
             SCHOLARXIV_BUCKET,
@@ -315,7 +317,14 @@ class EvidenceStages:
             ),
         )
 
+    def _key(self) -> SecretStr:
+        key = self.settings.scholarxiv_api_key
+        if key is None or not key.get_secret_value().strip():
+            raise EvidenceUnavailable("evidence stages need OVRLY_SCHOLARXIV_API_KEY")
+        return key
+
     async def retrieval(self, job: ClaimedJob, context: JobContext) -> dict[str, Any]:
+        self._key()
         return await with_heartbeat(context, self._retrieval(_payload(job), context))
 
     async def _retrieval(self, payload: StagePayload, context: JobContext) -> dict[str, Any]:
@@ -388,6 +397,7 @@ class EvidenceStages:
         ).model_dump(mode="json")
 
     async def assessment(self, job: ClaimedJob, context: JobContext) -> dict[str, Any]:
+        self._key()
         payload = _payload(job)
         if payload.retrieval_job_id is None:
             raise NonRetriableInput("assessment payload names no retrieval job")
@@ -586,7 +596,19 @@ def merged_version(
             )
             evidence.extend(outcome.evidence)
         assessed = {a.claim_id for a in assessments}
-        provisional = capture_open or any(c.id not in assessed for c in base.claims)
+        attempted = {outcome.claim_id for outcome in outcomes}
+        # Superseded appearances are never assessed (#127). A claim this run tried but could
+        # not assess (budget, provider gaps) stays visible as unassessed with its reason in
+        # the summary; only a claim still waiting for an evidence run keeps it provisional.
+        waiting = [
+            c
+            for c in base.claims
+            if c.superseded_by_occurrence_id is None
+            and c.id not in assessed
+            and c.id not in attempted
+            and base.provisional
+        ]
+        provisional = capture_open or bool(waiting)
         done = sum(1 for o in outcomes if o.assessment is not None)
         summary = (
             f"Evidence check{' (deeper search)' if depth == 'deeper' else ''}: "

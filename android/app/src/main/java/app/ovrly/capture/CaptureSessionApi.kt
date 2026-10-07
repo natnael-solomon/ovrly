@@ -137,6 +137,19 @@ internal object CaptureApis {
         created ?: create(context.applicationContext).also { created = it }
     }
 
+    /**
+     * Why captured chunks cannot reach research, or null when they go to the ovrly service.
+     * Only the labelled in-memory server and a build without a usable service are offline.
+     */
+    fun researchOffline(context: Context): String? = when {
+        isTestServer -> "Research is not connected: chunks go to the in-memory test server."
+
+        ApiServices.get(context) == null ->
+            "Research is not connected: this build has no ovrly service configured."
+
+        else -> null
+    }
+
     /** Replaces the API for tests; pass null to restore the default. */
     fun replace(api: CaptureSessionApi?) {
         override = api

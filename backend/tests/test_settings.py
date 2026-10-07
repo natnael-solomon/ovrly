@@ -130,3 +130,37 @@ def test_retention_defaults_are_opt_in_and_bounds_are_inclusive():
         assert settings.retention_tombstone_seconds == tombstone
         assert settings.retention_poll_seconds == poll
         assert settings.retention_batch_size == batch
+
+
+STAGES = ("OVRLY_ASR_ENABLED", "OVRLY_EXTRACTION_ENABLED", "OVRLY_RECONCILIATION_ENABLED")
+
+
+def test_main_flow_stages_default_on_and_report_missing_configuration(monkeypatch):
+    for name in STAGES:
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings(database_url=URL, _env_file=None)
+    assert settings.asr_enabled and settings.extraction_enabled and settings.reconciliation_enabled
+    # Unconfigured defaults start, then fail visibly per job instead of skipping.
+    assert not settings.asr_configured
+    assert not settings.extraction_configured
+    assert not settings.reconciliation_configured
+
+
+@pytest.mark.parametrize("field", ["asr_enabled", "extraction_enabled", "reconciliation_enabled"])
+def test_explicit_opt_in_must_be_complete(monkeypatch, field):
+    for name in STAGES:
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(ValidationError):
+        Settings(database_url=URL, _env_file=None, **{field: True})
+    monkeypatch.setenv("OVRLY_" + field.upper(), "1")
+    with pytest.raises(ValidationError):
+        Settings(database_url=URL, _env_file=None)
+
+
+def test_development_stub_replaces_default_research_stages(monkeypatch):
+    for name in STAGES:
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings(database_url=URL, _env_file=None, stub_reports=True)
+    assert not settings.extraction_enabled and not settings.reconciliation_enabled
+    with pytest.raises(ValidationError):
+        Settings(database_url=URL, _env_file=None, stub_reports=True, extraction_enabled=True)

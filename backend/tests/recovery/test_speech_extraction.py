@@ -6,6 +6,7 @@ import uuid
 
 import httpx
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import func, select
 
 from recovery.test_capture_processing import finish, guest, package, send, start
@@ -188,7 +189,9 @@ async def test_failed_extraction_never_repeats_hosted_speech(harness, tmp_path):
 
 async def test_unavailable_speech_admits_nothing_and_keeps_its_gap(harness, tmp_path):
     config = speech_settings(harness, tmp_path, text_grace_seconds=0, asr_enabled=False)
-    config = config.model_copy(update=EXTRACTION)
+    # model_copy skips validation, so the secret is wrapped as Settings would wrap it.
+    key = SecretStr(EXTRACTION["scholarxiv_api_key"])
+    config = config.model_copy(update={**EXTRACTION, "scholarxiv_api_key": key})
     pipeline = Pipeline(harness, config, grounded)
     app = create_app(config)
     async with (

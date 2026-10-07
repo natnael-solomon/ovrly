@@ -72,7 +72,7 @@ class CompanionViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 withContext(Dispatchers.IO) { CaptureFiles(getApplication()).delete() }
                 CaptureStore.set(
-                    CaptureState(message = "Local capture deleted. Research is not connected.")
+                    CaptureState(message = "Local capture deleted.")
                 )
             } catch (error: IOException) {
                 storageError(error)
@@ -93,8 +93,7 @@ class CompanionViewModel(application: Application) : AndroidViewModel(applicatio
                 if (deleted) {
                     CaptureStore.set(
                         CaptureState(
-                            message = "Expired or interrupted local capture was deleted. " +
-                                "Research is not connected."
+                            message = "Expired or interrupted local capture was deleted."
                         )
                     )
                 }

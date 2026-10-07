@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from services.api.auth import Principal, load_owned, lock_active_principal
 from services.api.schemas import JobSummary, ReportVersion, SavedReport
+from services.jobs.models import jobs
 from services.models import investigations, report_versions, saved_reports
 
 
@@ -258,3 +259,32 @@ async def unsave_owned_report(
     )
     if removed.rowcount == 0:
         await load_owned(connection, report_versions, report_id, principal)
+
+
+EVIDENCE_STAGES = ("retrieval", "assessment")
+
+
+async def evidence_failure(connection: AsyncConnection, investigation_id: uuid.UUID) -> str | None:
+    """Safe code when the newest main-flow evidence job of an investigation failed terminally.
+
+    Reanalysis requests report their own failures, and a newer queued or running evidence job
+    supersedes an older failure (#127).
+    """
+    from services.api.errors import evidence_failure_code
+
+    newest = (
+        await connection.execute(
+            select(jobs.c.state, jobs.c.failure)
+            .where(
+                jobs.c.stage.in_(EVIDENCE_STAGES),
+                jobs.c.payload["investigation_id"].astext == str(investigation_id),
+                jobs.c.payload["reanalysis_request_id"].astext.is_(None),
+                jobs.c.state != "deleted",
+            )
+            .order_by(jobs.c.created_at.desc(), jobs.c.id.desc())
+            .limit(1)
+        )
+    ).first()
+    if newest is None or newest.state != "failed":
+        return None
+    return evidence_failure_code(newest.failure)

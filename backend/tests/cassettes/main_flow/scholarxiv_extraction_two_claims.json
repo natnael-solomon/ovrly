@@ -1,0 +1,15 @@
+{
+  "id": "cmpl_synthetic_extraction_two_claims",
+  "model": "synthetic-cheap-model",
+  "decision_id": "dec_synthetic_extraction_two_claims",
+  "usage": {"prompt_tokens": 410, "completion_tokens": 170, "total_tokens": 580},
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "{\"occurrences\": [{\"proposition\": \"Half of the city's buses are diesel.\", \"taxonomy\": \"empirical\", \"source_refs\": [{\"observation_id\": \"{speech_observation}\", \"start_char\": 0, \"end_char\": 23}], \"context_refs\": [], \"assertion_mode\": \"asserted\", \"speaker_commitment\": \"endorsed\", \"attributed_to\": null, \"eligibility_reason\": \"factual-claim\", \"uncertainty_flags\": []}, {\"proposition\": \"Over half of the city's buses are electric.\", \"taxonomy\": \"empirical\", \"source_refs\": [{\"observation_id\": \"{speech_observation}\", \"start_char\": 24, \"end_char\": 43}], \"context_refs\": [], \"assertion_mode\": \"asserted\", \"speaker_commitment\": \"endorsed\", \"attributed_to\": null, \"eligibility_reason\": \"factual-claim\", \"uncertainty_flags\": []}]}"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}

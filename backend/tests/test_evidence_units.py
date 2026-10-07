@@ -544,8 +544,27 @@ async def test_merged_version_is_citation_valid_and_keeps_out_of_scope_claims():
         False,
         "deeper",
     )(identity(2, fresh.id))
-    assert missed.provisional and "1 retrieval unavailable" in missed.change_summary
+    # Tried but unassessable: final, with the reason kept in the summary (#127).
+    assert not missed.provisional and "1 retrieval unavailable" in missed.change_summary
     assert "(deeper search)" in missed.change_summary
+    waiting = merged_version(fresh, [outcome], {claim.id}, False, "standard")(identity(2, fresh.id))
+    # A claim no evidence run has tried yet keeps the version provisional ...
+    assert waiting.provisional
+    superseded = fresh.model_copy(
+        update={
+            "claims": [
+                c.model_copy(update={"superseded_by_occurrence_id": claim.id})
+                if c.id != claim.id
+                else c
+                for c in fresh.claims
+            ]
+        }
+    )
+    # ... but a superseded appearance never does: its correction carries the assessment.
+    done = merged_version(superseded, [outcome], {claim.id}, False, "standard")(
+        identity(2, fresh.id)
+    )
+    assert not done.provisional
     await client.aclose()
 
 

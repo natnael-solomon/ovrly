@@ -38,7 +38,9 @@ class Settings(BaseSettings):
     media_output_max_bytes: int = Field(default=65536, gt=0, le=1048576)
     # Provisional decimal-byte cap, not evidence of a provider account's entitlement.
     asr_audio_max_bytes: int = Field(default=25000000, gt=44)
-    asr_enabled: bool = False
+    # Main-flow stages default on (#127). Left on without their provider configuration they
+    # report a typed unavailable reason at run time instead of skipping silently.
+    asr_enabled: bool = True
     text_grace_seconds: int = Field(default=60, ge=0, le=3600)
     groq_api_key: SecretStr = SecretStr("")
     # RFC-D27 (decision 0004): turbo first, then large-v3 once after a provider failure.
@@ -72,7 +74,7 @@ class Settings(BaseSettings):
     # for real users; every such report is marked ``fixture: true``.
     stub_reports: bool = False
     # Evidence stages (BE-09, #27). The Scholarxiv key is server-only; without it the
-    # retrieval, assessment and reanalysis stages are not registered and their jobs wait.
+    # retrieval, assessment and reanalysis jobs fail with ``EvidenceUnavailable``.
     scholarxiv_api_key: SecretStr | None = None
     scholarxiv_base_url: str = Field(default="https://www.scholarxiv.com", max_length=200)
     # Papers and Router calls share one account limit (1 200 requests per hour on Free);
@@ -111,7 +113,7 @@ class Settings(BaseSettings):
     groq_llm_requests_per_day: int = Field(default=900, ge=1, le=10000000)
     groq_llm_tokens_per_minute: int = Field(default=7200, ge=1, le=100000000)
     groq_llm_tokens_per_day: int = Field(default=180000, ge=1, le=1000000000)
-    extraction_enabled: bool = False
+    extraction_enabled: bool = True
     extraction_free_routes_verified: bool = False
     extraction_models: list[str] = Field(default_factory=list, max_length=20)
     extraction_max_tokens: int = Field(default=2048, ge=1, le=8192)
@@ -119,7 +121,7 @@ class Settings(BaseSettings):
     extraction_recovery_attempts: int = Field(default=0, ge=0, le=10)
     groq_extraction_enabled: bool = False
     groq_free_route_verified: bool = False
-    reconciliation_enabled: bool = False
+    reconciliation_enabled: bool = True
     reconciliation_free_routes_verified: bool = False
     reconciliation_models: list[str] = Field(default_factory=list, max_length=20)
     # Per-input budget for real speech/text producers; defaults are the measured BE-08 candidate.
@@ -131,18 +133,69 @@ class Settings(BaseSettings):
     extraction_overlap_observations: int = Field(default=1, ge=1, le=32)
     extraction_max_observations: int = Field(default=64, ge=1, le=4096)
 
+    @property
+    def asr_configured(self) -> bool:
+        """Every verified account/model limit hosted speech needs before any call."""
+        return (
+            bool(self.groq_api_key.get_secret_value().strip())
+            and bool(self.groq_model.strip())
+            and bool(self.groq_fallback_model.strip())
+            and self.groq_fallback_model.strip() != self.groq_model.strip()
+            and bool(self.groq_account_id.strip())
+            and self.asr_limits_verified_on is not None
+            and self.asr_requests_per_minute is not None
+            and self.asr_requests_per_day is not None
+            and self.asr_audio_seconds_per_hour is not None
+            and self.asr_audio_seconds_per_day is not None
+            and self.asr_minimum_billable_seconds is not None
+            and "asr_audio_max_bytes" in self.model_fields_set
+        )
+
+    @property
+    def extraction_configured(self) -> bool:
+        """Extraction is on with a verified free model pool and the server credential."""
+        return (
+            self.extraction_enabled
+            and self.extraction_free_routes_verified
+            and bool(self.extraction_models)
+            and all(value.strip() and len(value) <= 200 for value in self.extraction_models)
+            and self.scholarxiv_api_key is not None
+            and bool(self.scholarxiv_api_key.get_secret_value().strip())
+        )
+
+    @property
+    def reconciliation_configured(self) -> bool:
+        """Reconciliation is on with its own verified quality pool on configured extraction."""
+        return (
+            self.reconciliation_enabled
+            and self.extraction_configured
+            and self.reconciliation_free_routes_verified
+            and bool(self.reconciliation_models)
+            and all(value.strip() and len(value) <= 200 for value in self.reconciliation_models)
+        )
+
     @model_validator(mode="after")
     def extraction_gate(self) -> Self:
+        # An explicit opt-in (argument or OVRLY_ variable) must be complete at startup; the
+        # production default may lack its configuration and then fails visibly per job.
+        explicit = set(self.model_fields_set)
         if (
             self.extraction_reserved_requests >= self.extraction_budget_requests
             or self.extraction_reserved_tokens >= self.extraction_budget_tokens
         ):
             raise ValueError("Extraction requires capacity outside the reconciliation reserve")
-        if self.reconciliation_enabled and (
-            not self.extraction_enabled
-            or not self.reconciliation_free_routes_verified
-            or not self.reconciliation_models
-            or any(not value.strip() or len(value) > 200 for value in self.reconciliation_models)
+        if self.stub_reports:
+            if self.extraction_enabled and "extraction_enabled" in explicit:
+                raise ValueError("Real extraction cannot be combined with development stub reports")
+            # The development stub replaces the default-on research stages.
+            self.extraction_enabled = False
+            self.reconciliation_enabled = self.reconciliation_enabled and (
+                "reconciliation_enabled" in explicit
+            )
+        if (
+            self.reconciliation_enabled
+            and "reconciliation_enabled" in explicit
+            and not self.reconciliation_configured
         ):
             raise ValueError("Reconciliation needs its own verified free quality model pool")
         if self.groq_extraction_enabled and (
@@ -151,16 +204,12 @@ class Settings(BaseSettings):
             or not self.groq_api_key.get_secret_value().strip()
         ):
             raise ValueError("Groq extraction needs independent route verification and credential")
-        if self.extraction_enabled and (
-            not self.extraction_free_routes_verified
-            or not self.extraction_models
-            or any(not value.strip() or len(value) > 200 for value in self.extraction_models)
-            or self.scholarxiv_api_key is None
-            or not self.scholarxiv_api_key.get_secret_value().strip()
+        if (
+            self.extraction_enabled
+            and "extraction_enabled" in explicit
+            and not self.extraction_configured
         ):
             raise ValueError("Extraction needs a verified free model pool and server credential")
-        if self.extraction_enabled and self.stub_reports:
-            raise ValueError("Real extraction cannot be combined with development stub reports")
         return self
 
     @model_validator(mode="after")
@@ -176,20 +225,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def hosted_speech_configuration(self) -> Self:
-        if self.asr_enabled and (
-            not self.groq_api_key.get_secret_value().strip()
-            or not self.groq_model.strip()
-            or not self.groq_fallback_model.strip()
-            or self.groq_fallback_model.strip() == self.groq_model.strip()
-            or not self.groq_account_id.strip()
-            or self.asr_limits_verified_on is None
-            or self.asr_requests_per_minute is None
-            or self.asr_requests_per_day is None
-            or self.asr_audio_seconds_per_hour is None
-            or self.asr_audio_seconds_per_day is None
-            or self.asr_minimum_billable_seconds is None
-            or "asr_audio_max_bytes" not in self.model_fields_set
-        ):
+        if self.asr_enabled and "asr_enabled" in self.model_fields_set and not self.asr_configured:
             raise ValueError("Hosted speech requires explicit verified account/model limits")
         return self
 

@@ -311,8 +311,7 @@ internal class CaptureMedia(
     }
 
     companion object {
-        const val LIMIT_REACHED =
-            "Stopped at the 3-minute capture limit. Research is not connected."
+        const val LIMIT_REACHED = "Stopped at the 3-minute capture limit."
         private const val TAG = "OvrlyCapture"
         private const val JPEG_QUALITY = 72
         private const val READ_BUFFER = 3_200

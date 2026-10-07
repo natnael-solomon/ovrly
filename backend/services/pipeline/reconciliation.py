@@ -20,6 +20,7 @@ from services.api.schemas import (
 )
 from services.captures import chunk_jobs
 from services.claims import Reconciliation
+from services.evidence.stages import enqueue_retrieval
 from services.jobs.faults import Checkpoint
 from services.jobs.handlers import CancellationRequested, JobContext, StageResult
 from services.jobs.models import jobs
@@ -466,13 +467,13 @@ class ReconciliationStage:
         ]
 
         async def publish(connection: AsyncConnection) -> None:
-            await connection.execute(
-                select(investigations.c.id)
+            owner = await connection.scalar(
+                select(investigations.c.owner_id)
                 .where(investigations.c.id == identifier)
                 .with_for_update()
             )
             latest = (await latest_reports(connection, [identifier])).get(identifier)
-            if latest is None or latest.id != previous.id:
+            if owner is None or latest is None or latest.id != previous.id:
                 raise PublishRejected(job.id, "reconciliation snapshot was superseded")
 
             def build(identity: NextVersion) -> ReportVersion:
@@ -503,12 +504,32 @@ class ReconciliationStage:
                     }
                 )
 
-            await publish_report_version(connection, identifier, build, fixture=previous.fixture)
+            published = await publish_report_version(
+                connection, identifier, build, fixture=previous.fixture
+            )
             await connection.execute(
                 update(investigations)
                 .where(investigations.c.id == identifier)
                 .values(stage=STAGE, state="running", error_code=None, updated_at=func.now())
             )
+            # BE-09 handoff (#127): every current, unassessed claim of the reconciled version
+            # goes to retrieval in this fenced transaction, so a lost lease or a cancelled
+            # job never leaves orphan evidence work behind.
+            assessed = {item.claim_id for item in published.assessments}
+            pending = [
+                claim.id
+                for claim in published.claims
+                if claim.superseded_by_occurrence_id is None and claim.id not in assessed
+            ]
+            if pending:
+                await enqueue_retrieval(
+                    connection,
+                    context.queue,
+                    investigation_id=identifier,
+                    owner_id=owner,
+                    base_version=published.version,
+                    claim_ids=pending,
+                )
 
         return StageResult({"investigation_id": str(identifier)}, publish)
 

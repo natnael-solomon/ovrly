@@ -45,7 +45,7 @@ from services.pipeline.incremental import extraction_progress
 from services.pipeline.reconciliation import reconciliation_progress
 from services.pipeline.stub_reports import sync_capture_stub
 from services.quotas import charge, lock_owner
-from services.reports import latest_reports
+from services.reports import evidence_failure, latest_reports
 
 router = APIRouter(tags=["captures"])
 
@@ -475,7 +475,13 @@ async def capture_status(
                 )
             )
         reports = await latest_reports(connection, [capture_id])
-        claims, extraction = claim_progress(reports.get(capture_id), session.continue_research)
+        # Evidence failure ends live polling only once the capture is closed (#127).
+        evidence_error = (
+            await evidence_failure(connection, capture_id) if session.state == "closed" else None
+        )
+        claims, extraction = claim_progress(
+            reports.get(capture_id), session.continue_research, evidence_error
+        )
         return CaptureStatus(
             session=session_response(session, chunks, await database_time(connection)),
             continue_research=session.continue_research,

@@ -14,7 +14,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from services.api.auth import CurrentPrincipal, Principal, load_owned, owned_rows
-from services.api.errors import ApiError, extraction_failure_code, safe_error
+from services.api.errors import (
+    ApiError,
+    extraction_failure_code,
+    safe_error,
+)
 from services.api.intake import InvestigationDispatcher
 from services.api.routes.common import engine, settings
 from services.api.schemas import (
@@ -52,7 +56,7 @@ from services.pipeline.intake import (
 from services.pipeline.media_validation import MEDIA_STAGE, media_stage_key
 from services.pipeline.speech import ASR_STAGE, speech_stage_key
 from services.quotas import charge, lock_owner
-from services.reports import latest_reports, summarize_job
+from services.reports import evidence_failure, latest_reports, summarize_job
 
 router = APIRouter(tags=["investigations"])
 
@@ -254,7 +258,7 @@ async def latest_jobs(
             & (jobs.c.owner_id == investigations.c.owner_id),
         )
         .where(
-            jobs.c.stage.in_(["claim_extraction", "reconciliation"]),
+            jobs.c.stage.in_(["claim_extraction", "reconciliation", "retrieval", "assessment"]),
             investigations.c.id.in_(investigation_ids),
         )
     )
@@ -379,6 +383,18 @@ async def read_models(
         for item in models:
             if item.job is not None and item.job.id in by_id:
                 item.error = SafeError.model_validate(safe_error(by_id[item.job.id]))
+    # A terminally failed evidence stage of the main flow ends an upload (#127). Captures keep
+    # their published report (the failed branch carries none) and report the failure per
+    # claim in capture status once closed; reanalysis requests report their own failures.
+    for row, item in zip(rows, models, strict=True):
+        if row.source_kind == "capture" or item.state == "cancelled":
+            continue
+        code = await evidence_failure(connection, item.id)
+        if code is not None:
+            item.state = "failed"
+            item.processing_status = "failed"
+            item.report = None
+            item.error = SafeError.model_validate(safe_error(code))
     return models
 
 

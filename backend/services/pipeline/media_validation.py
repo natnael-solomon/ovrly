@@ -437,7 +437,11 @@ def build_media_validation(settings: Settings) -> JobHandler:
                 source.declared_sha256,
             ),
         )
-        if settings.asr_enabled and result["audio_artifact"] is not None:
+        if (
+            settings.asr_enabled
+            and settings.asr_configured
+            and result["audio_artifact"] is not None
+        ):
             from services.pipeline.speech import speech_settings_hash, speech_stage_key
 
             context.enqueue_after_publish(
@@ -449,9 +453,14 @@ def build_media_validation(settings: Settings) -> JobHandler:
                 },
             )
         else:
+            # Enabled without a configured provider is a visible ASR_UNAVAILABLE gap.
             result["speech"] = {
                 "status": "unavailable",
-                "reason": "no_audio_track" if result["audio_artifact"] is None else "disabled",
+                "reason": "no_audio_track"
+                if result["audio_artifact"] is None
+                else "provider_unavailable"
+                if settings.asr_enabled
+                else "disabled",
             }
         result["text_grace_seconds"] = settings.text_grace_seconds
         return result
