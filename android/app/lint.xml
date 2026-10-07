@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <lint>
-    <!-- No project-wide suppressions. Existing narrow source annotations:
+    <!-- The only project-wide suppressions: these checks query Google Maven and the Gradle
+         service for newly published versions at build time, so an unchanged commit can start
+         failing later (it did on 7 October 2026 when Gradle 9.8.1 was released). Version bumps
+         are deliberate and go through gradle/verification-metadata.xml and review instead. -->
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="NewerVersionAvailable" severity="ignore" />
+    <!-- Existing narrow source annotations:
          MainActivity.hideOverlay: ImplicitSamInstance; stopService matches the component.
          AndroidVoiceAudio.start: MissingPermission; runtime permission checked before capture.
          OverlayService.params: RtlHardcoded; dragging uses physical screen coordinates.

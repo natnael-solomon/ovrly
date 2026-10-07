@@ -34,7 +34,7 @@ through Gradle plugin 14.2.0. It checks application/test Kotlin and Gradle scrip
 Detekt runs source analysis at the root, independent of AGP's variant API; it is
 not type-resolved analysis. Existing findings are recorded in `config/*baseline.xml`,
 not silently fixed or excluded. New findings fail; baseline changes need review.
-`app/lint.xml` documents the existing narrow lint annotations and disables no rules.
+`app/lint.xml` documents the existing narrow lint annotations. It disables only the online "newer version available" checks (`AndroidGradlePluginVersion`, `GradleDependency`, `NewerVersionAvailable`): they query the network at build time, so a fixed commit could start failing when a new version is published. Version bumps are deliberate, through the verification metadata.
 `settings.gradle.kts` pins patched transitive build-tool dependencies; those
 overrides do not apply to the app's runtime dependencies.
 
