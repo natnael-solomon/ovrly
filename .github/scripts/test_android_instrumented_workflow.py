@@ -42,8 +42,8 @@ class InstrumentedWorkflowTest(unittest.TestCase):
         self.assertIn("if: needs.changes.outputs.android == 'true'", matrix)
 
     def test_only_main_writes_caches(self):
-        self.assertIn("cache-read-only: ${{ github.event_name == 'pull_request' || "
-                      "github.ref != 'refs/heads/main' }}", SOURCE)
+        self.assertIn("cache-read-only: true", SOURCE)
+        self.assertNotIn("cache-read-only: ${{", SOURCE)
         saves = [step for step in SOURCE.split("      - name: ")
                  if "actions/cache/save@" in step]
         self.assertEqual(2, len(saves))
