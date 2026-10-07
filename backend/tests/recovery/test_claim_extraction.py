@@ -722,6 +722,10 @@ async def test_feedback_outcomes_control_further_requests_honestly(harness, fail
             stages=default_handlers(
                 llm=ScholarxivAdapter(http, allowed_models=["fixture-free-model"], max_tokens=2048)
             ),
+            # This test checks feedback outcomes, not lease timing. Under coverage on slow
+            # runners the 0.5 s harness lease raced the strict renewal fence and was lost
+            # mid-stage (unknown_outcome), flaking twice on #125; 2 s removes that race.
+            job_lease_seconds=2,
         )
         async with app.router.lifespan_context(app), harness.client(app) as client:
             investigation_id = await create_investigation(client)
