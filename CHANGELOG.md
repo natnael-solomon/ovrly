@@ -4,6 +4,20 @@
 
 ### Added
 
+- RFC-D27 hosted speech fallback (BE-07b, #117): upload and capture-chunk speech
+  call Groq `whisper-large-v3-turbo` first and, after a quota, rate-limit, outage,
+  offline, missing-model, invalid-response or unknown-outcome failure, try
+  `whisper-large-v3` once. If both fail the chunk is `ASR_UNAVAILABLE` with the last
+  attempt's reason. Missing, short or over-cap audio is refused before any call, and
+  an observed empty result is `no_speech`, not a failure. Each model reserves its
+  own quota, and a model whose outcome is unknown is never sent the same audio
+  again. `speech.reason` gains `offline`, `invalid_response`, `missing_audio`,
+  `chunk_exceeds_file_cap`, `model_unavailable` and `no_speech` (additive, contract
+  stays `0.2.0-draft`); the Android enum mirrors them. Owner speech retry now applies
+  only after both models were refused for quota with no uncertain attempt. New
+  `OVRLY_GROQ_FALLBACK_MODEL` setting; both model settings default to the RFC-D27
+  models. Live hosted speech stays disabled by default.
+
 - Quote-grounded extraction prompt (BE-08, #25): `claim-window-v2` asks hosted
   models to quote source text verbatim, and the backend resolves quotes to
   character spans. The single extraction or reconciliation repair now states a

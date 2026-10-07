@@ -61,7 +61,7 @@ Unit tests cover palette contrast, fallback decisions, demo-entry policy, live c
 
 `/healthz` checks the database, that the schema is at the Alembic head the build ships, that the upload directory is writable and, when enabled, that the embedded worker is running and has polled or extended a lease within two minutes. It also reports queue depth, the oldest claimable job's age and the worker heartbeat age (RFC section 16 signals) without contacting a provider. Failures return a safe 503 with one reason; failed embedded-worker startup prevents API startup. API-only readiness does not monitor a separate worker. Shutdown stops owned tasks, finishes or releases the worker's in-flight lease and closes database connections. Deployment, smoke, keep-alive and backup are in the [deployment runbook](operations/deployment.md).
 
-Jobs live in PostgreSQL with an idempotent stage key `(version, stage, input hash)`, are claimed with `FOR UPDATE SKIP LOCKED` and carry a lease with a fencing token plus a cancellation/deletion generation. Publishing a stage result is compare-and-set against both, in the same transaction as its result and deferred successors, which inherit the parent job's stored owner. A stale or late worker cannot publish or advance the pipeline. The state machine and typed retries are property-tested; infrastructure failures re-lease work rather than pretending it failed safely. Unknown provider outcomes require verified reconciliation before retry: uploaded Groq speech instead stops as unavailable. Recovery cases run in CI as **Backend recovery**, including owner isolation and API-driven cancel/delete; see the [backend README](../backend/README.md#durable-jobs-and-recovery). Intake hands uploads to media validation; capture validation still verifies stored chunks and uses its fenced fan-out/fan-in publisher. Upload speech uses internal stage `upload_asr` (public `asr`) so capture's unimplemented `asr` jobs are not claimed by it. Existing evidence and labelled-stub registration remain independent. Nothing here establishes hosting entitlement.
+Jobs live in PostgreSQL with an idempotent stage key `(version, stage, input hash)`, are claimed with `FOR UPDATE SKIP LOCKED` and carry a lease with a fencing token plus a cancellation/deletion generation. Publishing a stage result is compare-and-set against both, in the same transaction as its result and deferred successors, which inherit the parent job's stored owner. A stale or late worker cannot publish or advance the pipeline. The state machine and typed retries are property-tested; infrastructure failures re-lease work rather than pretending it failed safely. Unknown provider outcomes require verified reconciliation before retry: hosted Groq speech never resends that model and tries the RFC-D27 fallback model once instead. Recovery cases run in CI as **Backend recovery**, including owner isolation and API-driven cancel/delete; see the [backend README](../backend/README.md#durable-jobs-and-recovery). Intake hands uploads to media validation; capture validation still verifies stored chunks and uses its fenced fan-out/fan-in publisher. Upload speech uses internal stage `upload_asr` (public `asr`) so capture's unimplemented `asr` jobs are not claimed by it. Existing evidence and labelled-stub registration remain independent. Nothing here establishes hosting entitlement.
 
 `services/api/routes/jobs.py` exposes owner-scoped cancellation and deletion.
 Migration `0006_job_ownership` gives jobs nullable principal ownership and a
@@ -84,11 +84,15 @@ Pydantic request/read models in `services/api/schemas.py` mirror `packages/contr
 
 The additional `upload_asr` handler (`services/pipeline/speech.py`, contract stage `asr`) is wired as a fenced
 successor only when hosted speech is explicitly enabled and audio exists.
-`services/asr/groq.py` implements bounded Groq HTTP with no provider/model
-fallback; `services/asr/reservations.py` and migration `0012_asr_requests` store
-shared account/model quota reservations and outcomes before publication.
-Uncertain interrupted requests stop rather than using the generic queue's
-reconciliation retries, because no Groq reconciliation mechanism is verified.
+`services/asr/groq.py` implements bounded Groq HTTP. `services/asr/fallback.py`
+applies RFC-D27 (decision 0004) to uploads and capture chunks alike: the primary
+`whisper-large-v3-turbo` request, then one `whisper-large-v3` request after any
+primary failure, then explicit `ASR_UNAVAILABLE` with the last attempt's reason.
+There is no other provider and no local model. `services/asr/reservations.py` and
+migration `0012_asr_requests` store per-model account quota reservations and
+outcomes before publication. An uncertain interrupted request is never resent to
+the same model (no Groq reconciliation mechanism is verified); the run moves on to
+the fallback instead of using the generic queue's reconciliation retries.
 Known outcomes survive restarts, and completed responses are reused within the
 same job/source/model/settings. Quota exhaustion never auto-resumes at reset.
 Owner-scoped `speech` reads retain timed segments and provenance separately from
