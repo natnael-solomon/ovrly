@@ -97,6 +97,11 @@ CASES: dict[tuple[str, str], Callable[[Workspace], Request]] = {
         "POST",
         {},
     ),
+    ("DELETE", "/v1/reports/{report_id}/save"): lambda w: (
+        f"/v1/reports/{w.report}/save",
+        "DELETE",
+        {},
+    ),
 }
 
 

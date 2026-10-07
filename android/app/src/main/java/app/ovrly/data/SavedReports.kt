@@ -172,12 +172,26 @@ internal class SavedReports(
         ).also { if (it is ApiResult.Success) dao.upsert(entry(it.value)) }
     }
 
-    /** Removes the caller's save of [reportId]; the report itself is not changed. */
+    /**
+     * Removes the caller's save of [reportId]; the report itself is not changed. A 404 means
+     * the caller holds no save of it (already removed, for example on another device), so the
+     * stored copy is dropped too.
+     */
     suspend fun unsave(reportId: String): ApiResult<Unit> = lock.withLock {
-        api.sendAuthenticated(
+        val result = api.sendAuthenticated(
             { ApiCall("reports.unsave", "DELETE", "v1/reports/$reportId/save", EMPTY_BODY, it) },
             { }
-        ).also { if (it is ApiResult.Success) dao.delete(reportId) }
+        )
+        when {
+            result is ApiResult.Success -> result.also { dao.delete(reportId) }
+
+            result is ApiResult.Failure && result.isNotFound -> {
+                dao.delete(reportId)
+                ApiResult.Success(Unit, result.failure.requestId)
+            }
+
+            else -> result
+        }
     }
 
     private suspend fun list(): ApiResult<SavedReportList> = api.sendAuthenticated(
@@ -193,6 +207,9 @@ internal class SavedReports(
         json = encoded(saved.report),
         storedAt = clock()
     )
+
+    private val ApiResult.Failure.isNotFound: Boolean
+        get() = (failure as? ApiFailure.Server)?.code == ApiErrorCode.NOT_FOUND
 
     private companion object {
         val EMPTY_BODY = ByteArray(0).toRequestBody()

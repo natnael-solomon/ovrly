@@ -659,10 +659,10 @@
         "tags": ["reports"],
         "operationId": "unsaveReport",
         "summary": "Remove the caller's explicit save of one report; idempotent.",
-        "description": "No request body; a body is rejected with VALIDATION_FAILED. Deletes only the caller's own save; the immutable report version is never changed. Removing a save that does not exist, including another owner's report, answers the same 204, so existence is not revealed. A malformed id is 404. A guest merged into an account by a second-device link (BC-D07) is refused with 401 INVALID_CREDENTIAL.",
+        "description": "No request body; a body is rejected with VALIDATION_FAILED. Deletes only the caller's own save; the immutable report version is never changed. A save the caller holds is always removable, including one moved to this account by a second-device link (BC-D07). Without a save, the caller's own report answers 204 again, so a repeat is harmless; another owner's report, a missing report and a malformed id all answer the same 404. A guest merged into an account by a second-device link is refused with 401 INVALID_CREDENTIAL.",
         "responses": {
           "204": {
-            "description": "The caller has no save of this report.",
+            "description": "The caller has no save of this report now.",
             "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } }
           },
           "400": { "$ref": "#/components/responses/ClientIdentityRejected" },

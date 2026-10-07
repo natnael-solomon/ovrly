@@ -124,6 +124,18 @@ class SavedReportsTest {
     }
 
     @Test
+    fun removingASaveTheServerNoLongerHasDropsTheStoredCopy() = withServer { server ->
+        server.credentials.write("synthetic-token-1")
+        server.error(404, "NOT_FOUND")
+        val dao = MemorySavedReportDao()
+        runBlocking { dao.upsert(entry()) }
+        val (saved) = server.saved(dao)
+        assertTrue(runBlocking { saved.unsave(reportId) } is ApiResult.Success)
+        assertEquals("DELETE", server.take().method)
+        assertTrue(dao.rows.isEmpty())
+    }
+
+    @Test
     fun aFailedSaveOrRemovalChangesNothingOnTheDevice() = withServer { server ->
         server.credentials.write("synthetic-token-1")
         server.error(404, "NOT_FOUND")

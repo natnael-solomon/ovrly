@@ -259,9 +259,10 @@ async def test_unsave_removes_only_the_callers_save_and_is_idempotent(client, ap
     path = f"/v1/reports/{report.id}/save"
     assert (await client.post(path, headers=owner)).status_code == 200
 
-    # Another principal's unsave answers like a missing save and changes nothing.
-    foreign = await client.delete(path, headers=other)
-    assert foreign.status_code == 204 and foreign.content == b""
+    # Another principal's unsave is the same 404 as a missing report and changes nothing.
+    assert_error(await client.delete(path, headers=other), 404, "NOT_FOUND")
+    unknown = f"/v1/reports/{uuid.uuid4()}/save"
+    assert_error(await client.delete(unknown, headers=owner), 404, "NOT_FOUND")
     assert len((await client.get("/v1/reports/saved", headers=owner)).json()["items"]) == 1
     assert_error(await client.delete(path), 401, "AUTHENTICATION_REQUIRED")
     for report_id in (report.id.upper(), "rpt_synthetic_0001_v2", "x" * 128):

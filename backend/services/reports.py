@@ -240,17 +240,19 @@ async def save_owned_report(
 async def unsave_owned_report(
     connection: AsyncConnection, principal: Principal, report_id: uuid.UUID
 ) -> None:
-    """Remove the caller's own save of one report; nothing else changes.
+    """Remove the caller's own save of one report; the report version never changes.
 
-    Idempotent: removing a save that does not exist, or that belongs to another principal,
-    changes nothing and answers the same, so the route does not reveal whether a report
-    exists. The report version itself is immutable and is never touched. Like a save, a
-    caller merged into an account by a concurrent link is refused with 401.
+    Removing a save the caller holds always succeeds, including one moved to this account by
+    a second-device link. Otherwise the report must be the caller's own, so repeating the
+    removal is harmless; another owner's or a missing report is the same 404 as on save.
+    Like a save, a caller merged into an account by a concurrent link is refused with 401.
     """
     await lock_active_principal(connection, principal)
-    await connection.execute(
+    removed = await connection.execute(
         delete(saved_reports).where(
             saved_reports.c.owner_id == principal.id,
             saved_reports.c.report_id == report_id,
         )
     )
+    if removed.rowcount == 0:
+        await load_owned(connection, report_versions, report_id, principal)
