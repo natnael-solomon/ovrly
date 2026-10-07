@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
@@ -340,10 +341,13 @@ class ReportScreenTest {
     private fun assertClickTargets() {
         val nodes = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes()
         assertTrue(nodes.isNotEmpty())
-        val areas = nodes.map { it.touchArea() }
-        areas.forEachIndexed { i, area ->
-            areas.drop(i + 1).forEach { other ->
-                assertFalse("touch areas $area and $other overlap", area.overlaps(other))
+        val areas = nodes.map { it.ownBounds() to it.touchArea() }
+        areas.forEachIndexed { i, (own, area) ->
+            // Only overlaps the expansion itself creates; nested controls are a layout choice.
+            areas.drop(i + 1).forEach { (otherOwn, other) ->
+                if (!own.overlaps(otherOwn)) {
+                    assertFalse("touch areas $area and $other overlap", area.overlaps(other))
+                }
             }
         }
     }
@@ -374,6 +378,9 @@ class ReportScreenTest {
         fetchSemanticsNode().touchArea()
         return this
     }
+
+    private fun SemanticsNode.ownBounds(): Rect =
+        Rect(positionInRoot, Size(size.width.toFloat(), size.height.toFloat()))
 
     /**
      * Where a node can be touched: its own size, grown to the platform's minimum touch target
