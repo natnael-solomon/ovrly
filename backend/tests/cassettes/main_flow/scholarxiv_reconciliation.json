@@ -1,0 +1,15 @@
+{
+  "id": "cmpl_synthetic_reconciliation",
+  "model": "synthetic-quality-model",
+  "decision_id": "dec_synthetic_reconciliation",
+  "usage": {"prompt_tokens": 820, "completion_tokens": 140, "total_tokens": 960},
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "{\"updates\": \"{unchanged_claims}\", \"explanation\": \"The whole input keeps each claim's original meaning.\"}"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}

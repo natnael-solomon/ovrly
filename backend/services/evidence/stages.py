@@ -20,7 +20,7 @@ from datetime import timedelta
 from typing import Any, Final, Literal, TypeVar
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, SecretStr, ValidationError
 from sqlalchemy import Row, func, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -63,6 +63,10 @@ MAX_EXPANSION_POLLS: Final = 12
 Depth = Literal["standard", "deeper"]
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+
+
+class EvidenceUnavailable(NonRetriableInput):
+    """The server Scholarxiv credential is missing; the job fails with this typed reason."""
 
 
 class StagePayload(BaseModel):
@@ -296,9 +300,7 @@ class EvidenceStages:
         )
 
     def _clients(self, client: httpx.AsyncClient) -> tuple[RouterClient, PapersClient]:
-        key = self.settings.scholarxiv_api_key
-        if key is None:
-            raise NonRetriableInput("evidence stages need OVRLY_SCHOLARXIV_API_KEY")
+        key = self._key()
         bucket = TokenBucket(
             self.database,
             SCHOLARXIV_BUCKET,
@@ -316,7 +318,14 @@ class EvidenceStages:
             ),
         )
 
+    def _key(self) -> SecretStr:
+        key = self.settings.scholarxiv_api_key
+        if key is None or not key.get_secret_value().strip():
+            raise EvidenceUnavailable("evidence stages need OVRLY_SCHOLARXIV_API_KEY")
+        return key
+
     async def retrieval(self, job: ClaimedJob, context: JobContext) -> dict[str, Any]:
+        self._key()
         return await with_heartbeat(context, self._retrieval(_payload(job), context))
 
     async def _retrieval(self, payload: StagePayload, context: JobContext) -> dict[str, Any]:
@@ -389,6 +398,7 @@ class EvidenceStages:
         ).model_dump(mode="json")
 
     async def assessment(self, job: ClaimedJob, context: JobContext) -> dict[str, Any]:
+        self._key()
         payload = _payload(job)
         if payload.retrieval_job_id is None:
             raise NonRetriableInput("assessment payload names no retrieval job")

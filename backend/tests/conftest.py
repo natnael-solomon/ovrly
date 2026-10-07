@@ -9,6 +9,12 @@ import pytest
 from psycopg import sql
 from sqlalchemy.engine import make_url
 
+# The stage suites predate the default-on main flow (#127) and opt in stage by stage, so they
+# start from the earlier opt-outs. test_main_flow.py clears these to run production defaults.
+STAGE_OPT_OUTS = ("OVRLY_ASR_ENABLED", "OVRLY_EXTRACTION_ENABLED", "OVRLY_RECONCILIATION_ENABLED")
+for _name in STAGE_OPT_OUTS:
+    os.environ.setdefault(_name, "0")
+
 
 @pytest.fixture(scope="session")
 def database_url() -> Iterator[str]:

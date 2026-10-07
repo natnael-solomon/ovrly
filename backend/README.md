@@ -7,14 +7,48 @@ uploads and records investigations behind bearer authentication (see
 [Identity and intake API](#identity-and-intake-api)). Each recorded
 investigation is handed to the queue as an `intake` job in the same
 transaction; publishing intake schedules upload-backed `media_validation`.
-Opt-in Groq transcription follows preparation; neither is completed research
-(BE-07, #20). The worker also preserves capture byte validation, configured evidence
+Groq transcription follows preparation (BE-07, #20). The worker also preserves capture byte validation, configured evidence
 stages and opt-in privacy retention (see [Privacy operations](#privacy-operations)). See
 [Durable jobs and recovery](#durable-jobs-and-recovery).
 
-BE-08 (#25) adds disabled-by-default, internal single-window and incremental claim-extraction
-handoff. It is not yet dispatched by intake, ASR or device text; see
+BE-08 (#25) adds single-window and incremental claim extraction and whole-input
+reconciliation. Since #127 the main flow is connected and on by default: committed
+speech and device text are admitted to extraction, settled input is reconciled, and the
+reconciled claims go to BE-09 retrieval and assessment, which publishes the assessed
+report. See [Main flow](#main-flow-127) and
 [Provisional claim extraction](#provisional-claim-extraction).
+
+## Main flow (#127)
+
+A capture or upload runs these stages with production defaults:
+
+1. `intake`, then `media_validation` (uploads) or per-chunk capture validation.
+2. Speech (`upload_asr` or the chunk `asr` stage, Groq) and device text (upload batches
+   or the chunk `device_text` stage).
+3. `claim_extraction` windows over the time-ordered speech and text observations.
+4. `reconciliation` once the input settles. Its fenced publication enqueues
+   `retrieval` for every current, unassessed claim of the reconciled version.
+5. `retrieval`, then `assessment`, which publishes the next report version. With every
+   claim assessed and no open capture it is final (`processing_status: complete`).
+
+`OVRLY_ASR_ENABLED`, `OVRLY_EXTRACTION_ENABLED` and `OVRLY_RECONCILIATION_ENABLED`
+default to `1`. A stage left on without its provider configuration still starts and
+fails visibly per input, never silently:
+
+| Missing | Visible result |
+| --- | --- |
+| Groq key, model, account label or verified limits | Speech `unavailable` with reason `provider_unavailable`; analysis gap `ASR_UNAVAILABLE`. No Groq call |
+| Scholarxiv key, verified extraction pool or model list | Extraction observations `failed` with `EXTRACTION_UNAVAILABLE` |
+| Verified reconciliation pool | `reconciliation_progress` `failed` with `EXTRACTION_UNAVAILABLE`; the provisional report stays readable |
+| Scholarxiv key at the evidence stages | `retrieval`/`assessment` jobs fail with `EvidenceUnavailable`, shown as the investigation's failed `job` |
+
+An explicit opt-in (`=1` in the environment or an argument) must still be complete: the
+server refuses to start with a partial configuration, as before. `=0` opts a stage out.
+`OVRLY_STUB_REPORTS=1` turns the default-on extraction and reconciliation off.
+`tests/recovery/test_main_flow.py` runs the whole flow for an upload and a capture with
+recorded synthetic provider responses (`tests/cassettes/main_flow` and the evidence
+cassettes) against PostgreSQL in **Backend recovery**; no request leaves the test. The
+other stage suites pin the earlier opt-outs in `tests/conftest.py` and opt in per test.
 
 ## Local setup (Linux / WSL)
 
@@ -108,7 +142,7 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_JOB_RETRY_BACKOFF_SECONDS` | 1; positive, at most 60. Base of the exponential backoff |
 | `OVRLY_JOB_RETRY_MAX_BACKOFF_SECONDS` | 60; positive, at most 3600 and at least the base. Caps ordinary backoff/hints, but never shortens validated extraction provider cooldowns |
 | `OVRLY_GOOGLE_CLIENT_ID` | Empty; Google Web client ID that linked ID tokens must be issued for (BC-D07). Configuration, not a secret. Empty leaves `POST /v1/principals/link` unavailable with 503 `ACCOUNT_LINK_UNAVAILABLE` |
-| `OVRLY_EXTRACTION_ENABLED` | `0`; registers a failing, unavailable extraction handler until explicitly enabled |
+| `OVRLY_EXTRACTION_ENABLED` | `1`; without a verified pool and credential each window fails with `EXTRACTION_UNAVAILABLE`. An explicit `1` must be complete at startup; `0` opts out |
 | `OVRLY_EXTRACTION_FREE_ROUTES_VERIFIED` | `0`; enabled extraction requires owner-verified route eligibility, not a claim that a configured name is free |
 | `OVRLY_EXTRACTION_MODELS` | `[]`; explicit JSON array of verified Scholarxiv executor names, at most 20 |
 | `OVRLY_EXTRACTION_MAX_TOKENS` | 2048; per-window extraction output cap, 1..8192 |
@@ -118,7 +152,7 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_GROQ_EXTRACTION_ENABLED` | `0`; separately enables extraction-only Groq recovery |
 | `OVRLY_GROQ_FREE_ROUTE_VERIFIED` | `0`; independent owner verification required for enabled Groq recovery |
 | `OVRLY_GROQ_API_KEY` | Empty; separate secret required for enabled Groq recovery |
-| `OVRLY_RECONCILIATION_ENABLED` | `0`; requires extraction to be enabled. While `0`, quality reconciliation stays unavailable even with verified extraction routes |
+| `OVRLY_RECONCILIATION_ENABLED` | `1`; requires configured extraction and its own verified pool, otherwise reconciliation fails with `EXTRACTION_UNAVAILABLE`. An explicit `1` must be complete at startup; `0` opts out and no retrieval starts |
 | `OVRLY_RECONCILIATION_FREE_ROUTES_VERIFIED` | `0`; independent owner verification of the quality-reconciliation routes. Extraction route verification does not cover reconciliation |
 | `OVRLY_RECONCILIATION_MODELS` | `[]`; explicit JSON array of verified Scholarxiv quality executor names, at most 20. This list is separate from `OVRLY_EXTRACTION_MODELS` |
 | `OVRLY_EXTRACTION_BUDGET_REQUESTS` / `OVRLY_EXTRACTION_BUDGET_TOKENS` | 24 / 196500; per-investigation pre-send ceilings used when real speech starts a run. Candidate values from offline evidence, not verified free-plan capacity |
@@ -166,7 +200,7 @@ scratch directories still need operator cleanup with workers stopped. Keep uploa
 to the backend, outside served roots, and shared by workers using this database.
 This is local storage, not a distributed artifact store.
 
-Hosted ASR is disabled by default; its opt-in is described below. These stages add
+Hosted ASR is on by default and needs the configuration described below. These stages add
 no server OCR or URL downloader. Device-text ingestion is a separate endpoint below.
 Existing report/evidence
 and labelled development-stub behavior is preserved. Android parses the optional
@@ -188,11 +222,13 @@ synthetic API/PostgreSQL tests; the Android completed-upload sender and physical
 end-to-end verification remain separate. There is no OCR/provider call or
 aggregation timer in these routes.
 
-### Hosted uploaded speech (disabled by default)
+### Hosted uploaded speech
 
-`OVRLY_ASR_ENABLED=1` enables the Groq-only successor for prepared audio.
+`OVRLY_ASR_ENABLED` (default `1`) enables the Groq-only successor for prepared audio.
 There is no default model, alternate provider or local model. Startup rejects
-incomplete live configuration. An operator must first verify model availability,
+incomplete configuration when `OVRLY_ASR_ENABLED=1` is set explicitly; left at the
+default without it, speech is `unavailable` with reason `provider_unavailable` and no
+Groq call is made. `OVRLY_ASR_ENABLED=0` reports `disabled`. An operator must first verify model availability,
 free/no-card entitlement, exact byte cap, all applicable quotas, and billing
 rounding for the account. These facts remain unverified; the implementation and
 offline replay tests do not establish permission to upload media.
@@ -503,7 +539,7 @@ maintenance settles the run before scheduling reconciliation: uploads once
 only after a continue-in-queue close once every received chunk's work is terminal.
 Keep-only-results never settles, so no new inference starts. Settlement registers
 reconciliation with the accepted speech/media jobs when reconciliation was enabled
-at admission. Handing reconciled claims to `enqueue_retrieval` (#27) remains a gap.
+at admission. Published reconciliation hands its claims to `enqueue_retrieval` (#27).
 
 The trusted producer registers `request_reconciliation(connection, investigation_id,
 owner_id, *, accepted_jobs)` from `services/pipeline/reconciliation.py`. The immutable,
@@ -536,7 +572,8 @@ their old evidence/assessments. A correction link alone does not change the corr
 occurrence's meaning, so it keeps its results and gets no correction record unless its
 proposition or interpretation changed. Unaffected results survive with the new report version.
 The report/version plus reassessment claim IDs is the stable downstream handoff;
-`change_summary` explains the update. No retrieval or assessment work is started here.
+`change_summary` explains the update. The same fenced publication enqueues `retrieval`
+for every claim that is not superseded and has no assessment in the new version (#127).
 
 Optional `reconciliation_progress` on investigation/capture reads reports waiting,
 checking, complete, failed or cancelled independently of report/coverage completion.
@@ -1209,12 +1246,13 @@ handler wins over the production one. The stub goes once #25 publishes real clai
 
 BE-09 (#27). Two queue stages with the contract's stage names turn a published version
 that has claims into the next version with evidence and assessments. They are
-registered (embedded and standalone workers alike, through
-`services/pipeline/registry.py`) only when `OVRLY_SCHOLARXIV_API_KEY` is set; the key
-is server-side only and never logged.
+registered in embedded and standalone workers alike, through
+`services/pipeline/registry.py`. Without `OVRLY_SCHOLARXIV_API_KEY` their jobs fail with
+the typed `EvidenceUnavailable` reason instead of waiting unclaimed (#127). The key is
+server-side only and never logged.
 
-1. The stage that publishes claims (`claim_extraction`, #25) calls
-   `services.evidence.stages.enqueue_retrieval(...)` with the version it published.
+1. Reconciliation (#25, #127) calls `services.evidence.stages.enqueue_retrieval(...)`
+   with the version it published.
 2. `retrieval` (`services/evidence/retrieval.py`), per claim and within the budget:
    - asks the router (`OVRLY_EVIDENCE_QUERY_ROUTE`, default `auto:cheap`) for neutral
      and disconfirming search queries (at most `OVRLY_EVIDENCE_MAX_QUERIES_PER_CLAIM`);
@@ -1282,7 +1320,7 @@ or a provider replay; the tests use a synthetic one.
 
 | Setting | Default / meaning |
 | --- | --- |
-| `OVRLY_SCHOLARXIV_API_KEY` | Unset. Server-only `sxv_` key; without it the evidence stages are not registered |
+| `OVRLY_SCHOLARXIV_API_KEY` | Unset. Server-only `sxv_` key; without it evidence jobs fail with `EvidenceUnavailable` |
 | `OVRLY_SCHOLARXIV_BASE_URL` | `https://www.scholarxiv.com` |
 | `OVRLY_SCHOLARXIV_REQUESTS_PER_HOUR` | 1000; 1..1200. Shared Papers and Router budget |
 | `OVRLY_SCHOLARXIV_FEDERATED` | `0`; federated search needs the Go plan |

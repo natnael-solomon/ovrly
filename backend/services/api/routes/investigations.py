@@ -262,7 +262,7 @@ async def latest_jobs(
             & (jobs.c.owner_id == investigations.c.owner_id),
         )
         .where(
-            jobs.c.stage.in_(["claim_extraction", "reconciliation"]),
+            jobs.c.stage.in_(["claim_extraction", "reconciliation", "retrieval", "assessment"]),
             investigations.c.id.in_(investigation_ids),
         )
     )

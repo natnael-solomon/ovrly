@@ -215,7 +215,8 @@ they do not mean absent audio or no claims. No-audio and disabled processing
 report `unavailable` with separate reasons. Provider request/account identifiers,
 request markers and storage paths are never exposed.
 
-The server currently implements Groq-only uploaded speech, disabled by default.
+The server currently implements Groq-only uploaded speech, on by default; without its
+provider configuration speech is `unavailable` with reason `provider_unavailable`.
 `ASR_QUOTA_EXHAUSTED` stops automatic attempts; `ASR_UNAVAILABLE` includes an
 explicit `unknown_outcome` reason for interrupted calls that cannot be
 reconciled. Neither a quota reset nor polling retries old speech. Successful
@@ -223,7 +224,7 @@ speech leaves investigation state queued for later analysis; media coverage
 remains the original preparation facts. Partial analysis is described at the
 top of this file and owner retry in the schema index; Android speech parsing is
 later work.
-See [hosted speech configuration](../../backend/README.md#hosted-uploaded-speech-disabled-by-default).
+See [hosted speech configuration](../../backend/README.md#hosted-uploaded-speech).
 
 For a capture-source investigation, `speech` concatenates the published
 chunks' segments on the `capture` timebase (aggregate source/audio digests are

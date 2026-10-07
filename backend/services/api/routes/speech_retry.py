@@ -105,6 +105,7 @@ async def retry_speech(
                 speech.state == "failed"
                 and speech.failure == "ASRQuotaExhausted"
                 and config.asr_enabled
+                and config.asr_configured
                 and media is not None
                 and media.state == "published"
                 and speech.payload.get("settings_sha256") == speech_settings_hash(config)
@@ -264,6 +265,7 @@ async def _capture_outcome(
             speech.state == "failed"
             and speech.failure == "ASRQuotaExhausted"
             and config.asr_enabled
+            and config.asr_configured
             and package is not None
             and package["audio"] is not None
             and await store.digest(chunk.storage_key) == (chunk.size_bytes, chunk.sha256)

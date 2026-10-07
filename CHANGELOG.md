@@ -4,6 +4,15 @@
 
 ### Added
 
+- Connected main flow (#127): a capture or upload now runs media validation,
+  speech, device text, claim extraction, reconciliation, evidence retrieval and
+  assessment to a published report. Speech, extraction and reconciliation are on by
+  default; without their provider settings they report a visible reason
+  (`provider_unavailable` speech, `EXTRACTION_UNAVAILABLE`, `EvidenceUnavailable`)
+  instead of being skipped. An end-to-end test with recorded synthetic provider
+  responses runs in **Backend recovery**. The live capture status no longer says
+  research is not connected when a server is configured.
+
 - Quote-grounded extraction prompt (BE-08, #25): `claim-window-v2` asks hosted
   models to quote source text verbatim, and the backend resolves quotes to
   character spans. The single extraction or reconciliation repair now states a
@@ -422,7 +431,7 @@
 
 ### Known limitations
 
-- Research, OCR and evidence retrieval are not connected. Uploaded media is validated and prepared; optional Groq speech remains disabled until an operator supplies verified account/model settings. Speech is not completed analysis, and no live provider behavior or entitlement has been verified. URL references remain intake-only. Media artifacts use private local storage; automatic orphan cleanup and Android investigation parsing are not implemented.
+- The main flow needs operator-verified Groq, Scholarxiv extraction and reconciliation settings to produce reports; without them each stage reports a typed unavailable reason. Android does not yet send on-device text for shared uploads, so shares rely on the 60-second text grace. Speech is not completed analysis, and no live provider behavior or entitlement has been verified. URL references remain intake-only. Media artifacts use private local storage; automatic orphan cleanup and Android investigation parsing are not implemented.
 - Gallery and report content are labeled samples. Gallery selection does not change the live overlay.
 - Native blur depends on device/system support; no backdrop refraction is implemented.
 - Physical-device testing is partial. Full cross-app capture/lifecycle behavior and live Voxide authorization/compatibility remain unverified.

@@ -1,0 +1,20 @@
+{
+  "task": "transcribe",
+  "language": "english",
+  "duration": 1.0,
+  "text": "Over half of the city's buses are electric.",
+  "segments": [
+    {
+      "id": 0,
+      "seek": 0,
+      "start": 0.1,
+      "end": 0.9,
+      "text": "Over half of the city's buses are electric.",
+      "temperature": 0.0,
+      "avg_logprob": -0.21,
+      "compression_ratio": 0.94,
+      "no_speech_prob": 0.01
+    }
+  ],
+  "x_groq": {"id": "req_synthetic_main_flow"}
+}
