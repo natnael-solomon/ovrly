@@ -458,7 +458,8 @@ today (`/v1/principals/guest`, `/v1/uploads`, `/v1/uploads/{id}/content`,
 capture routes, and from BE-10 (#33) `/v1/investigations/{id}/reports`,
 `/v1/investigations/{id}/reports/{version}`,
 `/v1/investigations/{id}/reports/{version}/export`,
-`/v1/investigations/{id}/reanalyze`, `/v1/reports/{report_id}/save` and
+`/v1/investigations/{id}/reanalyze`, `/v1/reports/{report_id}/save` (`POST`
+to save and, from AN-10 (#36), `DELETE` to remove the caller's own save) and
 `/v1/reports/saved`) plus `POST /v1/voice/actions`. Every request and
 response schema is a `$ref` into `schemas/`, through named components
 (`#/components/schemas/Investigation` is `schemas/investigation.schema.json`),

@@ -131,6 +131,7 @@ private fun ReportList(report: OpenReport, actions: ReportActions, modifier: Mod
         if (view.version != null) {
             item { VersionSection(report, { onCommand(CheckCommand.ShowVersion(it)) }) }
         }
+        report.save?.let { save -> item { SaveCard(save, report.busy, onCommand) } }
         if (view.captured && view.canCorrect && report.candidates.isNotEmpty()) {
             item { FullVideoCard(report.busy, actions.onFullVideo) }
         }
