@@ -121,8 +121,9 @@ class SavedReportsStateTest {
         assertEquals(report.version, view.latestVersion)
         assertEquals(report.claims.size, view.claims.size)
         assertEquals(report.id, view.reportId)
-        assertFalse(view.coverage!!.stale)
-        assertEquals(report.provisional, view.coverage!!.provisional)
+        val coverage = checkNotNull(view.coverage)
+        assertFalse(coverage.stale)
+        assertEquals(report.provisional, coverage.provisional)
         assertNull(savedCopyView(save(readable = false)))
         assertTrue(saveState(view, listOf(save()), copy = true)!!.copy)
 

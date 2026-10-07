@@ -72,7 +72,6 @@ internal object SavedFixtures {
 
     fun list(vararg items: JsonObject): String =
         JsonObject(mapOf("items" to JsonArray(items.toList()))).toString()
-
 }
 
 class SavedReportsTest {
