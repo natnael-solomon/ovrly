@@ -130,7 +130,7 @@ class CaptureService : Service() {
             check(sessionLifecycle.recording()) { "Capture was interrupted during setup." }
             running.set(true)
             CaptureStore.set(
-                CaptureState(phase = CapturePhase.RECORDING, message = recordingMessage(replaced))
+                CaptureState(phase = CapturePhase.RECORDING, message = recordingMessage(this, replaced))
             )
             capture.start(scope, startedMs)
             startTicker()
@@ -316,9 +316,10 @@ class CaptureService : Service() {
         private const val NO_SIGNAL = " No playback signal was detected; silence or source " +
             "policy may be responsible. Share a video instead."
 
-        private fun recordingMessage(replaced: Int): String = buildString {
-            append("Capturing only this interval. Chunks are sent as they are recorded; ")
-            append("research is not connected.")
+        private fun recordingMessage(context: Context, replaced: Int): String = buildString {
+            append("Capturing only this interval. Chunks are sent for research as they are ")
+            append("recorded.")
+            CaptureApis.researchOffline(context)?.let { append(" ").append(it) }
             if (replaced > 0) {
                 append(" The previous capture's $replaced unsent chunks were deleted.")
             }
