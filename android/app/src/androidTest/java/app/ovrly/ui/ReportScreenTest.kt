@@ -12,9 +12,11 @@ import androidx.compose.ui.semantics.SemanticsProperties.StateDescription
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
@@ -228,8 +230,9 @@ class ReportScreenTest {
     @Test fun shareHandsTheShownVersionToTheShareSheet() {
         show(OpenReport(reportView(complete), retrievedAt = ChecksFixtures.NOW), dark = true)
 
-        compose.onNodeWithContentDescription("Share report")
-            .assertTouchTarget().performClick()
+        compose.onNodeWithContentDescription("Share report").assertMaterialTarget()
+        assertClickTargets()
+        compose.onNodeWithContentDescription("Share report").performClick()
 
         compose.runOnIdle {
             val export = exports.single()
@@ -289,7 +292,8 @@ class ReportScreenTest {
             .assert(hasText("Supports the claim"))
             .assert(hasText("Synthetic Publisher"))
         compose.onAllNodesWithContentDescription("Open source: Synthetic source 1")
-            .onFirst().assertTouchTarget()
+            .onFirst().assertMaterialTarget()
+        assertClickTargets()
     }
 
     @Test fun everyReportControlHasA48DpTarget() {
@@ -310,15 +314,23 @@ class ReportScreenTest {
         assertClickTargets()
         reveal("Shared the full video?")
         assertClickTargets()
+        val before = compose.idsWithText("Check the full video")
         compose.onNodeWithText("Check the full video").performScrollTo().performClick()
         compose.awaitDisplayed("Is this the same video?")
-        listOf(
-            candidate.title,
-            "I confirm this is the full video of the clip I captured.",
-            "Cancel"
-        ).forEach {
-            compose.onNode(hasText(it) and hasClickAction()).assertTouchTarget()
-        }
+        // Rows drawn by ovrly must measure 48 dp themselves; Material buttons are drawn at
+        // 40 dp and expanded to 48 dp, which only works if the expansions do not overlap.
+        val video = compose.onNode(hasText(candidate.title) and hasClickAction())
+        val confirm = compose.onNode(
+            hasText("I confirm this is the full video of the clip I captured.") and
+                hasClickAction()
+        )
+        val check = compose.newNodeWithText("Check the full video", before)
+        val cancel = compose.onNode(hasText("Cancel") and hasClickAction())
+        video.assertOwnTarget()
+        confirm.assertOwnTarget()
+        check.assertMaterialTarget()
+        cancel.assertMaterialTarget()
+        assertNoOverlap(listOf(video, confirm, check, cancel).map { it.fetchSemanticsNode() })
     }
 
     @Test fun at200PercentTextNoReportOrEvidenceTextIsClipped() {
@@ -335,13 +347,17 @@ class ReportScreenTest {
     }
 
     /**
-     * Every clickable node on screen can be touched over at least 48 by 48 dp, and no two of
-     * those touch areas overlap, so a control drawn smaller has the room it is expanded into.
+     * No two touch areas on screen overlap once Material controls are expanded to 48 dp, so
+     * each control drawn smaller than 48 dp really has the room it is expanded into.
      */
     private fun assertClickTargets() {
         val nodes = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes()
         assertTrue(nodes.isNotEmpty())
-        val areas = nodes.map { it.ownBounds() to it.touchArea() }
+        assertNoOverlap(nodes)
+    }
+
+    private fun assertNoOverlap(nodes: List<SemanticsNode>) {
+        val areas = nodes.map { it.ownBounds() to it.expandedArea() }
         areas.forEachIndexed { i, (own, area) ->
             // Only overlaps the expansion itself creates; nested controls are a layout choice.
             areas.drop(i + 1).forEach { (otherOwn, other) ->
@@ -374,27 +390,26 @@ class ReportScreenTest {
         }
     }
 
-    private fun SemanticsNodeInteraction.assertTouchTarget(): SemanticsNodeInteraction {
-        fetchSemanticsNode().touchArea()
-        return this
-    }
+    /** A control drawn by ovrly (a row, a card) measures at least 48 by 48 dp itself. */
+    private fun SemanticsNodeInteraction.assertOwnTarget(): SemanticsNodeInteraction =
+        assertHeightIsAtLeast(MIN_TARGET).assertWidthIsAtLeast(MIN_TARGET)
+
+    /**
+     * A Material button is drawn at least 40 by 40 dp and relies on the platform's 48 dp
+     * minimum touch target; pair it with [assertNoOverlap] so that expansion has room.
+     */
+    private fun SemanticsNodeInteraction.assertMaterialTarget(): SemanticsNodeInteraction =
+        assertHeightIsAtLeast(MATERIAL_DRAWN).assertWidthIsAtLeast(MATERIAL_DRAWN)
 
     private fun SemanticsNode.ownBounds(): Rect =
         Rect(positionInRoot, Size(size.width.toFloat(), size.height.toFloat()))
 
-    /**
-     * Where a node can be touched: its own size, grown to the platform's minimum touch target
-     * (48 dp), which Material controls drawn at 40 dp rely on. Fails below 48 by 48 dp.
-     */
-    private fun SemanticsNode.touchArea(): Rect {
+    /** The node's bounds grown, around its center, to the platform's minimum touch target. */
+    private fun SemanticsNode.expandedArea(): Rect {
         val minimum = layoutInfo.viewConfiguration.minimumTouchTargetSize
         return with(layoutInfo.density) {
             val width = maxOf(size.width.toFloat(), minimum.width.toPx())
             val height = maxOf(size.height.toFloat(), minimum.height.toPx())
-            assertTrue(
-                "touch area ${width.toDp()} by ${height.toDp()}",
-                width.toDp() >= MIN_TARGET && height.toDp() >= MIN_TARGET
-            )
             val center = positionInRoot + Offset(size.width / 2f, size.height / 2f)
             Rect(
                 center.x - width / 2,
@@ -406,6 +421,7 @@ class ReportScreenTest {
     }
 
     private companion object {
-        val MIN_TARGET = 47.5.dp
+        val MIN_TARGET = 48.dp
+        val MATERIAL_DRAWN = 40.dp
     }
 }
