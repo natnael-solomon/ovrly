@@ -145,9 +145,11 @@ def configured_llm(
     *,
     task: Literal["claim_extraction", "reconciliation"] = "claim_extraction",
 ) -> LlmAdapter:
-    if settings is None or not settings.extraction_enabled:
+    # Enabled without a verified pool or credential stays unavailable: each window then
+    # fails visibly with EXTRACTION_UNAVAILABLE instead of being skipped.
+    if settings is None or not settings.extraction_configured:
         return DisabledLlm(task)
-    if task == "reconciliation" and not settings.reconciliation_enabled:
+    if task == "reconciliation" and not settings.reconciliation_configured:
         return DisabledLlm(task)
     return ScholarxivAdapter(
         allowed_models=(

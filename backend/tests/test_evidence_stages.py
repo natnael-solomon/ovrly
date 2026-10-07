@@ -23,6 +23,7 @@ from services.evidence.stages import (
     ASSESSMENT_STAGE,
     RETRIEVAL_STAGE,
     EvidenceStages,
+    EvidenceUnavailable,
     enqueue_retrieval,
 )
 from services.jobs.handlers import JobContext, default_handlers
@@ -374,7 +375,7 @@ async def test_retrieval_failures_are_typed(client, app, providers):
 
 
 @pytest.mark.parametrize("quota_policy", [False, True])
-async def test_claim_budget_keeps_extra_claims_visible_and_provisional(
+async def test_claim_budget_keeps_extra_claims_visible_and_finishes(
     client, app, providers, quota_policy
 ):
     headers = await guest(client)
@@ -391,11 +392,12 @@ async def test_claim_budget_keeps_extra_claims_visible_and_provisional(
     await run(app, evidence.retrieval, RETRIEVAL_STAGE, investigation_id)
     await run(app, evidence.assessment, ASSESSMENT_STAGE, investigation_id)
     report = await read(client, headers, investigation_id, base.version + 1)
-    assert report["provisional"] is True and len(report["claims"]) == 2
+    # The capped claim stays visible and unassessed with its reason; the run is final (#127).
+    assert report["provisional"] is False and len(report["claims"]) == 2
     assert len(report["assessments"]) == 1
     assert "1 claim budget" in report["change_summary"]
     body = (await client.get(f"/v1/investigations/{investigation_id}", headers=headers)).json()
-    assert body["processing_status"] == "partial"
+    assert body["processing_status"] == "complete"
 
 
 async def test_reanalysis_correction_and_deeper(client, app, providers):
@@ -603,14 +605,15 @@ async def test_cancelling_an_expansion_stops_its_polling(client, app, providers)
     assert [item["version"] for item in listing.json()["items"]] == [clip_base.version]
 
 
-async def test_stages_are_registered_only_with_the_key(app, database_url, tmp_path):
+async def test_stages_are_registered_and_fail_typed_without_the_key(app, database_url, tmp_path):
     database = app.state.database
     base = default_handlers(app.state.upload_store)
     with_key = worker_handlers(database, settings_for(database_url, tmp_path), base)
     assert {RETRIEVAL_STAGE, ASSESSMENT_STAGE, REANALYSIS_STAGE} <= set(with_key)
     plain = Settings(database_url=database_url, _env_file=None)
+    # Without the key the stages still register (#127), so their jobs fail visibly.
     without = worker_handlers(database, plain, base)
-    assert not {RETRIEVAL_STAGE, ASSESSMENT_STAGE, REANALYSIS_STAGE} & set(without)
+    assert {RETRIEVAL_STAGE, ASSESSMENT_STAGE, REANALYSIS_STAGE} <= set(without)
     # A test-supplied table (create_app(handlers=...)) never gains the evidence stages.
     explicit = worker_handlers(database, settings_for(database_url, tmp_path), {}, evidence=False)
     assert explicit == {}
@@ -620,8 +623,12 @@ async def test_stages_are_registered_only_with_the_key(app, database_url, tmp_pa
     assert stub[RETRIEVAL_STAGE].__name__ == "retrieval"
     keyless = EvidenceStages(database, plain, transport=Providers().transport())
     async with httpx.AsyncClient() as unused:
-        with pytest.raises(NonRetriableInput):
+        with pytest.raises(EvidenceUnavailable):
             keyless._clients(unused)
+    with pytest.raises(EvidenceUnavailable):
+        await keyless.retrieval(SimpleNamespace(payload={}), None)
+    with pytest.raises(EvidenceUnavailable):
+        await keyless.assessment(SimpleNamespace(payload={}), None)
 
 
 async def test_artifact_is_stored_only_as_the_job_result(client, app, providers):

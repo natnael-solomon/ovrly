@@ -4,6 +4,19 @@
 
 ### Added
 
+- Connected main flow (#127): a capture or upload now runs media validation,
+  speech, device text, claim extraction, reconciliation, evidence retrieval and
+  assessment to a published report. Speech, extraction and reconciliation are on by
+  default; without their provider settings they report a visible reason
+  (`provider_unavailable` speech, `EXTRACTION_UNAVAILABLE`, `EvidenceUnavailable`)
+  instead of being skipped. An end-to-end test with recorded synthetic provider
+  responses runs in **Backend recovery**. The live capture status no longer says
+  research is not connected when a server is configured. Corrections and claims the
+  evidence run could not assess (claim budget, provider gaps) no longer keep a report
+  provisional, and a failed evidence stage fails the investigation with
+  `EVIDENCE_FAILED` or `EVIDENCE_UNAVAILABLE` (a closed capture keeps its report and
+  marks its unassessed claims failed), so polling always ends.
+
 - Google sign-in on Android (AN-10, #36). With the backend's Web client ID set in
   `api.local.properties` (`googleWebClientId`), the account section's Sign in with Google uses
   Android Credential Manager to link the guest to a Google account (BC-D07). Signing in on a
@@ -26,7 +39,7 @@
   only after both models were refused for quota with no uncertain attempt. New
   `OVRLY_GROQ_FALLBACK_MODEL` setting; both model settings default to the RFC-D27
   models. The BE-12 global intake stop still reads the primary model's windows.
-  Live hosted speech stays disabled by default.
+  Hosted speech needs the verified account settings to run.
 
 - Backend CI reuses main's cached coverage baseline (#125): a passing `main` push
   caches its coverage report by commit, and PRs compare against that exact report
@@ -465,7 +478,7 @@
 
 ### Known limitations
 
-- Research, OCR and evidence retrieval are not connected. Uploaded media is validated and prepared; optional Groq speech remains disabled until an operator supplies verified account/model settings. Speech is not completed analysis, and no live provider behavior or entitlement has been verified. URL references remain intake-only. Media artifacts use private local storage; automatic orphan cleanup and Android investigation parsing are not implemented.
+- The main flow needs operator-verified Groq, Scholarxiv extraction and reconciliation settings to produce reports; without them each stage reports a typed unavailable reason. Android does not yet send on-device text for shared uploads, so shares rely on the 60-second text grace. Speech is not completed analysis, and no live provider behavior or entitlement has been verified. URL references remain intake-only. Media artifacts use private local storage; automatic orphan cleanup and Android investigation parsing are not implemented.
 - Gallery and report content are labeled samples. Gallery selection does not change the live overlay.
 - Native blur depends on device/system support; no backdrop refraction is implemented.
 - Physical-device testing is partial. Full cross-app capture/lifecycle behavior and live Voxide authorization/compatibility remain unverified.

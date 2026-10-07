@@ -36,6 +36,11 @@ def extraction_failure_code(failure: str | None) -> str:
     }.get(failure or "", "PROCESSING_FAILED")
 
 
+def evidence_failure_code(failure: str | None) -> str:
+    """Safe code of a terminally failed ``retrieval`` or ``assessment`` job (#127)."""
+    return "EVIDENCE_UNAVAILABLE" if failure == "EvidenceUnavailable" else "EVIDENCE_FAILED"
+
+
 class ApiError(Exception):
     """Typed, client-safe error. Messages must never contain internals or secrets."""
 
@@ -190,6 +195,9 @@ def safe_error(error_code: str | None) -> dict[str, Any] | None:
         "DURATION_LIMIT_EXCEEDED": ("The media exceeds the permitted duration", False),
         "MEDIA_PROCESSING_TIMEOUT": ("Media processing exceeded its time limit", True),
         "MEDIA_PROCESSING_UNAVAILABLE": ("Media processing is temporarily unavailable", True),
+        "EVIDENCE_UNAVAILABLE": ("Evidence checking is unavailable", False),
+        "EVIDENCE_FAILED": ("Evidence checking failed", False),
+        "CLAIM_UNASSESSED": ("This claim was not assessed; the report says why", False),
     }
     if error_code in media_errors:
         message, retryable = media_errors[error_code]

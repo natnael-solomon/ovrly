@@ -83,7 +83,8 @@ Pydantic request/read models in `services/api/schemas.py` mirror `packages/contr
 `services/pipeline/media_validation.py` snapshots and verifies completed upload bytes, probes media, checks decoded video duration, and prepares complete 16 kHz mono PCM16 WAV when audio exists. `services/media/runner.py` bounds command CPU, wall time, output and file size and reaps process groups on cancellation. Private artifacts are linked atomically under the active job lock; only fenced job-result publication makes references usable. Coverage stays `not_started`, with explicit absent audio and pending text for silent video. Opt-in retention removes job artifacts at guest/legacy expiry or tombstone purge; crash-left preparation scratch directories remain operator-cleaned. Device text and multimodal aggregation are later BE-07 slices.
 
 The additional `upload_asr` handler (`services/pipeline/speech.py`, contract stage `asr`) is wired as a fenced
-successor only when hosted speech is explicitly enabled and audio exists.
+successor when hosted speech is enabled (the default since #127), configured and audio
+exists. Enabled without configuration, speech is a visible `provider_unavailable` gap.
 `services/asr/groq.py` implements bounded Groq HTTP. `services/asr/fallback.py`
 applies RFC-D27 (decision 0004) to uploads and capture chunks alike: the primary
 `whisper-large-v3-turbo` request, then one `whisper-large-v3` request after any
@@ -97,10 +98,10 @@ Known outcomes survive restarts, and completed responses are reused within the
 same job/source/model/settings. Quota exhaustion never auto-resumes at reset.
 Owner-scoped `speech` reads retain timed segments and provenance separately from
 the unchanged preparation coverage. Successful transcription is not completed
-analysis. Live use remains disabled pending verified account/model settings;
-see [hosted speech](../backend/README.md#hosted-uploaded-speech-disabled-by-default).
+analysis. Live use still needs operator-verified account/model settings;
+see [hosted speech](../backend/README.md#hosted-uploaded-speech).
 
-Media preparation and optional speech do not claim completed investigation analysis; claim extraction remains separate work. The evidence stages (#27, `services/evidence`, `services/providers`) turn published claims into evidence and assessments through Scholarxiv retrieval, open-access passages, a router relation step and citation validation. Until #25 publishes real claims, development-only `OVRLY_STUB_REPORTS` publishes labelled fixture reports; its upload intake path does not launch hosted speech. Saved reports move to the account on a second-device merge. Every outbound evidence and hosted speech request goes through the SSRF guard in `services/providers/egress.py` (one checked resolution per connection, checked redirects, size cap); the REPO-06 (#28) security tests are listed in the [backend README](../backend/README.md#security-tests-repo-06-28).
+Media preparation and speech alone do not claim completed investigation analysis. The evidence stages (#27, `services/evidence`, `services/providers`) turn reconciled claims into evidence and assessments through Scholarxiv retrieval, open-access passages, a router relation step and citation validation; they are always registered and fail with `EvidenceUnavailable` without the Scholarxiv key. Development-only `OVRLY_STUB_REPORTS` publishes labelled fixture reports instead and turns the default-on extraction and reconciliation off; its upload intake path does not launch hosted speech. Saved reports move to the account on a second-device merge. Every outbound evidence and hosted speech request goes through the SSRF guard in `services/providers/egress.py` (one checked resolution per connection, checked redirects, size cap); the REPO-06 (#28) security tests are listed in the [backend README](../backend/README.md#security-tests-repo-06-28).
 
 `services/api/routes/device_text.py` accepts a separate backend-only v1 handoff
 for owned, validated uploaded video. Bounded immutable batches preserve
@@ -123,8 +124,9 @@ and physical-device end-to-end verification remain separate.
 BE-08 (#25) supplies the internal `enqueue_extraction` handoff and typed
 `LlmAdapter` boundary. One versioned timed observation window yields
 source-grounded provisional occurrences, with optional shared-contract
-interpretation metadata and no verdicts. Production activation is off until
-route eligibility and input authorization are verified. `jobs.stage_data`
+interpretation metadata and no verdicts. Extraction is on by default (#127); without a
+verified route pool and the Scholarxiv credential each window fails with
+`EXTRACTION_UNAVAILABLE`. `jobs.stage_data`
 persists attempt allowance and validated artifacts; an unresolved provider
 attempt fails explicitly instead of repeating inference. `StageResult` adds
 an optional transactional publication callback to the existing dictionary
@@ -143,8 +145,9 @@ publication deduplicates exact source identities without collapsing later
 repetitions. Owner-scoped investigation/capture reads expose pending, processed,
 skipped and failed source intervals separately from findings. Capture Stop fences
 this fixture-backed path too. Reports expose optional diagnostic processing
-provenance. Numeric production budgets and real ingestion remain
-gated; the legacy single-window handoff does not automatically gain run budgeting.
+provenance. Committed speech and device text feed this producer through
+`services/pipeline/producers.py`. Numeric production budgets remain candidates; the
+legacy single-window handoff does not automatically gain run budgeting.
 
 `services/pipeline/reconciliation.py` registers accepted upstream work and schedules
 one quality-only job after sealed observations and terminal upstream/extraction work.
@@ -153,9 +156,11 @@ pre-send ledger protects total capacity; lease-safe provider waits and invalid-o
 feedback are shared with extraction. No available context is silently truncated.
 Durable artifacts, capture Stop and report-snapshot fencing prevent resends and stale
 publication. Corrections retain linked appearances and immutable history, remove stale
-evidence/assessments, and hand changed claim IDs to later reassessment. Report
-interpretation finality and live reconciliation failure are additive contract metadata,
-not completed assessment or full modality coverage.
+evidence/assessments, and hand changed claim IDs to later reassessment. Its fenced
+publication enqueues BE-09 `retrieval` for every current, unassessed claim, and
+assessment publishes the final version (#127). Report interpretation finality and live
+reconciliation failure are additive contract metadata, not completed assessment or full
+modality coverage. See the [main flow](../backend/README.md#main-flow-127).
 
 `services/privacy.py` schedules opt-in retention work on the existing durable
 job engine in both worker entry points. It deletes an expired principal's
@@ -186,8 +191,8 @@ Capture polling reports missing intervals and client-declared speech/text
 coverage, separately from processing. Both worker modes verify each chunk's
 stored bytes before close and atomically enqueue `asr` and `device_text`;
 publication of both queues one `claim_extraction` job for that chunk, which
-admits the chunk's committed speech and device text to the extraction ledger when
-extraction is enabled. Stage keys preserve
+admits the chunk's committed speech and device text to the extraction ledger
+(extraction is on by default). Stage keys preserve
 per-capture/sequence idempotency, publication shares
 the queue's lease fence, and Stop cancels downstream work under the session lock.
 Capture polling derives per-claim states from the latest report, including
