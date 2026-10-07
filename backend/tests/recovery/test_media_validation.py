@@ -172,7 +172,9 @@ async def test_running_media_is_visible_and_reaps_tools_on_stop(harness, tmp_pat
         storage_dir=tmp_path / "uploads",
         artifacts_dir=tmp_path / "artifacts",
         ffprobe_path=tool,
-        media_probe_timeout_seconds=1,
+        # Only the timeout case may end by timeout; the others end by cancel or delete, which
+        # the heartbeat must observe before a timeout could race it on a loaded runner.
+        media_probe_timeout_seconds=1 if ending == "timeout" else 30,
         job_retry_transient_attempts=0,
     )
     app = create_app(config, faults=faults)

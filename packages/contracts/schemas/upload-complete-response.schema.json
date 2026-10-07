@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0).",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0).",
   "title": "UploadCompleteResponse",
   "description": "Response body for POST /v1/uploads/{id}/complete: the Upload read model with state completed and completed_at set. Completing twice returns the same body. The shape is upload.schema.json.",
   "$ref": "upload.schema.json"

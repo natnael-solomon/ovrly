@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Shared scalar and small object types referenced by the resource schemas. Definitions only.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Shared scalar and small object types referenced by the resource schemas. Definitions only.",
   "title": "Common",
   "description": "Identifier, hash, timestamp and interval types shared by every resource schema.",
   "$defs": {

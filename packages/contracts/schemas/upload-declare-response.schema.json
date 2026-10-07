@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0).",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0).",
   "title": "UploadDeclareResponse",
   "description": "Response body for POST /v1/uploads: the Upload read model with state pending. Kept as its own file so each endpoint has a request/response pair; the shape is upload.schema.json.",
   "$ref": "upload.schema.json"

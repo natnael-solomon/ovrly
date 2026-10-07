@@ -69,6 +69,21 @@ val captureApi: String = apiConfig.getProperty("captureApi", "server").trim()
 check(captureApi == "server" || captureApi == "memory") {
     "api.local.properties captureApi must be server or memory."
 }
+// Google sign-in (AN-10, #36; BC-D07): the backend's OAuth Web client ID, which Google ID
+// tokens are issued for. Configuration, not a secret, but kept out of Git like the base URL:
+// api.local.properties googleWebClientId, or the OVRLY_GOOGLE_WEB_CLIENT_ID environment
+// variable for CI. Empty leaves sign-in unavailable.
+val googleWebClientId: String = (
+    apiConfig.getProperty("googleWebClientId")?.takeIf { it.isNotBlank() }
+        ?: System.getenv("OVRLY_GOOGLE_WEB_CLIENT_ID")
+        ?: ""
+    ).trim()
+check(
+    googleWebClientId.isEmpty() ||
+        Regex("[0-9]+-[0-9a-z]+\\.apps\\.googleusercontent\\.com").matches(googleWebClientId)
+) {
+    "googleWebClientId must be a Google OAuth Web client ID (...apps.googleusercontent.com)."
+}
 
 // CI passes -Povrly.versionCode=<code> from the release ledger; local builds keep 1.
 // Google Play accepts 1..2100000000 inclusive, so anything else is a configuration error.
@@ -113,6 +128,7 @@ android {
         buildConfigField("String", "OVRLY_API_BASE_URL", quoted(apiBaseUrl))
         buildConfigField("long", "OVRLY_UPLOAD_MAX_BYTES", "${uploadMaxBytes}L")
         buildConfigField("String", "OVRLY_CAPTURE_API", quoted(captureApi))
+        buildConfigField("String", "OVRLY_GOOGLE_WEB_CLIENT_ID", quoted(googleWebClientId))
     }
     buildFeatures {
         compose = true
@@ -272,6 +288,10 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.12.0")
     // Bundled Latin model: recognition runs on the device without a model download (#100).
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    // Google sign-in for the optional account link (AN-10, #36; BC-D07).
+    implementation("androidx.credentials:credentials:1.6.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.2.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("junit:junit:4.13.2")

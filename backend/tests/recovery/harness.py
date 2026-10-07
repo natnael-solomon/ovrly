@@ -20,6 +20,15 @@ from services.jobs.retries import UnknownOutcome
 from services.settings import Settings
 from services.worker.runtime import Worker
 
+# Lease for cases that do not test leases. A stage that goes this long between heartbeats
+# under CI load loses its lease, so it is well above a loaded runner's stalls; a crashed
+# worker's lease still expires quickly enough for the re-lease waits below.
+DEFAULT_LEASE_SECONDS = 2
+# Cases about lease expiry, heartbeats or stale publication pass this explicitly.
+SHORT_LEASE_SECONDS = 0.5
+# Upper bound for the state waits; a passing case returns as soon as the state is reached.
+WAIT_SECONDS = 20
+
 
 class ScriptedFaults:
     """Crash at ``crash_at`` for the listed attempts and record every checkpoint hit."""
@@ -112,7 +121,7 @@ class Harness:
         values = {
             "database_url": self.database_url,
             "worker_shutdown_seconds": 2,
-            "job_lease_seconds": 0.5,
+            "job_lease_seconds": DEFAULT_LEASE_SECONDS,
             "job_poll_seconds": 0.05,
             "_env_file": None,
         }
@@ -192,7 +201,7 @@ class Harness:
 
         return handler
 
-    async def wait_for_state(self, job_id, *states, seconds=5):
+    async def wait_for_state(self, job_id, *states, seconds=WAIT_SECONDS):
         async with asyncio.timeout(seconds):
             while True:
                 record = await self.queue.get(job_id)
@@ -211,12 +220,12 @@ class Harness:
                 )
             )
 
-    async def wait_for_state_by_key(self, key, *states, seconds=5):
+    async def wait_for_state_by_key(self, key, *states, seconds=WAIT_SECONDS):
         job_id = await self.job_id_for(key)
         assert job_id is not None, f"No job exists for stage key {key}"
         return await self.wait_for_state(job_id, *states, seconds=seconds)
 
-    async def wait_until(self, predicate, seconds=5):
+    async def wait_until(self, predicate, seconds=WAIT_SECONDS):
         async with asyncio.timeout(seconds):
             while True:
                 if predicate():

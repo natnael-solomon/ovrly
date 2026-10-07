@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from test_contract_roundtrip import validate
 
 from services.api.main import create_app
@@ -20,9 +20,10 @@ from services.captures import stage_key
 from services.jobs.faults import SimulatedCrash
 from services.jobs.handlers import default_handlers
 from services.jobs.models import job_results, jobs
+from services.models import asr_requests
 from services.storage import LocalFilesystemStore
 
-from .test_speech import speech_settings, success
+from .test_speech import model_of, speech_settings, success
 from .test_speech_retry import exhausted, retry
 
 DURATION = 10_000
@@ -138,7 +139,7 @@ def capture_worker(harness, config, replay, *, quota_clock=None, faults=None):
 
 
 def capture_config(harness, tmp_path, **overrides):
-    return speech_settings(harness, tmp_path, asr_audio_max_bytes=400_000, **overrides)
+    return speech_settings(harness, tmp_path, **({"asr_audio_max_bytes": 400_000} | overrides))
 
 
 async def guest(http):
@@ -580,13 +581,17 @@ async def test_crash_recovery_never_repeats_an_uncertain_chunk_call(harness, tmp
         await recovering.start()
         body = await settled(http, headers, capture, 1)
         await recovering.stop()
+    assert body["speech"]["segments"] == [offsets(0)]
     if point in {"before_provider_call", "after_provider_call"}:
-        assert body["speech"]["status"] == "unavailable"
-        assert body["speech"]["reason"] == "unknown_outcome"
-        assert ("speech", "ASR_OUTCOME_UNKNOWN", 0) in gaps(body)
+        # The uncertain primary is never resent; the fallback model is tried once.
+        assert body["speech"]["model"] == "synthetic-fallback"
+        assert [model_of(call) for call in calls] == (
+            ["synthetic-fallback"]
+            if point == "before_provider_call"
+            else ["synthetic-model", "synthetic-fallback"]
+        )
     else:
-        assert body["speech"]["segments"] == [offsets(0)]
-    assert len(calls) == (0 if point == "before_provider_call" else 1)
+        assert [model_of(call) for call in calls] == ["synthetic-model"]
     assert body["analysis"]["text"]["chunks"][0]["seq"] == 0
 
 
@@ -611,14 +616,14 @@ async def test_shared_quota_blocks_then_retry_requeues_only_missing_chunks(
         capture = await start(http, headers)
         worker = capture_worker(harness, config, replay, quota_clock=lambda: clock[0])
         await worker.start()
-        assert (await send(http, headers, capture, 0, package(0))).status_code == 200
-        await settled(http, headers, capture, 1)
-        assert (await send(http, headers, capture, 1, package(1))).status_code == 200
-        blocked = await settled(http, headers, capture, 2)
+        for seq in range(3):
+            assert (await send(http, headers, capture, seq, package(seq))).status_code == 200
+            blocked = await settled(http, headers, capture, seq + 1)
         await worker.stop()
-        assert blocked["speech"]["segments"] == [offsets(0)]
-        assert ("speech", "ASR_QUOTA_EXHAUSTED", DURATION) in gaps(blocked)
-        assert len(calls) == 1
+        # Each model's own daily window admits one chunk; the third has no room on either.
+        assert blocked["speech"]["segments"] == [offsets(0), offsets(1)]
+        assert ("speech", "ASR_QUOTA_EXHAUSTED", 2 * DURATION) in gaps(blocked)
+        assert [model_of(call) for call in calls] == ["synthetic-model", "synthetic-fallback"]
         assert await retry(http, capture, headers, "too-early") == "quota_exhausted"
         clock[0] += timedelta(days=1)
         assert await retry(http, capture, headers, "after-reset") == "accepted"
@@ -629,12 +634,12 @@ async def test_shared_quota_blocks_then_retry_requeues_only_missing_chunks(
         async with asyncio.timeout(15):
             while True:
                 done = await read(http, headers, capture)
-                if done["speech"]["status"] == "completed" and len(done["speech"]["segments"]) > 1:
+                if done["speech"]["status"] == "completed" and len(done["speech"]["segments"]) > 2:
                     break
                 await asyncio.sleep(0.02)
         await restarted.stop()
-        assert done["speech"]["segments"] == [offsets(0), offsets(1)]
-        assert len(calls) == 2
+        assert done["speech"]["segments"] == [offsets(0), offsets(1), offsets(2)]
+        assert len(calls) == 3
         assert await retry(http, capture, headers, "third") == "already_complete"
         outsider = await guest(http)
         response = await http.post(
@@ -692,3 +697,93 @@ async def test_audio_overrun_is_clamped_inside_the_chunk(running):
         "audio": {"bytes": (DURATION + 640) * 32, "duration_ms": DURATION + 640},
         "frames": 1,
     }
+
+
+@pytest.mark.parametrize(
+    ("primary", "fallback", "reason"),
+    [
+        (exhausted(None), None, None),
+        (httpx.ReadTimeout("private detail"), None, None),
+        (httpx.Response(503, json={}), None, None),
+        (exhausted(None), httpx.ConnectError("private detail"), "offline"),
+        (httpx.ReadTimeout("private detail"), exhausted(None), "quota_exhausted"),
+        (httpx.Response(200, json={}), httpx.ReadTimeout("private detail"), "unknown_outcome"),
+    ],
+)
+async def test_chunk_falls_back_once_and_is_explicitly_unavailable_when_both_fail(
+    harness, tmp_path, primary, fallback, reason
+):
+    calls = []
+    answers = {"synthetic-model": primary, "synthetic-fallback": fallback}
+
+    def replay(request):
+        calls.append(model_of(request))
+        answer = answers[calls[-1]]
+        if answer is None:
+            return success(request)
+        if isinstance(answer, Exception):
+            raise type(answer)(str(answer), request=request)
+        return answer
+
+    config = capture_config(harness, tmp_path)
+    app = create_app(config)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http,
+    ):
+        headers = await guest(http)
+        capture = await start(http, headers)
+        worker = capture_worker(harness, config, replay)
+        await worker.start()
+        assert (await send(http, headers, capture, 0, package(0))).status_code == 200
+        body = await settled(http, headers, capture, 1)
+        await worker.stop()
+    assert calls == ["synthetic-model", "synthetic-fallback"]
+    assert "private" not in str(body)
+    if reason is None:
+        assert body["speech"]["model"] == "synthetic-fallback"
+        assert body["speech"]["segments"] == [offsets(0)]
+    else:
+        assert body["speech"]["status"] == "unavailable"
+        assert body["speech"]["reason"] == reason
+        code = {"quota_exhausted": "ASR_QUOTA_EXHAUSTED", "unknown_outcome": "ASR_OUTCOME_UNKNOWN"}
+        assert ("speech", code.get(reason, "ASR_UNAVAILABLE"), 0) in gaps(body)
+        assert body["analysis"]["text"]["chunks"][0]["seq"] == 0
+
+
+@pytest.mark.parametrize(
+    ("chunk", "overrides", "reason"),
+    [
+        (package(0, audio_ms=DURATION - 1001), {}, "missing_audio"),
+        (package(0), {"asr_audio_max_bytes": 100_000}, "chunk_exceeds_file_cap"),
+    ],
+)
+async def test_short_or_over_cap_chunk_audio_is_unavailable_before_any_call(
+    harness, tmp_path, chunk, overrides, reason
+):
+    config = capture_config(harness, tmp_path, **overrides)
+    app = create_app(config)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http,
+    ):
+        headers = await guest(http)
+        capture = await start(http, headers)
+        worker = capture_worker(
+            harness, config, lambda _: pytest.fail("Refused audio must not reach Groq")
+        )
+        await worker.start()
+        assert (await send(http, headers, capture, 0, chunk)).status_code == 200
+        body = await settled(http, headers, capture, 1)
+        await worker.stop()
+        async with app.state.database.engine.connect() as connection:
+            reserved = await connection.scalar(
+                select(func.count())
+                .select_from(asr_requests)
+                .where(asr_requests.c.account_id == config.groq_account_id)
+            )
+    assert body["speech"]["status"] == "unavailable"
+    assert body["speech"]["reason"] == reason
+    assert body["speech"]["segments"] == []
+    assert ("speech", "ASR_UNAVAILABLE", 0) in gaps(body)
+    assert reserved == 0

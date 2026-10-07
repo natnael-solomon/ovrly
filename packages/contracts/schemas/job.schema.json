@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py JobSummary: the client-visible columns of the jobs table (backend/services/jobs/models.py). Lease owner, lease expiry, fencing token, generation, payload and provider request id stay server-side.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py JobSummary: the client-visible columns of the jobs table (backend/services/jobs/models.py). Lease owner, lease expiry, fencing token, generation, payload and provider request id stay server-side.",
   "title": "Job",
   "description": "Summary of one durable queue job (BE-04, #16), nested in an investigation read and the target of the queue_cancel, queue_retry and queue_continue voice actions. state follows the job state machine; cancel_requested is the separate flag that distinguishes a requested cancellation (a worker still holds the lease) from the effective cancelled state. Clients map unknown state, stage and retry_class values to UNKNOWN.",
   "type": "object",

@@ -13,7 +13,6 @@ from pathlib import Path
 import httpx
 import pytest
 from evidence_cassettes import KEY, Providers
-from sqlalchemy import delete
 
 from recovery.test_analysis import audiovisual, send_text, text_source
 from recovery.test_capture_processing import finish, guest, package, send, start
@@ -22,7 +21,6 @@ from services.api.main import create_app
 from services.asr.groq import GroqAdapter
 from services.evidence.stages import EvidenceStages
 from services.jobs.handlers import default_handlers
-from services.models import provider_buckets
 from services.pipeline.llm import ScholarxivAdapter, configured_llm
 from services.storage import LocalFilesystemStore
 
@@ -122,10 +120,9 @@ class Replay:
 
 
 @pytest.fixture
-async def replays(harness):
-    """Build a :class:`Replay` per test; the shared Scholarxiv bucket starts empty."""
-    async with harness.control.engine.begin() as connection:
-        await connection.execute(delete(provider_buckets))
+async def replays():
+    """Build a :class:`Replay` per test. Each recovery case has its own database (#131),
+    so provider buckets and queued jobs never carry over from another case."""
     clients = []
 
     def build(**options):

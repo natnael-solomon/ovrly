@@ -12,3 +12,8 @@ uploadMaxBytes=268435456
 # Live capture uploads: server (default) or memory, the labelled in-memory test server
 # for offline demonstrations. Nothing leaves the device with memory.
 captureApi=server
+# Google sign-in (AN-10, #36): the backend's OAuth Web client ID (OVRLY_GOOGLE_CLIENT_ID),
+# ending in .apps.googleusercontent.com. Empty leaves sign-in unavailable. The Android OAuth
+# clients (package app.ovrly plus the debug and release SHA-1) are matched by Google and are not
+# configured here.
+googleWebClientId=

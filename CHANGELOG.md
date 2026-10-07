@@ -16,6 +16,30 @@
   provisional, and a failed evidence stage fails the investigation with
   `EVIDENCE_FAILED` or `EVIDENCE_UNAVAILABLE`, so polling always ends.
 
+- Google sign-in on Android (AN-10, #36). With the backend's Web client ID set in
+  `api.local.properties` (`googleWebClientId`), the account section's Sign in with Google uses
+  Android Credential Manager to link the guest to a Google account (BC-D07). Signing in on a
+  second device with an account linked elsewhere shows that account's saved reports there,
+  and the checks the previous guest started on that device are removed from it. Setup is in
+  the Android README. Second-device recovery stays disclosed as incomplete (decision 0003)
+  until it is verified on two physical devices.
+
+- RFC-D27 hosted speech fallback (BE-07b, #117): upload and capture-chunk speech
+  call Groq `whisper-large-v3-turbo` first and, after a quota, rate-limit, outage,
+  offline, missing-model, invalid-response or unknown-outcome failure, try
+  `whisper-large-v3` once. If both fail the chunk is `ASR_UNAVAILABLE` with the last
+  attempt's reason. Missing, short or over-cap audio is refused before any call, and
+  an observed empty result is `no_speech`, not a failure. Each model reserves its
+  own quota, and a model whose outcome is unknown is never sent the same audio
+  again. `speech.reason` gains `offline`, `invalid_response`, `missing_audio`,
+  `chunk_exceeds_file_cap`, `model_unavailable` and `no_speech`; the contract moves
+  to `0.3.0-draft` because the breaking-change gate counts new response enum
+  values, and the Android enum mirrors them. Owner speech retry now applies
+  only after both models were refused for quota with no uncertain attempt. New
+  `OVRLY_GROQ_FALLBACK_MODEL` setting; both model settings default to the RFC-D27
+  models. The BE-12 global intake stop still reads the primary model's windows.
+  Hosted speech needs the verified account settings to run.
+
 - Backend CI reuses main's cached coverage baseline (#125): a passing `main` push
   caches its coverage report by commit, and PRs compare against that exact report
   instead of rerunning main's suite. A missing or mismatched cache warns and

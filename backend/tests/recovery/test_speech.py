@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from test_contract_roundtrip import validate
 
 from recovery.test_media_validation import audio_bytes, media_settings, submit, wait_for_media
@@ -29,6 +29,7 @@ def speech_settings(harness, tmp_path, **overrides):
         "asr_enabled": True,
         "groq_api_key": "synthetic-offline-key",
         "groq_model": "synthetic-model",
+        "groq_fallback_model": "synthetic-fallback",
         "groq_account_id": "synthetic-" + uuid.uuid4().hex,
         "asr_limits_verified_on": date(2026, 10, 5),
         "asr_audio_max_bytes": 100000,
@@ -69,7 +70,10 @@ def success(_):
 
 
 async def wait_for_speech(http, identifier, headers):
-    async with asyncio.timeout(10):
+    # One wait covers intake, ffprobe/ffmpeg preparation and every speech attempt, so it is
+    # wider than the other waits. If it still expires, the recovery conftest reports every
+    # pending task stack and this case's job rows.
+    async with asyncio.timeout(30):
         while True:
             response = await http.get(f"/v1/investigations/{identifier}", headers=headers)
             assert response.status_code == 200, response.text
@@ -77,6 +81,14 @@ async def wait_for_speech(http, identifier, headers):
             if (body.get("speech") or {}).get("status") in {"completed", "unavailable"}:
                 return body
             await asyncio.sleep(0.02)
+
+
+def model_of(request):
+    """The model named in a multipart transcription request."""
+    content = request.content
+    marker = b'name="model"\r\n\r\n'
+    start = content.index(marker) + len(marker)
+    return content[start : content.index(b"\r\n", start)].decode()
 
 
 def speech_error(body):
@@ -217,15 +229,23 @@ async def test_concurrent_workers_and_restart_cannot_bypass_account_model_quota(
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http,
     ):
-        submissions = [await submit(http, audio_bytes()) for _ in range(2)]
+        submissions = [await submit(http, audio_bytes()) for _ in range(3)]
         await asyncio.gather(*(worker.start() for worker in workers))
         results = await asyncio.gather(
             *(wait_for_speech(http, identifier, headers) for identifier, headers in submissions)
         )
         await asyncio.gather(*(worker.stop() for worker in workers))
-        assert sorted(body["speech"]["status"] for body in results) == ["completed", "unavailable"]
+        statuses = sorted(body["speech"]["status"] for body in results)
+        assert statuses == ["completed", "completed", "unavailable"]
+        completed = [body for body in results if body["speech"]["status"] == "completed"]
+        # Each model has its own windows: one chunk each, then neither has room.
+        assert sorted(body["speech"]["model"] for body in completed) == [
+            "synthetic-fallback",
+            "synthetic-model",
+        ]
         [blocked] = [body for body in results if body["speech"]["status"] == "unavailable"]
         assert speech_error(blocked) == "ASR_QUOTA_EXHAUSTED"
+        assert blocked["speech"]["reason"] == "quota_exhausted"
         identifier, headers = await submit(http, audio_bytes())
         restarted = speech_worker(harness, config, success)
         await restarted.start()
@@ -294,18 +314,23 @@ async def test_crash_recovery_never_repeats_uncertain_or_completed_speech(harnes
         await recovering.start()
         body = await wait_for_speech(http, identifier, headers)
         await recovering.stop()
+        assert body["speech"]["status"] == "completed"
         if point in {"before_provider_call", "after_provider_call"}:
-            assert body["speech"]["status"] == "unavailable"
-            assert body["speech"]["reason"] == "unknown_outcome"
-            assert speech_error(body) == "ASR_UNAVAILABLE"
+            # The primary may have run: it is never resent, and the fallback is tried once.
+            assert body["speech"]["model"] == "synthetic-fallback"
+            assert [model_of(call) for call in calls] == (
+                ["synthetic-fallback"]
+                if point == "before_provider_call"
+                else ["synthetic-model", "synthetic-fallback"]
+            )
         else:
-            assert body["speech"]["status"] == "completed"
-        assert len(calls) == (0 if point == "before_provider_call" else 1)
+            assert body["speech"]["model"] == "synthetic-model"
+            assert [model_of(call) for call in calls] == ["synthetic-model"]
 
 
 @pytest.mark.parametrize("status", [429, 503])
 @pytest.mark.parametrize("crash", [False, True])
-async def test_known_transient_outcomes_retry_durably_without_bypassing_retry_caps(
+async def test_primary_rate_limit_or_outage_falls_back_once_and_survives_a_crash(
     harness, tmp_path, status, crash
 ):
     class CrashAfterOutcome:
@@ -345,7 +370,8 @@ async def test_known_transient_outcomes_retry_durably_without_bypassing_retry_ca
         body = await wait_for_speech(http, identifier, headers)
         await worker.stop()
         assert body["speech"]["status"] == "completed", body
-        assert len(calls) == 2
+        assert body["speech"]["model"] == "synthetic-fallback"
+        assert [model_of(call) for call in calls] == ["synthetic-model", "synthetic-fallback"]
 
 
 async def test_quota_reset_only_admits_new_work_never_resumes_blocked_speech(harness, tmp_path):
@@ -359,7 +385,9 @@ async def test_quota_reset_only_admits_new_work_never_resumes_blocked_speech(har
         worker = speech_worker(harness, config, success, quota_clock=lambda: now)
         await worker.start()
         first = await submit(http, audio_bytes())
-        assert (await wait_for_speech(http, *first))["speech"]["status"] == "completed"
+        assert (await wait_for_speech(http, *first))["speech"]["model"] == "synthetic-model"
+        second = await submit(http, audio_bytes())
+        assert (await wait_for_speech(http, *second))["speech"]["model"] == "synthetic-fallback"
         blocked = await submit(http, audio_bytes())
         before = await wait_for_speech(http, *blocked)
         assert speech_error(before) == "ASR_QUOTA_EXHAUSTED"
@@ -415,12 +443,17 @@ async def test_cancelled_speech_cannot_publish_and_keeps_reservation(
         assert len(calls) == (0 if point == "before_provider_call" else 1)
         restarted = speech_worker(harness, config, replay)
         await restarted.start()
-        new = await submit(http, audio_bytes())
-        assert speech_error(await wait_for_speech(http, *new)) == "ASR_QUOTA_EXHAUSTED"
+        # The cancelled primary reservation is kept, so only the fallback has room.
+        new = await wait_for_speech(http, *(await submit(http, audio_bytes())))
+        assert new["speech"]["model"] == "synthetic-fallback"
+        blocked = await submit(http, audio_bytes())
+        assert speech_error(await wait_for_speech(http, *blocked)) == "ASR_QUOTA_EXHAUSTED"
         await restarted.stop()
 
 
-@pytest.mark.parametrize("status", [200, 401, 408, 429, 500, 502, 503, 504, "timeout"])
+@pytest.mark.parametrize(
+    "status", [200, 401, 404, 408, 413, 429, 500, 502, 503, 504, "timeout", "offline"]
+)
 @pytest.mark.parametrize("crash", [False, True])
 async def test_terminal_provider_outcomes_are_safe_and_charge_conservatively(
     harness, tmp_path, status, crash
@@ -436,6 +469,8 @@ async def test_terminal_provider_outcomes_are_safe_and_charge_conservatively(
         calls.append(request)
         if status == "timeout":
             raise httpx.ReadTimeout("private detail", request=request)
+        if status == "offline":
+            raise httpx.ConnectError("private detail", request=request)
         return httpx.Response(status, json={"private": "not exposed"})
 
     config = speech_settings(harness, tmp_path, asr_requests_per_day=1)
@@ -470,13 +505,19 @@ async def test_terminal_provider_outcomes_are_safe_and_charge_conservatively(
         assert speech_error(failed) == (
             "ASR_QUOTA_EXHAUSTED" if status == 429 else "ASR_UNAVAILABLE"
         )
-        if ambiguous:
-            assert failed["speech"]["reason"] == "unknown_outcome"
+        assert failed["speech"]["reason"] == {
+            200: "invalid_response",
+            404: "model_unavailable",
+            413: "chunk_exceeds_file_cap",
+            429: "quota_exhausted",
+            "offline": "offline",
+        }.get(status, "unknown_outcome" if ambiguous else "provider_unavailable")
         assert "private" not in str(failed)
         new = await submit(http, audio_bytes())
         assert speech_error(await wait_for_speech(http, *new)) == "ASR_QUOTA_EXHAUSTED"
         await worker.stop()
-        assert len(calls) == 1
+        # Both models were tried once each and both reservations are kept.
+        assert [model_of(call) for call in calls] == ["synthetic-model", "synthetic-fallback"]
 
 
 async def test_video_without_audio_skips_groq_even_when_enabled(harness, tmp_path):
@@ -562,21 +603,28 @@ async def test_provider_wait_keeps_heartbeats_and_stops_on_cancel_or_lease_loss(
         else:
             await harness.queue.release(observed.job.lease)
         await asyncio.wait_for(stopped.wait(), 5)
+        if ending == "stale":
+            finish.set()
         body = await wait_for_speech(http, identifier, headers)
         await worker.stop()
-        assert body["speech"]["status"] == ("completed" if ending == "finish" else "unavailable")
-        if ending == "stale":
-            assert body["speech"]["reason"] == "unknown_outcome"
         if ending == "cancel":
+            assert body["speech"]["status"] == "unavailable"
             assert body["state"] == "cancelled"
-        assert len(calls) == 1
+            assert len(calls) == 1
+        elif ending == "stale":
+            # The interrupted primary is never resent; the fallback answers once.
+            assert body["speech"]["status"] == "completed"
+            assert body["speech"]["model"] == "synthetic-fallback"
+            assert [model_of(call) for call in calls] == ["synthetic-model", "synthetic-fallback"]
+        else:
+            assert body["speech"]["status"] == "completed"
+            assert len(calls) == 1
 
 
 @pytest.mark.parametrize(
     "field",
     [
         "groq_api_key",
-        "groq_model",
         "groq_account_id",
         "asr_limits_verified_on",
         "asr_requests_per_minute",
@@ -630,9 +678,27 @@ async def test_unusable_prepared_source_never_reaches_provider(harness, tmp_path
         body = await wait_for_speech(http, *submitted)
         await worker.stop()
         assert speech_error(body) == "ASR_UNAVAILABLE"
+        # Missing or changed audio is a gap before any reservation, never silence.
+        assert body["speech"]["reason"] == (
+            "provider_unavailable" if change == "preparation-deleted" else "missing_audio"
+        )
+        async with app.state.database.engine.connect() as connection:
+            reserved = await connection.scalar(
+                select(func.count())
+                .select_from(asr_requests)
+                .where(asr_requests.c.account_id == config.groq_account_id)
+            )
+        assert reserved == 0
 
 
-@pytest.mark.parametrize("change", [{"groq_model": "different-model"}, {"asr_enabled": False}])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"groq_model": "different-model"},
+        {"groq_fallback_model": "different-fallback"},
+        {"asr_enabled": False},
+    ],
+)
 async def test_queued_speech_cannot_silently_change_model_or_enablement(harness, tmp_path, change):
     config = speech_settings(harness, tmp_path)
 

@@ -61,8 +61,9 @@ internal class ApiServices(
         internal set
 
     /**
-     * Optional account link (BC-D07, #36), on the same [api] and credential. Its ID token
-     * source is [NoIdTokenSource] until a Google OAuth client is registered for this app.
+     * Optional account link (BC-D07, #36), on the same [api] and credential. The app's own
+     * instance uses Google sign-in when the build has a Web client ID; otherwise sign-in is
+     * unavailable.
      */
     var account: AccountLinker = AccountLinker(api, NoIdTokenSource)
         internal set
@@ -106,6 +107,11 @@ internal class ApiServices(
             )
             return ApiServices(api, jobs, investigations, reconciler, live).also {
                 it.saved = SavedReports(api, database.savedReports())
+                it.account = AccountLinker(
+                    api,
+                    GoogleIdTokenSource(BuildConfig.OVRLY_GOOGLE_WEB_CLIENT_ID),
+                    onSwitched = { database.localHistory().forgetServerHistory() }
+                )
             }
         }
 

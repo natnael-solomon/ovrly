@@ -20,6 +20,7 @@ import app.ovrly.data.SIGN_IN_UNAVAILABLE
 import app.ovrly.data.SavedReportEntry
 import app.ovrly.data.StoredSave
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -136,6 +137,8 @@ class SavedReportsScreenTest {
         showSections(ChecksUiState(loaded = true, account = AccountUiState(available = true)))
         compose.onNodeWithText("Sign in with Google").performScrollTo().assertIsEnabled()
             .performClick()
-        assertEquals(listOf<CheckCommand>(CheckCommand.LinkAccount), commands)
+        val link = commands.single() as CheckCommand.LinkAccount
+        // The picker needs the screen it is shown over.
+        assertNotNull(link.activity)
     }
 }

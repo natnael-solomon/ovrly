@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py UploadCreateRequest field for field.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py UploadCreateRequest field for field.",
   "title": "UploadDeclareRequest",
   "description": "Request body for POST /v1/uploads (BE-05, #19). The client declares the bytes it is about to send; the server answers with a scoped upload target and verifies size and hash at completion. size_bytes must be positive; the server enforces OVRLY_UPLOAD_MAX_BYTES and answers 413 UPLOAD_TOO_LARGE above it.",
   "type": "object",

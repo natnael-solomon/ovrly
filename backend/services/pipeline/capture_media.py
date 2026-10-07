@@ -32,14 +32,19 @@ from services.api.text_schemas import (
     TextRecognizer,
     TextSampling,
 )
-from services.asr.groq import ASRAdapter, ASRUnavailable
-from services.asr.reservations import complete, reserve, resume
-from services.jobs.faults import Checkpoint
+from services.asr.fallback import SpeechAudio, transcribe
+from services.asr.groq import (
+    ASRAdapter,
+    ASRChunkTooLarge,
+    ASRMissingAudio,
+    failure_reason,
+)
 from services.jobs.handlers import JobContext, JobHandler
 from services.jobs.models import job_results, jobs
 from services.jobs.queue import ClaimedJob
-from services.jobs.retries import NonRetriableInput, RetryableError
+from services.jobs.retries import NonRetriableInput
 from services.models import capture_chunks, capture_sessions
+from services.pipeline.analysis import speech_gap
 from services.settings import Settings
 from services.storage import UploadStore
 
@@ -52,6 +57,8 @@ MANIFEST_MAX_BYTES = 2_097_152
 BYTES_PER_MS = 32
 # Android attributes each whole audio buffer to the chunk its first sample falls in.
 AUDIO_OVERRUN_MS = 1000
+# Audio covering less of its chunk than this is missing samples, not a shorter recording.
+SHORT_AUDIO_RATIO = 0.9
 _OBSERVATION_IDS = uuid.UUID("5d4f0f43-9a52-4b8e-9b1e-0c6f1f6a7c01")
 
 
@@ -221,6 +228,11 @@ def package_summary(package: Package) -> dict[str, Any]:
     }
 
 
+def short_audio(pcm: bytes, length_ms: int) -> bool:
+    """Missing samples are a visible gap, never silence (``asr_policy.audio_problem``)."""
+    return not pcm or len(pcm) % 2 == 1 or len(pcm) < length_ms * BYTES_PER_MS * SHORT_AUDIO_RATIO
+
+
 def _wav(pcm: bytes) -> bytes:
     output = io.BytesIO()
     with wave.open(output, "wb") as audio:
@@ -298,7 +310,6 @@ def build_capture_speech(
     adapter: ASRAdapter | None = None,
     quota_clock: Callable[[], datetime] | None = None,
 ) -> JobHandler:
-    from services.pipeline.media_validation import _heartbeat_while as heartbeat_while
     from services.pipeline.speech import speech_provider, speech_settings_hash
 
     provider = speech_provider(settings, adapter)
@@ -311,59 +322,61 @@ def build_capture_speech(
             return _unavailable("disabled")
         if not settings.asr_configured:
             return _unavailable("provider_unavailable")
-        previous = await resume(job, context)
-        if previous is not None:
-            return previous
-        package = await _load(store, prepared)
-        if package.audio is None:
-            raise InvalidPackage("Capture package audio disappeared")
-        audio = _wav(package.audio)
-        if len(audio) > settings.asr_audio_max_bytes:
-            raise ASRUnavailable
-        duration_ms = len(package.audio) // BYTES_PER_MS
         start = prepared.chunk.seq * prepared.chunk_duration_ms
         end = prepared.chunk.end_ms
-        request_id = await reserve(job, context, settings, duration_ms / 1000, quota_clock)
-        await context.checkpoint(Checkpoint.BEFORE_PROVIDER_CALL, job)
-        await context.heartbeat()
-        try:
-            segments = await heartbeat_while(
-                context,
-                provider.transcribe(audio, duration_ms=max(duration_ms, 1), offset_ms=start),
+
+        async def load() -> SpeechAudio:
+            package = await _load(store, prepared)
+            if package.audio is None:
+                raise InvalidPackage("Capture package audio disappeared")
+            if short_audio(package.audio, end - start):
+                raise ASRMissingAudio
+            audio = _wav(package.audio)
+            if len(audio) > settings.asr_audio_max_bytes:
+                raise ASRChunkTooLarge
+            duration_ms = len(package.audio) // BYTES_PER_MS
+            return SpeechAudio(
+                audio, duration_ms, duration_ms / 1000, hashlib.sha256(package.audio).hexdigest()
             )
-        except (ASRUnavailable, RetryableError) as error:
-            await context.checkpoint(Checkpoint.AFTER_PROVIDER_CALL, job)
-            await complete(job, context, request_id, None, error=error)
-            await context.checkpoint(Checkpoint.AFTER_ARTIFACT_STORE, job)
-            raise
-        await context.checkpoint(Checkpoint.AFTER_PROVIDER_CALL, job)
-        result = {
-            "speech": {
-                "status": "completed",
-                "reason": None,
-                "provider": "groq",
-                "model": settings.groq_model,
-                "processing_version": CAPTURE_ASR_VERSION,
-                "source_sha256": prepared.chunk.sha256,
-                "audio_sha256": hashlib.sha256(package.audio).hexdigest(),
-                "settings_sha256": speech_settings_hash(settings),
-                "segments": [
-                    {
-                        "text": segment["text"],
-                        # Audio overrun past the chunk is attributed to its final millisecond.
-                        "interval": {
-                            "start_ms": min(segment["start_ms"], end - 1),
-                            "end_ms": min(segment["end_ms"], end),
-                            "timebase": "capture",
-                        },
-                    }
-                    for segment in segments
-                ],
+
+        def build(
+            model: str, segments: list[dict[str, Any]], speech: SpeechAudio
+        ) -> dict[str, Any]:
+            return {
+                "speech": {
+                    "status": "completed",
+                    "reason": None if segments else "no_speech",
+                    "provider": "groq",
+                    "model": model,
+                    "processing_version": CAPTURE_ASR_VERSION,
+                    "source_sha256": prepared.chunk.sha256,
+                    "audio_sha256": speech.sha256,
+                    "settings_sha256": speech_settings_hash(settings),
+                    "segments": [
+                        {
+                            "text": segment["text"],
+                            # Audio overrun past the chunk is attributed to its final millisecond.
+                            "interval": {
+                                "start_ms": min(segment["start_ms"], end - 1),
+                                "end_ms": min(segment["end_ms"], end),
+                                "timebase": "capture",
+                            },
+                        }
+                        for segment in segments
+                    ],
+                }
             }
-        }
-        await complete(job, context, request_id, result)
-        await context.checkpoint(Checkpoint.AFTER_ARTIFACT_STORE, job)
-        return result
+
+        return await transcribe(
+            job,
+            context,
+            settings,
+            provider,
+            load=load,
+            offset_ms=start,
+            build=build,
+            clock=quota_clock,
+        )
 
     return handle
 
@@ -389,18 +402,6 @@ def build_capture_text(store: UploadStore) -> JobHandler:
     return handle
 
 
-_SPEECH_GAPS = {
-    "no_audio_track": "NO_AUDIO_TRACK",
-    "disabled": "ASR_DISABLED",
-    "ASRQuotaExhausted": "ASR_QUOTA_EXHAUSTED",
-    "ASRUnknownOutcome": "ASR_OUTCOME_UNKNOWN",
-}
-_SPEECH_REASONS = {
-    "NO_AUDIO_TRACK": "no_audio_track",
-    "ASR_DISABLED": "disabled",
-    "ASR_QUOTA_EXHAUSTED": "quota_exhausted",
-    "ASR_OUTCOME_UNKNOWN": "unknown_outcome",
-}
 _ACTIVE = {"queued", "leased", "running"}
 
 
@@ -444,7 +445,7 @@ async def capture_analysis(
     running = False
     analyzed: set[str] = set()
     speech_meta: dict[str, Any] | None = None
-    first_speech_gap: str | None = None
+    first_speech_reason: str | None = None
     for chunk in received:
         span = interval(chunk.seq * session.chunk_duration_ms, chunk.end_ms).model_dump(mode="json")
         digest = stage_key(capture_id, chunk.seq).input_hash
@@ -458,7 +459,7 @@ async def capture_analysis(
                 gaps.append(
                     {"modality": modality, "reason": "CAPTURE_CHUNK_INVALID", "interval": span}
                 )
-            first_speech_gap = first_speech_gap or "CAPTURE_CHUNK_INVALID"
+            first_speech_reason = first_speech_reason or "provider_unavailable"
             continue
         speech = stages.get("asr")
         if speech is None or speech.state in _ACTIVE:
@@ -470,14 +471,13 @@ async def capture_analysis(
             speech_meta = speech_meta or result
             segments.extend(result["segments"])
         else:
-            key = (
+            reason = (
                 speech.result["speech"]["reason"]
                 if speech.state == "published"
-                else speech.failure or ""
+                else failure_reason(speech.failure)
             )
-            reason = _SPEECH_GAPS.get(key, "ASR_UNAVAILABLE")
-            first_speech_gap = first_speech_gap or reason
-            gaps.append({"modality": "speech", "reason": reason, "interval": span})
+            first_speech_reason = first_speech_reason or reason
+            gaps.append({"modality": "speech", "reason": speech_gap(reason), "interval": span})
         text = stages.get("device_text")
         if text is None or text.state in _ACTIVE:
             pending.add("text")
@@ -526,9 +526,11 @@ async def capture_analysis(
     else:
         speech_read = {
             "status": "unavailable",
-            "reason": _SPEECH_REASONS.get(first_speech_gap or "", "provider_unavailable"),
+            "reason": first_speech_reason or "provider_unavailable",
         }
     speech_read["segments"] = segments
+    if speech_read["status"] == "completed" and not segments:
+        speech_read["reason"] = "no_speech"
     observations = any(
         frame["text_observations"] for item in text_chunks for frame in item["frames"]
     )

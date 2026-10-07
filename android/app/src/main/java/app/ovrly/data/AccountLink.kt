@@ -1,6 +1,9 @@
 package app.ovrly.data
 
 import android.content.Context
+import androidx.room.Dao
+import androidx.room.Query
+import androidx.room.Transaction
 import app.ovrly.contract.ContractJson
 import app.ovrly.contract.ContractSyntax
 import java.io.File
@@ -12,8 +15,9 @@ import kotlinx.serialization.Serializable
  * Optional account link (AN-10, #36; BC-D07). Checking never needs it: every call works with
  * the guest credential. Linking upgrades this device's guest to a Google account in place, or,
  * when the account already exists on another device, swaps this device to the account's
- * credential. The Google ID token comes from an [IdTokenSource]; this build has none, because
- * no Google OAuth client is registered yet, so sign-in is reported as unavailable.
+ * credential. The Google ID token comes from an [IdTokenSource]: [GoogleIdTokenSource] when the
+ * build has a Google Web client ID, otherwise [NoIdTokenSource], which reports sign-in as
+ * unavailable.
  */
 
 /** Where a Google ID token comes from. Tests inject a fake; no test contacts Google. */
@@ -21,7 +25,11 @@ internal interface IdTokenSource {
     /** False when this build cannot sign in, for example with no OAuth client configured. */
     val available: Boolean
 
-    suspend fun idToken(): IdTokenResult
+    /**
+     * Asks for an ID token. [activity] is the screen the account picker is shown over; a
+     * source that needs one answers [IdTokenResult.Unavailable] without it.
+     */
+    suspend fun idToken(activity: Context?): IdTokenResult
 }
 
 internal sealed interface IdTokenResult {
@@ -41,7 +49,8 @@ internal sealed interface IdTokenResult {
 internal object NoIdTokenSource : IdTokenSource {
     override val available: Boolean = false
 
-    override suspend fun idToken(): IdTokenResult = IdTokenResult.Unavailable(SIGN_IN_UNAVAILABLE)
+    override suspend fun idToken(activity: Context?): IdTokenResult =
+        IdTokenResult.Unavailable(SIGN_IN_UNAVAILABLE)
 }
 
 internal const val SIGN_IN_UNAVAILABLE = "Sign-in isn't available in this build."
@@ -155,18 +164,55 @@ internal sealed interface LinkOutcome {
     data class Failed(val failure: ApiFailure) : LinkOutcome
 }
 
-/** Gets an ID token from [tokens] and links this device's principal with it. */
-internal class AccountLinker(private val api: OvrlyApi, private val tokens: IdTokenSource) {
+/**
+ * Gets an ID token from [tokens] and links this device's principal with it. When this device
+ * continues as an account created on another device, [onSwitched] forgets the checks the
+ * revoked guest started here: the server no longer lets this device read them (BC-D07).
+ */
+internal class AccountLinker(
+    private val api: OvrlyApi,
+    private val tokens: IdTokenSource,
+    private val onSwitched: suspend () -> Unit = {}
+) {
     val available: Boolean get() = tokens.available
 
-    suspend fun link(): LinkOutcome = when (val token = tokens.idToken()) {
-        IdTokenResult.Cancelled -> LinkOutcome.Cancelled
+    suspend fun link(activity: Context? = null): LinkOutcome =
+        when (val token = tokens.idToken(activity)) {
+            IdTokenResult.Cancelled -> LinkOutcome.Cancelled
 
-        is IdTokenResult.Unavailable -> LinkOutcome.Unavailable(token.reason)
+            is IdTokenResult.Unavailable -> LinkOutcome.Unavailable(token.reason)
 
-        is IdTokenResult.Token -> when (val result = api.linkAccount(token.value)) {
-            is ApiResult.Failure -> LinkOutcome.Failed(result.failure)
-            is ApiResult.Success -> result.value
+            is IdTokenResult.Token -> when (val result = api.linkAccount(token.value)) {
+                is ApiResult.Failure -> LinkOutcome.Failed(result.failure)
+                is ApiResult.Success -> result.value.also { if (it.switched) onSwitched() }
+            }
         }
+}
+
+/**
+ * Removes the checks this device holds from the server, with their cached report versions,
+ * after it switched to an account created on another device. Shares not yet accepted stay
+ * and are sent under the account: their declared or completed upload belonged to the revoked
+ * guest, so it is cleared and the staged copy is uploaded again as the account.
+ */
+@Dao
+internal abstract class LocalHistoryDao {
+    @Query("DELETE FROM report_versions")
+    abstract suspend fun deleteReports()
+
+    @Query("DELETE FROM investigations WHERE server_id IS NOT NULL")
+    abstract suspend fun deleteServerChecks()
+
+    @Query(
+        "UPDATE investigations SET upload_id = NULL, declared_upload = NULL " +
+            "WHERE server_id IS NULL"
+    )
+    abstract suspend fun forgetGuestUploads()
+
+    @Transaction
+    open suspend fun forgetServerHistory() {
+        deleteReports()
+        deleteServerChecks()
+        forgetGuestUploads()
     }
 }
