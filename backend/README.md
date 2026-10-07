@@ -30,10 +30,14 @@ download models/media, or deploy anything. In another terminal:
 curl --fail http://127.0.0.1:8000/healthz
 ```
 
-Ready returns `200 {"status":"ok"}`. An unavailable database or stopped/failed
-embedded worker returns a safe `503` with reason `database` or `worker`.
-Probes have a bounded database timeout; no provider is contacted. When the
-embedded worker is disabled, readiness does not claim to monitor a separate
+Ready returns `200` with `status: ok`, the individual checks and the queue and
+worker-heartbeat signals described in the
+[deployment runbook](../docs/operations/deployment.md#health-check). An unavailable
+database, a schema that is not at the migration head this build ships, an unwritable
+upload directory, or a stopped, failed or stuck (no poll or lease extension for two
+minutes) embedded worker returns a safe `503` with reason `database`, `migrations`,
+`storage` or `worker`. Probes have a bounded database timeout; no provider is contacted.
+When the embedded worker is disabled, readiness does not claim to monitor a separate
 worker process. Database failure during embedded-worker startup prevents API
 startup rather than pretending the worker started.
 
@@ -78,6 +82,7 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_WORKER_SHUTDOWN_SECONDS` | 5; positive, at most 30. Time a stopping worker may spend finishing its in-flight job before the lease is released |
 | `OVRLY_JOB_LEASE_SECONDS` | 30; positive, at most 600. Lease granted per claim; handlers extend it with heartbeats |
 | `OVRLY_JOB_POLL_SECONDS` | 1; positive, at most 60. Idle wait between claim attempts |
+| `OVRLY_JOB_IDLE_POLL_MAX_SECONDS` | Unset; positive, at most 600 and at least the poll. When set, consecutive idle waits double from `OVRLY_JOB_POLL_SECONDS` up to this cap and reset after a claim, so an idle worker queries a free-tier database less often |
 | `OVRLY_UPLOAD_MAX_BYTES` | 268435456 (256 MiB); positive. Placeholder until BC-D06 fixes the budget |
 | `OVRLY_UPLOAD_TARGET_SECONDS` | 900; how long an upload target accepts bytes and completion, at most 86400 |
 | `OVRLY_MAX_SHARED_DURATION_SECONDS` | 600; declared shared-media duration limit from BC-D01 |
@@ -157,7 +162,17 @@ exec uv run --frozen uvicorn services.api.main:create_app --factory --host 0.0.0
 Set `OVRLY_EMBED_WORKER=1`, use `/healthz` as the health check and store
 `OVRLY_SCHOLARXIV_API_KEY` as a host secret. Do not set `OVRLY_API_PORT`; it only
 configures the development helper. Never set `OVRLY_STUB_REPORTS` on a public deploy.
-This deployment has not been verified.
+Keep `exec` on the server command so Uvicorn receives the host's stop signal and the
+embedded worker drains its lease. After each deploy, run the post-deploy smoke test
+from `backend/` (or the manual **Deployment smoke** workflow):
+
+```sh
+uv run --frozen python -m services.smoke --base-url https://<service host> --report reports/smoke.json
+```
+
+The [deployment runbook](../docs/operations/deployment.md) has the full environment,
+health signals, keep-alive, rollback, backup and restore, log locations and the owner's
+open checklist. This deployment has not been verified.
 
 ### Durable jobs and recovery
 

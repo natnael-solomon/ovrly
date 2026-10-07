@@ -1,0 +1,49 @@
+name: Keep-alive
+
+# EthioDeploy Free sleeps after 30 minutes without incoming HTTP and takes the embedded
+# worker with it (BC-D03). When the OVRLY_KEEPALIVE repository variable is 1, this pings
+# /healthz every 15 minutes from 08:00 to 23:59 East Africa Time. Keeping the service awake
+# spends the monthly Free quota, so turn it on only for test and demo windows. GitHub may
+# delay or skip scheduled runs; see docs/operations/deployment.md. Schedules run from main.
+
+on:
+  schedule:
+    - cron: '*/15 5-20 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: keep-alive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    name: Ping readiness
+    if: ${{ github.event_name != 'schedule' || vars.OVRLY_KEEPALIVE == '1' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      BASE_URL: ${{ vars.OVRLY_BASE_URL }}
+    steps:
+      - name: Ping /healthz
+        run: |
+          if [[ -z "$BASE_URL" ]]; then
+            echo "::notice::OVRLY_BASE_URL is not set; nothing to ping."
+            exit 0
+          fi
+          if [[ "$BASE_URL" != https://* ]]; then
+            echo "::error::OVRLY_BASE_URL must be an https origin."
+            exit 1
+          fi
+          started=$(date +%s)
+          status=000
+          while (( $(date +%s) - started < 180 )); do
+            status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --max-time 30 --proto '=https' "${BASE_URL%/}/healthz" || true)
+            [[ "$status" == 200 ]] && break
+            sleep 10
+          done
+          waited=$(( $(date +%s) - started ))
+          echo "Readiness HTTP $status after ${waited}s" | tee -a "$GITHUB_STEP_SUMMARY"
+          [[ "$status" == 200 ]]
