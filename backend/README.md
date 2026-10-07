@@ -12,6 +12,10 @@ Opt-in Groq transcription follows preparation; neither is completed research
 stages and opt-in privacy retention (see [Privacy operations](#privacy-operations)). See
 [Durable jobs and recovery](#durable-jobs-and-recovery).
 
+BE-08 (#25) adds disabled-by-default, internal single-window and incremental claim-extraction
+handoff. It is not yet dispatched by intake, ASR or device text; see
+[Provisional claim extraction](#provisional-claim-extraction).
+
 ## Local setup (Linux / WSL)
 
 Install [uv](https://docs.astral.sh/uv/), Docker with Compose, ffmpeg/ffprobe,
@@ -102,8 +106,24 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_JOB_RETRY_SCHEMA_REPAIR_ATTEMPTS` | 2; 0 to 10. Repair attempts for the `invalid_model_schema` class |
 | `OVRLY_JOB_RETRY_UNKNOWN_OUTCOME_ATTEMPTS` | 3; 0 to 10. Reconciliation attempts for the `unknown_outcome` class |
 | `OVRLY_JOB_RETRY_BACKOFF_SECONDS` | 1; positive, at most 60. Base of the exponential backoff |
-| `OVRLY_JOB_RETRY_MAX_BACKOFF_SECONDS` | 60; positive, at most 3600 and at least the base. Caps backoff and provider retry-after hints |
+| `OVRLY_JOB_RETRY_MAX_BACKOFF_SECONDS` | 60; positive, at most 3600 and at least the base. Caps ordinary backoff/hints, but never shortens validated extraction provider cooldowns |
 | `OVRLY_GOOGLE_CLIENT_ID` | Empty; Google Web client ID that linked ID tokens must be issued for (BC-D07). Configuration, not a secret. Empty leaves `POST /v1/principals/link` unavailable with 503 `ACCOUNT_LINK_UNAVAILABLE` |
+| `OVRLY_EXTRACTION_ENABLED` | `0`; registers a failing, unavailable extraction handler until explicitly enabled |
+| `OVRLY_EXTRACTION_FREE_ROUTES_VERIFIED` | `0`; enabled extraction requires owner-verified route eligibility, not a claim that a configured name is free |
+| `OVRLY_EXTRACTION_MODELS` | `[]`; explicit JSON array of verified Scholarxiv executor names, at most 20 |
+| `OVRLY_EXTRACTION_MAX_TOKENS` | 2048; per-window extraction output cap, 1..8192 |
+| `OVRLY_RECONCILIATION_MAX_TOKENS` | 8192; whole-input reconciliation output cap, 1..8192 |
+| `OVRLY_SCHOLARXIV_API_KEY` | Empty; secret required for enabled extraction, never put a real key in tracked files |
+| `OVRLY_EXTRACTION_RECOVERY_ATTEMPTS` | 0; 0..10 availability retries per provider/window. A ceiling, not verified free-plan capacity; worker retry caps also apply |
+| `OVRLY_GROQ_EXTRACTION_ENABLED` | `0`; separately enables extraction-only Groq recovery |
+| `OVRLY_GROQ_FREE_ROUTE_VERIFIED` | `0`; independent owner verification required for enabled Groq recovery |
+| `OVRLY_GROQ_API_KEY` | Empty; separate secret required for enabled Groq recovery |
+| `OVRLY_RECONCILIATION_ENABLED` | `0`; requires extraction to be enabled. While `0`, quality reconciliation stays unavailable even with verified extraction routes |
+| `OVRLY_RECONCILIATION_FREE_ROUTES_VERIFIED` | `0`; independent owner verification of the quality-reconciliation routes. Extraction route verification does not cover reconciliation |
+| `OVRLY_RECONCILIATION_MODELS` | `[]`; explicit JSON array of verified Scholarxiv quality executor names, at most 20. This list is separate from `OVRLY_EXTRACTION_MODELS` |
+| `OVRLY_EXTRACTION_BUDGET_REQUESTS` / `OVRLY_EXTRACTION_BUDGET_TOKENS` | 24 / 196500; per-investigation pre-send ceilings used when real speech starts a run. Candidate values from offline evidence, not verified free-plan capacity |
+| `OVRLY_EXTRACTION_RESERVED_REQUESTS` / `OVRLY_EXTRACTION_RESERVED_TOKENS` | 3 / 102500; reconciliation reserve, each strictly below its ceiling |
+| `OVRLY_EXTRACTION_BATCH_OBSERVATIONS` / `OVRLY_EXTRACTION_OVERLAP_OBSERVATIONS` / `OVRLY_EXTRACTION_MAX_OBSERVATIONS` | 6 / 1 / 64; base batch (1..64), overlap (1..32) and accepted observations (1..4096). Excess producer input is reported as `skipped/budget_exhausted` |
 | `OVRLY_STUB_REPORTS` | `0`. **Development only.** `1` makes both worker modes follow each `intake` job with one report version built from `packages/contracts/fixtures/results/complete.json`, so clients have report data before the assessment pipeline (#27). See [Reports, saves and voice actions](#reports-saves-and-voice-actions). There is no production environment flag to refuse it against; never enable it for real users |
 
 The helper checks for at least 2 GiB free on the checkout filesystem before and
@@ -316,8 +336,288 @@ sessions and chunk reservations/receipts. `0008_reports` adds immutable
 `0009_reanalysis_source` adds the nullable `source_investigation_id` to
 `reanalysis_requests`, and `0010_provider_buckets` adds the shared provider rate-limit
 buckets, and `0011_quotas` adds daily admission counters and expiring provider
-request slots. Future schema changes require a reviewed migration
-and upgrade/downgrade coverage, not `create_all()` during API startup.
+request slots. `0016_stage_data` adds durable JSONB extraction checkpoints to
+`jobs`; `0017_extraction_runs` stores accepted observations, window assignments
+and cumulative reservations per investigation. Future schema changes require a
+reviewed migration and upgrade/downgrade coverage, not `create_all()` during API
+startup.
+
+### Provisional claim extraction
+
+`services/pipeline/extraction.py` exposes `enqueue_extraction(connection, queue,
+investigation_id, owner_id, window)` for a future trusted producer; there is no
+public observation-ingestion endpoint. `ObservationWindow` version 1 contains a
+stable `window_id`, explicit `hosted_processing_approved` and 1..128 observations
+(at most 24,000 characters total). Each observation has a stable `id`, `target`
+or `context` role, nonblank `text` (at most 8,000 characters), `speech` or `text`
+modality, `media` or `capture` timebase, ordered `start_ms`/`end_ms` and nullable
+`speaker_id`. A window uses one timebase and includes a target. Producers must
+not reuse an observation ID for changed source content.
+
+Both worker modes register this stage. Activation requires the verified-route
+flag, explicit model pool and credential above; it cannot be combined with
+`OVRLY_STUB_REPORTS`. Authorization is also checked on each window. The adapter
+sends non-streaming Scholarxiv `auto:cheap` requests at temperature zero, using
+only `model`, `models`, `messages`, `max_tokens` and `temperature`. It rejects
+an executor outside the allowed pool and limits responses to 1 MiB and each
+attempt to 20 seconds total. Heartbeats maintain the lease during inference;
+cancellation stops the local wait, without promising remote provider erasure. Source
+text is untrusted data, not a tool instruction. No live-route eligibility or
+semantic accuracy is established by the scripted tests.
+
+Outputs use the shared interpretation vocabulary in `services/claims.py`
+(also reused by the BE-01 experiment). The `claim-window-v2` prompt asks the
+model to quote one contiguous part of a supplied observation verbatim rather than
+count characters. The backend resolves each quote to a half-open source/context
+character reference: an exact match first, then a case-insensitive one, and a
+repeated quote takes its next unused appearance. Wrapping quote marks are removed
+only when the raw quote is not found. Context references that cite one of the
+window's own targets are dropped; unknown IDs remain invalid. Resolved references
+must match their declared roles and bounds. Original wording
+comes from the referenced input, not the model. Occurrence IDs derive from the
+investigation and source spans; claim intervals enclose their source
+observations and do **not** assert word-level alignment.
+
+There is one invalid-output repair per window, durably recorded in
+`jobs.stage_data`, independent of queue retry budgets. The repair prompt states
+a validation reason of at most 200 characters, built only from schema field paths
+(unknown keys shown as `?`), error types and fixed grounding messages. Model-chosen
+values are never echoed. Reconciliation repairs use the same rule. Invalid exhaustion
+exposes `EXTRACTION_INVALID`; unavailable/disabled routing exposes
+`EXTRACTION_UNAVAILABLE`. A persisted in-flight attempt without a durable
+outcome exposes `EXTRACTION_OUTCOME_UNKNOWN` without another inference call.
+Validated artifacts survive worker restart. Publication writes the immutable
+provisional report and job result in one fenced transaction; cancellation or
+deletion cannot publish a late report. Metadata retains only model/decision
+identity, numeric token counters, attempt validity, the bounded repair reason and
+hygiene flags, not raw model completions or reasoning. Job deletion clears checkpoints too.
+
+Validated empty output is a provisional report with zero claims; it is not an
+extraction failure or an accuracy verdict. Interpretation metadata distinguishes
+normative/opinion and quoted-not-endorsed content, with no evidence or
+assessments generated here. The original `enqueue_extraction` interface publishes
+one window; incremental producers must use the budgeted interface below.
+Whole-input reconciliation uses the incremental run boundary below;
+real ASR/device-text handoffs remain separate BE-08 slices.
+
+#### Budgeted incremental observations
+
+`services/pipeline/incremental.py` exposes `submit_observations(connection, queue,
+investigation_id, owner_id, *, policy, observations, closed,
+hosted_processing_approved, groq_processing_approved=False)`. This is an internal,
+fixture-backed producer boundary, not an API or an ASR/OCR adapter. Call it within
+one database transaction. Every run requires explicit `ExtractionPolicy` values:
+request/token ceilings, a positive reconciliation reserve smaller than each
+ceiling, base batch size (1..64 observations), overlap (1..32), and total accepted
+observations (1..4096). Policy and authorization cannot change mid-run. These
+bounds are implementation safeguards, **not verified production/free-plan settings**.
+
+Observations are ordered by original start/end time and stable ID. Identical
+redelivery does not enqueue work; changed content under an existing ID, mixed
+timebases, additional input after close, unauthorized ownership and oversized
+admission fail explicitly. Pending observations remain visible. Ready batches
+include bounded earlier overlap, shrink overlap to fit new input, and split at
+24,000 characters rather than dropping dense accepted text. The base threshold
+doubles at 50% and quadruples at 75% pressure (capped at 64); pressure is the larger
+fraction of extraction request capacity committed to windows/requests and token
+capacity reserved. This trades update frequency for coverage. Input close flushes
+the remaining tail without declaring reconciliation complete. Context may extend
+a batch to reach a target; context-only input waits while open, or is explicitly
+skipped as `context_without_target` when closed or separated from a known target
+by the window bound. It never produces a definitive empty finding.
+
+Every HTTP completion, repair, routing decision, regenerated-feedback request
+and fallback reserves one request **before send**, atomically with the fenced
+stage checkpoint. The in-flight marker is written in that transaction only after
+the reservation is admitted, so a refused reservation never leaves an unknown
+outcome, even if the later budget-exhaustion checkpoint loses its lease. While a
+provider call runs, the lease is renewed just before the call starts and then
+every third of the lease, timed from each renewal's start so database latency
+cannot stretch the gap; a renewal after expiry is refused. A
+conservative local token approximation reserves the
+ASCII-escaped serialized JSON request's byte count (including prompts, schema
+and overlapping input), configured output-token cap, and 256 framing tokens.
+It is not a provider tokenizer or billing measurement. Unknown outcomes,
+cancelled calls and provider-reported lower usage receive no refunds; restarts
+cannot reset spending. The reconciliation reserve is never available to these
+calls. Reconciliation can spend the remaining total, including its protected reserve.
+Limits are per investigation, not an account-wide provider rate limiter.
+
+Published windows merge into immutable cumulative provisional reports. Exact
+source-span rediscovery retains the first occurrence and interpretation; a later
+repetition has different source identity even if wording matches. Span-changing
+model output is not semantically collapsed; reconciliation must resolve it.
+Prior claims, evidence, assessments and processing provenance survive updates,
+and finalized reports cannot be reopened by incremental extraction. Later failure
+does not erase earlier report versions or restart upstream work. Investigation
+and capture polling add optional `extraction_progress`: accepted source intervals
+are `pending`, `processed`, `skipped` or `failed`, with cumulative reservations
+and a public reason for gaps. Any successfully published containing window,
+including overlap after an earlier failure, establishes processed coverage.
+Individual failed attempts remain in their job records. Budget exhaustion is
+`EXTRACTION_BUDGET_EXHAUSTED` and `skipped/budget_exhausted`, never a no-claims conclusion. Existing failed
+investigation reads still omit `report`; prior versions remain on report endpoints.
+
+Capture Stop with no continued research fences admission, request reservations
+and publication under the session lock and cancels queued/in-flight incremental
+jobs. It cannot undo an already-started provider call. Job deletion
+clears its checkpoint/result, but not separately admitted run input or immutable
+reports; run observations and nonrefundable counters persist until investigation
+deletion, which cascades through the normal workspace-retention path. See the
+[data map](../docs/operations/data-map.md).
+
+#### Speech and device-text producer bridge
+
+`services/pipeline/producers.py` connects committed speech and device text to the ledger when
+`OVRLY_EXTRACTION_ENABLED=1`. The `upload_asr` handler admits its completed segments
+(`upload:speech:{n}`, `timebase: "media"`) in the same fenced transaction that
+publishes speech. Each capture chunk's fan-in `claim_extraction` job admits that
+chunk's published `asr` segments (`capture:{seq}:speech:{n}`, `timebase: "capture"`);
+with extraction disabled it publishes `admitted: "disabled"` without a ledger.
+Observations are targets without invented speakers; zero-length intervals get the
+smallest nonempty extent and text over 8,000 characters is split under the same
+interval. Unavailable or failed speech admits nothing and keeps its coverage gap.
+
+Recognized device text becomes `text` target observations at its sampled frame
+instant (`frame_pts` to `frame_pts + 1`; sampling cannot show how long text stayed
+visible): `capture:{seq}:text:{id}` from each chunk's published `device_text`
+(`timebase: "capture"`) and `upload:text:{id}` from received upload batches
+(`timebase: "media"`), keyed by the producer's stable observation identifiers so
+replays are idempotent. Failed, no-text-region and unavailable frames admit nothing
+and keep their analysis gaps. Upload media validation opens the run even when speech
+is unavailable (`no_audio_track`/`disabled`), so text-only uploads still settle. Upload
+text is admitted at settlement, after completion or grace expiry; batches received
+after the run closed are recorded as `skipped/input_closed`. Speech and text stay
+separate observations in one time-ordered ledger; neither overrides the other. A
+claim citing both reports `modality: "both"`, and the extractor can flag the
+disagreement with `source-text-conflict`.
+The first admission fixes the run's policy (settings above), hosted/Groq approval and
+whether reconciliation is wanted. Admission reads committed artifacts only, so a
+failed or restarted extraction never repeats ASR or its quota reservations.
+
+The producer marks the run, so late input after close is recorded as
+`skipped/input_closed` and input beyond `max_observations` as
+`skipped/budget_exhausted` instead of failing upstream publication. Worker
+maintenance settles the run before scheduling reconciliation: uploads once
+`upload_asr` is terminal and device text completed or its grace expired; captures
+only after a continue-in-queue close once every received chunk's work is terminal.
+Keep-only-results never settles, so no new inference starts. Settlement registers
+reconciliation with the accepted speech/media jobs when reconciliation was enabled
+at admission. Handing reconciled claims to `enqueue_retrieval` (#27) remains a gap.
+
+The trusted producer registers `request_reconciliation(connection, investigation_id,
+owner_id, *, accepted_jobs)` from `services/pipeline/reconciliation.py`. The immutable,
+owner/input-scoped list identifies all accepted upstream jobs (maximum 4096).
+Registration may precede late observations; `submit_observations(..., closed=True)`
+seals observations after they have been admitted. Worker maintenance enqueues exactly
+one quality-stage job only after input close and every registered upstream job and
+extraction window is terminal. For captures it also requires actual session close,
+checks the accepted chunk graph, and respects keep-only-results cancellation.
+Recording Stop alone never certifies pending ASR complete. Purged, cancelled and
+failed work produces limited coverage, not successful processing.
+
+Both worker entry points use the configured Scholarxiv adapter with `auto:quality`,
+its own explicit free-model pool, the separate reconciliation output cap and the recovery bound. Disabled hosted
+processing remains disabled. Quality routing, repair and regenerated feedback share
+the run's conservative pre-send ledger; no Groq or cheap downgrade is permitted.
+Every accepted available observation and current claim is submitted without truncation.
+If the bounded input cannot fit remaining capacity, or bounded quality output fails,
+the provisional version survives with a separate safe failure. Unknown outcomes are
+not resent; validated artifacts are reused after restart. Concurrent newer reports,
+lease loss, cancellation and deletion fence publication.
+
+Successful reconciliation publishes a new immutable version with `reconciliation.status:
+complete`, a `coverage_limited` flag, and `reassessment_claim_ids`. This finalizes only
+the available interpretation: `report.provisional` stays true because this stage
+does not complete assessment. Linked `corrects_occurrence_id` and
+`superseded_by_occurrence_id` preserve both original appearances; original text and
+source identity never change. Changed interpretations and superseded occurrences lose
+their old evidence/assessments. A correction link alone does not change the correcting
+occurrence's meaning, so it keeps its results and gets no correction record unless its
+proposition or interpretation changed. Unaffected results survive with the new report version.
+The report/version plus reassessment claim IDs is the stable downstream handoff;
+`change_summary` explains the update. No retrieval or assessment work is started here.
+
+Optional `reconciliation_progress` on investigation/capture reads reports waiting,
+checking, complete, failed or cancelled independently of report/coverage completion.
+A failed reconciliation keeps the available provisional report and places the existing
+allowlisted processing error in this field, not in a truth finding. Legacy payloads
+omit it. Android preserves unknown status values as unknown. Producer integration,
+verified production budgets, real semantic accuracy and physical-device evidence
+remain separate work; the acceptance tests use scripted HTTP and real PostgreSQL.
+
+#### Explicit provider recovery
+
+Scholarxiv remains the first provider. A 429 schedules a durable cooldown;
+502 schedules a bounded gateway retry using only verified models returned by
+`POST /api/v1/router`. The decision must match the cheap preset, remain inside
+the verified model pool and explicitly report `degraded: false`. At most one
+decision lookup is made per window; an unavailable lookup or exhausted fallback
+list ends Scholarxiv recovery. Authentication/permission failures (401/403),
+unverified routing and ambiguous timeouts never trigger an alternative provider.
+The adapter cannot distinguish undocumented 403 subtypes safely, so all 403s
+fail closed as `EXTRACTION_DENIED`.
+
+After eligible availability/quota exhaustion, direct Groq
+`openai/gpt-oss-20b` is permitted only with independent configuration and
+`groq_processing_approved: true` on that window (absent means false). Groq uses
+its own strict `json_schema` response format and the same local grounding
+checks. It is never the primary provider and is forbidden for reconciliation
+and assessment. Quality tasks retain the quality route. These guards do not
+implement assessment or real source ingestion.
+
+Availability recovery does not consume the one invalid-output repair, but an
+invalid result prevents cross-provider recovery altogether. Repair allowance
+survives worker restart. Discarded Scholarxiv output with a usable decision ID
+gets one `regenerated` feedback submission. Missing IDs, failed feedback and
+feedback of unknown outcome are recorded, not silently converted into success;
+feedback is never replayed after a crash. Ordinary feedback failures do not
+invalidate a later successful repair. Feedback 401/403 or invalid cooldowns
+block further inference, and feedback 429 defers it through the durable
+cooldown. If both invalid attempts are already exhausted, feedback does not
+replace the original `EXTRACTION_INVALID` outcome.
+
+Validated numeric `Retry-After` hints are seconds in 0..86400. Longer, negative,
+non-finite or malformed hints fail closed rather than retrying early. This
+one-day transport safety bound is not a plan quota. The deadline is checkpointed
+before scheduling, so crash recovery cannot shorten it. Cooldowns release the
+worker and can be cancelled. A provider switch does not carry the first
+provider's cooldown to the independently authorized provider. Per-class worker
+caps can terminate recovery earlier than the adapter ceiling.
+
+All completion, routing and feedback requests pass the same pre-send
+`RequestAccount` callback. The stage durably records provider, operation,
+ASCII-escaped serialized request size (including messages/schema/input) and
+maximum output tokens before sending. Reservations are conservative: a crash
+can leave a recorded request that never reached the provider. They are not
+billing receipts. Incremental runs enforce the shared request/token limits,
+approximation and reconciliation reserve described above; legacy single-window
+calls only record their reservations. No verified production budget is
+established here.
+
+Optional `report.processing_attempts` exposes completion provider, actual model,
+completion decision ID when available, task, usage, outcomes, repair/feedback
+and hygiene flags. Groq never inherits a Scholarxiv decision ID. Diagnostic
+strings are not verdicts. Logs contain only allowlisted job IDs and diagnostic
+codes, never source text, credentials, response bodies or reasoning. A failed
+later window does not alter earlier immutable versions; use the existing
+owner-scoped report-version endpoints when the investigation read shows failure.
+
+Transport contracts checked against official documentation on 2026-10-06:
+[Scholarxiv completions](https://www.scholarxiv.com/developers/docs/router-api/completions.md),
+[routing](https://www.scholarxiv.com/developers/docs/router-api/route.md),
+[feedback](https://www.scholarxiv.com/developers/docs/router-api/feedback.md),
+[Groq structured outputs](https://console.groq.com/docs/structured-outputs),
+[rate limits](https://console.groq.com/docs/rate-limits) and
+[errors](https://console.groq.com/docs/errors). Documentation does not establish
+account entitlement, enforceable free routing, retention, or authorization to
+send real input. All activation gates remain off by default.
+
+The capture orchestrator's identifier-only `{capture_id, seq}` jobs are not
+observation windows. Adapting their real ASR/device-text artifacts to this
+handoff remains the gated integration slice; this handler never fabricates
+observations for them. The publication adapter preserves capture fan-in/Stop
+checks and runs any `StageResult` callback within the same transaction.
 
 ### Single-service deployment (EthioDeploy)
 
@@ -358,13 +658,13 @@ fault-injection hooks used only by tests.
 | --- | --- |
 | Stage key | `(version, stage, input_hash)` is unique on `jobs` and `job_results`; re-enqueueing returns the existing job. `JobQueue.enqueue` takes the caller's connection so the business record and the queue row commit in one transaction. |
 | Claim | `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)`; each claim bumps the fencing token and attempt count, grants a lease and first returns expired leases to the queue (or makes a pending cancellation effective). Only jobs whose `available_at` has passed are claimable. |
-| Lease | Owner, expiry and a monotonically increasing fencing token. `heartbeat` extends it and reports a cancellation request; a lost lease raises `LeaseLost`. |
-| Publish | Compare-and-set on owner, fencing token, generation, `running` state and no pending cancellation; the result row and deferred successor jobs are written in the same transaction. Any mismatch raises `PublishRejected`. |
+| Lease | Owner, expiry and a monotonically increasing fencing token. `heartbeat` extends an unexpired lease and reports a cancellation request; a lost or expired lease raises `LeaseLost`. |
+| Publish | Compare-and-set on owner, fencing token, generation, unexpired lease, `running` state and no pending cancellation; the result row, deferred successor jobs and optional `StageResult.on_publish` business write share the transaction. Any mismatch raises `PublishRejected`; callback failures roll everything back. |
 | Retry | A handler raises a typed outcome (table below). The policy either schedules the job through `available_at`, recording the class and a per-class counter in `retry_counts`, or declares the class exhausted so the job fails with `retry_class` set. A pending cancellation wins over a retry. |
 | Request id | `JobContext.record_request_id` persists the provider request id before the call (fenced). A re-leased attempt sees it on `ClaimedJob.provider_request_id` and reconciles instead of calling again; `find_by_request_id` routes callbacks. The policy refuses to retry an `UnknownOutcome` when no id was recorded. |
 | Infrastructure errors | Database, socket and timeout errors raised during a stage leave the outcome unknown: the worker never marks the job failed, hands the lease back if it can and otherwise lets it expire, so the job is re-leased. The worker loop survives. |
 | Cancellation | `request_cancel` cancels a queued job immediately (effective) or sets `cancel_requested` for a leased one (requested); the worker observes it at start, through heartbeats or when the lease expires, and makes it effective. Both bump the generation. |
-| Deletion | `delete` tombstones the job, clears its payload, bumps the generation and removes the published result. The tombstone keeps `provider_request_id` so a late callback is routed to nothing. |
+| Deletion | `delete` tombstones the job, clears its payload and stage checkpoint, bumps the generation and removes the published result. The tombstone keeps `provider_request_id` so a late callback is routed to nothing. |
 | States | queued, leased, running, published, cancelled, deleted, failed. Terminal states only move to deleted; deleted is absorbing. `tests/test_job_states.py` checks random legal and illegal sequences with Hypothesis. |
 | Shutdown | Stop requests end claiming; the in-flight job finishes and publishes within `OVRLY_WORKER_SHUTDOWN_SECONDS`, otherwise the task is cancelled and its lease is released, so a job is neither lost nor run twice by the same worker. |
 
@@ -377,7 +677,8 @@ fault-injection hooks used only by tests.
 | `unknown_outcome` | `UnknownOutcome` (provider timeout) | Backoff only when a request id was recorded; `OVRLY_JOB_RETRY_UNKNOWN_OUTCOME_ATTEMPTS` reconciliation attempts; never a silent re-call |
 
 Workers execute only the stages they have handlers for. `default_handlers(store, settings=settings)`
-registers `intake`, `media_validation` and `upload_asr`. Intake checks the owned investigation
+registers `intake`, `media_validation`, `upload_asr`, `claim_extraction` and
+`reconciliation`, plus capture `asr`/`device_text` when a store is configured. Intake checks the owned investigation
 and publishes its placeholder result without resetting later progress. For an
 upload source it defers the media job until the same fenced publication
 transaction; stale or cancelled attempts cannot schedule successors.
@@ -404,7 +705,9 @@ API from the queue (`create_app(dispatcher=...)`).
 plus the stage-level `before_provider_call`, `after_provider_call` and
 `after_artifact_store` checkpoints). Legacy job-engine cases use stubs;
 uploaded speech uses the real Groq adapter with invented HTTP replay responses,
-and media preparation uses synthetic inputs with real ffprobe/ffmpeg. Covered:
+media preparation uses synthetic inputs with real ffprobe/ffmpeg, and extraction
+cases exercise the production adapter with scripted HTTP and durable PostgreSQL
+artifacts. Covered:
 
 - Worker killed before the state commit, after the provider call (request id
   recorded, reconciled on re-lease, provider called once) and after the
@@ -615,8 +918,9 @@ cancels all queued/in-flight stages, not just byte validation. A publication
 transaction failure releases the lease for retry. No migration or replay of
 already published pre-orchestration validation jobs is performed.
 
-The **claim handler remains #25**; without it `claim_extraction` jobs stay
-queued, never successful placeholders. Retrieval/assessment remain #27.
+The registered `claim_extraction` handler dispatches capture chunk fan-in jobs to
+the [speech and device-text producer bridge](#speech-and-device-text-producer-bridge) and other jobs to the
+observation-window handoff above. Retrieval/assessment remain #27.
 
 ### Captured chunk speech and device text (BE-07 #20)
 

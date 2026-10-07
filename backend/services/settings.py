@@ -98,6 +98,57 @@ class Settings(BaseSettings):
     quota_claims_per_run: int = Field(default=5, ge=1, le=100)
     quota_provider_concurrency: int = Field(default=2, ge=1, le=10)
     quota_provider_reserve: int = Field(default=50, ge=1, le=1200)
+    extraction_enabled: bool = False
+    extraction_free_routes_verified: bool = False
+    extraction_models: list[str] = Field(default_factory=list, max_length=20)
+    extraction_max_tokens: int = Field(default=2048, ge=1, le=8192)
+    reconciliation_max_tokens: int = Field(default=8192, ge=1, le=8192)
+    extraction_recovery_attempts: int = Field(default=0, ge=0, le=10)
+    groq_extraction_enabled: bool = False
+    groq_free_route_verified: bool = False
+    reconciliation_enabled: bool = False
+    reconciliation_free_routes_verified: bool = False
+    reconciliation_models: list[str] = Field(default_factory=list, max_length=20)
+    # Per-input budget for real speech/text producers; defaults are the measured BE-08 candidate.
+    extraction_budget_requests: int = Field(default=24, ge=1, le=10000)
+    extraction_budget_tokens: int = Field(default=196500, ge=1, le=2147483647)
+    extraction_reserved_requests: int = Field(default=3, ge=1, le=10000)
+    extraction_reserved_tokens: int = Field(default=102500, ge=1, le=2147483647)
+    extraction_batch_observations: int = Field(default=6, ge=1, le=64)
+    extraction_overlap_observations: int = Field(default=1, ge=1, le=32)
+    extraction_max_observations: int = Field(default=64, ge=1, le=4096)
+
+    @model_validator(mode="after")
+    def extraction_gate(self) -> Self:
+        if (
+            self.extraction_reserved_requests >= self.extraction_budget_requests
+            or self.extraction_reserved_tokens >= self.extraction_budget_tokens
+        ):
+            raise ValueError("Extraction requires capacity outside the reconciliation reserve")
+        if self.reconciliation_enabled and (
+            not self.extraction_enabled
+            or not self.reconciliation_free_routes_verified
+            or not self.reconciliation_models
+            or any(not value.strip() or len(value) > 200 for value in self.reconciliation_models)
+        ):
+            raise ValueError("Reconciliation needs its own verified free quality model pool")
+        if self.groq_extraction_enabled and (
+            not self.extraction_enabled
+            or not self.groq_free_route_verified
+            or not self.groq_api_key.get_secret_value().strip()
+        ):
+            raise ValueError("Groq extraction needs independent route verification and credential")
+        if self.extraction_enabled and (
+            not self.extraction_free_routes_verified
+            or not self.extraction_models
+            or any(not value.strip() or len(value) > 200 for value in self.extraction_models)
+            or self.scholarxiv_api_key is None
+            or not self.scholarxiv_api_key.get_secret_value().strip()
+        ):
+            raise ValueError("Extraction needs a verified free model pool and server credential")
+        if self.extraction_enabled and self.stub_reports:
+            raise ValueError("Real extraction cannot be combined with development stub reports")
+        return self
 
     @model_validator(mode="after")
     def backoff_bounds(self) -> Self:

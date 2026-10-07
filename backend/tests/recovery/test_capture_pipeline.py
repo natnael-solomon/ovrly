@@ -10,7 +10,7 @@ from test_intake_api import guest
 
 from services.api.main import create_app
 from services.captures import CAPTURE_STAGES, CaptureProcessor, stage_key
-from services.jobs.handlers import JobContext, default_handlers
+from services.jobs.handlers import JobContext, StageResult, default_handlers
 from services.jobs.models import jobs
 from services.jobs.queue import JobQueue, PublishRejected
 from services.jobs.retries import NonRetriableInput
@@ -130,9 +130,24 @@ async def test_fan_out_then_fan_in_is_per_chunk_owned_and_idempotent(pipeline, f
     with pytest.raises(PublishRejected):
         await publish_capture_stage(queue, two, {})
     _, final = await claim_stage(app, "claim_extraction")
-    await publish_capture_stage(queue, final, {"synthetic": True})
+    callbacks = []
+
+    async def on_publish(connection):
+        query = select(jobs.c.state).where(jobs.c.id == final.id)
+        assert await connection.scalar(query) == "published"
+        async with queue.database.engine.connect() as observer:
+            assert await observer.scalar(query) == "running"
+        callbacks.append(final.id)
+
+    await publish_capture_stage(queue, final, StageResult({"synthetic": True}, on_publish))
+    assert callbacks == [final.id]
     assert {row.state for row in await stage_rows(app, session)} == {"published"}
-    assert set(default_handlers(app.state.upload_store)) == {"intake", "media_validation"}
+    assert set(default_handlers(app.state.upload_store)) == {
+        "intake",
+        "media_validation",
+        "claim_extraction",
+        "reconciliation",
+    }
 
 
 async def test_concurrent_observation_publication_enqueues_extraction_once(pipeline):

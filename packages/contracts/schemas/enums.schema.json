@@ -4,6 +4,40 @@
   "title": "Enums",
   "description": "Definitions only; this file is not a payload schema. Read-model fields (investigation, job, report version, claim, evidence, assessment, capture session) tolerate values outside these lists by mapping them to UNKNOWN, never to a success or finding state. Request fields are validated strictly by the server.",
   "$defs": {
+    "reconciliation_status": {
+      "type": "string",
+      "enum": ["waiting", "checking", "complete", "failed", "cancelled"]
+    },
+    "extraction_coverage_status": {
+      "type": "string",
+      "description": "Observation-level extraction progress, never an assessment. Source: services.api.schemas.ObservationProgress.",
+      "enum": ["pending", "processed", "skipped", "failed"]
+    },
+    "claim_taxonomy": {
+      "type": "string",
+      "description": "Classification of an occurrence, not a verdict. Source: services.claims.Interpretation.",
+      "enum": ["empirical", "causal", "documentary", "predictive", "normative", "mixed", "unclear"]
+    },
+    "assertion_mode": {
+      "type": "string",
+      "description": "How an occurrence is presented by its source. Source: services.claims.Interpretation.",
+      "enum": ["asserted", "reported", "questioned", "hypothetical", "counterfactual", "unclear"]
+    },
+    "speaker_commitment": {
+      "type": "string",
+      "description": "Whether the speaker endorses the proposition. Source: services.claims.Interpretation.",
+      "enum": ["endorsed", "rejected", "uncommitted", "unclear"]
+    },
+    "eligibility_reason": {
+      "type": "string",
+      "description": "Extraction eligibility, never a finding. Source: services.claims.Interpretation.",
+      "enum": ["factual-claim", "factual-premise", "opinion", "quoted-not-endorsed", "insufficient-context", "not-a-claim"]
+    },
+    "claim_uncertainty": {
+      "type": "string",
+      "description": "Uncertainty preserved from source interpretation. Source: services.claims.Interpretation.",
+      "enum": ["unresolved-reference", "missing-context", "ambiguous-attribution", "ambiguous-commitment", "ambiguous-meaning", "source-text-conflict"]
+    },
     "analysis_status": {
       "type": "string",
       "description": "Media extraction only. pending awaits observations; partial has usable observations plus gaps; no_usable has no usable observations and no pending modalities; complete has processed the supplied available input. Never a research report or continuous OCR claim.",

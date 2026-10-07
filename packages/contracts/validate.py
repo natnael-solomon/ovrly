@@ -96,6 +96,7 @@ KEYWORDS = {
     "minimum",
     "maximum",
     "default",
+    "uniqueItems",
 }
 TYPES = {"object", "array", "string", "integer", "number", "boolean", "null"}
 EXPECTATIONS = {"valid", "invalid", "unknown-enum"}
@@ -253,6 +254,8 @@ class Validator:
             self.check_schema(schema["not"], file, f"{location}.not")
         if "items" in schema:
             self.check_schema(schema["items"], file, f"{location}.items")
+        if "uniqueItems" in schema:
+            require(type(schema["uniqueItems"]) is bool, location, "uniqueItems must be boolean")
 
     def resolve(self, ref: str, file: str, location: str) -> tuple[dict[str, Any], str]:
         """Resolve `#/$defs/x`, `other.schema.json` or `other.schema.json#/$defs/x`."""
@@ -322,6 +325,16 @@ class Validator:
             if "items" in schema:
                 for index, item in enumerate(value):
                     self._validate(item, schema["items"], file, f"{location}[{index}]", relax)
+            if schema.get("uniqueItems"):
+                require(
+                    not any(
+                        json_equal(item, prior)
+                        for index, item in enumerate(value)
+                        for prior in value[:index]
+                    ),
+                    location,
+                    "duplicate array item",
+                )
         if isinstance(value, str):
             require(len(value) >= schema.get("minLength", 0), location, "string too short")
             require(len(value) <= schema.get("maxLength", len(value)), location, "string too long")

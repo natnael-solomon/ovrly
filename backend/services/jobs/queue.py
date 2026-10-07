@@ -8,9 +8,9 @@ deletion cannot publish or otherwise mutate the job.
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
@@ -60,6 +60,7 @@ class ClaimedJob:
     retry_counts: Mapping[str, int]
     # Set when an earlier attempt recorded a provider request id; reconcile, do not re-call.
     provider_request_id: str | None
+    stage_data: dict[str, Any] = field(default_factory=dict)
 
     @property
     def id(self) -> UUID:
@@ -241,6 +242,7 @@ class JobQueue:
                         jobs.c.attempts,
                         jobs.c.retry_counts,
                         jobs.c.provider_request_id,
+                        jobs.c.stage_data,
                     )
                 )
             ).first()
@@ -254,6 +256,7 @@ class JobQueue:
             row.attempts,
             dict(row.retry_counts),
             row.provider_request_id,
+            dict(row.stage_data),
         )
 
     async def _fenced_update(self, lease: Lease, states: list[str], **values: Any) -> bool:
@@ -289,7 +292,11 @@ class JobQueue:
             row = (
                 await connection.execute(
                     update(jobs)
-                    .where(self._owned(lease), jobs.c.state.in_(_LEASED))
+                    .where(
+                        self._owned(lease),
+                        jobs.c.state.in_(_LEASED),
+                        jobs.c.lease_expires_at > func.clock_timestamp(),
+                    )
                     .values(
                         lease_expires_at=func.now() + timedelta(seconds=lease_seconds),
                         updated_at=func.now(),
@@ -307,6 +314,7 @@ class JobQueue:
         result: dict[str, Any],
         *,
         connection: AsyncConnection | None = None,
+        on_publish: Callable[[AsyncConnection], Awaitable[None]] | None = None,
         successors: Sequence[tuple[StageKey, dict[str, Any]]] = (),
     ) -> PublishedResult:
         """Publish a stage result and mark the job published in one transaction.
@@ -326,6 +334,7 @@ class JobQueue:
                             self._owned(lease),
                             jobs.c.state == JobState.RUNNING.value,
                             jobs.c.cancel_requested.is_(False),
+                            jobs.c.lease_expires_at > func.clock_timestamp(),
                         )
                         .values(state=JobState.PUBLISHED.value, **self._cleared())
                         .returning(jobs.c.version, jobs.c.stage, jobs.c.input_hash, jobs.c.owner_id)
@@ -349,6 +358,8 @@ class JobQueue:
                 from services.pipeline.analysis import record_terminal
 
                 await record_terminal(connection, lease.job_id, result)
+                if on_publish is not None:
+                    await on_publish(connection)
                 published = PublishedResult(
                     lease.job_id, _key(row), lease.fencing_token, lease.generation, result
                 )
@@ -361,6 +372,25 @@ class JobQueue:
             ) from None
         logger.info("Published job %s with fencing token %s", lease.job_id, lease.fencing_token)
         return published
+
+    async def save_stage_data(
+        self, lease: Lease, data: dict[str, Any], *, connection: AsyncConnection | None = None
+    ) -> None:
+        async with (
+            self.database.engine.begin() if connection is None else nullcontext(connection)
+        ) as connection:
+            result = await connection.execute(
+                update(jobs)
+                .where(
+                    self._owned(lease),
+                    jobs.c.state == JobState.RUNNING.value,
+                    jobs.c.cancel_requested.is_(False),
+                    jobs.c.lease_expires_at > func.clock_timestamp(),
+                )
+                .values(stage_data=data, updated_at=func.now())
+            )
+            if result.rowcount != 1:
+                raise LeaseLost("Stage checkpoint no longer owns an active lease")
 
     async def _rejection_reason(self, lease: Lease) -> str:
         record = await self.get(lease.job_id)
@@ -524,6 +554,7 @@ class JobQueue:
                 state=JobState.DELETED.value,
                 generation=jobs.c.generation + 1,
                 payload={},
+                stage_data={},
                 **self._cleared(),
             )
         )

@@ -9,12 +9,12 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import Row, and_, case, insert, select, tuple_
+from sqlalchemy import Row, Text, and_, case, insert, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from services.api.auth import CurrentPrincipal, Principal, load_owned, owned_rows
-from services.api.errors import ApiError, safe_error
+from services.api.errors import ApiError, extraction_failure_code, safe_error
 from services.api.intake import InvestigationDispatcher
 from services.api.routes.common import engine, settings
 from services.api.schemas import (
@@ -254,6 +254,19 @@ async def latest_jobs(
         .where(capture_chunks.c.session_id.in_(investigation_ids))
     )
     candidates.extend((row.investigation_id, row) for row in capture)
+    extraction = await connection.execute(
+        select(jobs, investigations.c.id.label("investigation_id"))
+        .join(
+            investigations,
+            (jobs.c.payload["investigation_id"].as_string() == investigations.c.id.cast(Text))
+            & (jobs.c.owner_id == investigations.c.owner_id),
+        )
+        .where(
+            jobs.c.stage.in_(["claim_extraction", "reconciliation"]),
+            investigations.c.id.in_(investigation_ids),
+        )
+    )
+    candidates.extend((row.investigation_id, row) for row in extraction)
     newest: dict[uuid.UUID, Row[Any]] = {}
     for investigation_id, row in candidates:
         if row.state == JobState.DELETED.value:
@@ -277,6 +290,21 @@ def read_model(
     reads as ``partial`` (state ``running``), a final one as ``complete``.
     """
     base = investigation_response(row, job_state)
+    if job is not None and job.stage == "claim_extraction":
+        speech = base.speech
+        base = investigation_response(
+            row,
+            PipelineJob(
+                state=job.state.value,
+                stage=job.stage,
+                failure=None,
+                result=None,
+                media_result=job_state.media_result if job_state is not None else None,
+            ),
+        )
+        base.stage = job.stage
+        # Extraction consumes committed speech; its job must not hide that upstream result.
+        base.speech = speech
     state = base.state
     error = base.error
     status: ProcessingStatus
@@ -340,6 +368,25 @@ async def read_models(
                 model.speech = SpeechResult.model_validate(captured[0])
                 model.analysis = captured[1]
         models.append(model)
+    from services.pipeline.incremental import extraction_progress
+    from services.pipeline.reconciliation import reconciliation_progress
+
+    for item in models:
+        item.extraction_progress = await extraction_progress(connection, item.id)
+        item.reconciliation_progress = await reconciliation_progress(connection, item.id)
+    extraction_failures = [
+        item.job.id
+        for item in models
+        if item.job is not None and item.job.stage == "claim_extraction" and item.state == "failed"
+    ]
+    if extraction_failures:
+        failures = await connection.execute(
+            select(jobs.c.id, jobs.c.failure).where(jobs.c.id.in_(extraction_failures))
+        )
+        by_id = {row.id: extraction_failure_code(row.failure) for row in failures}
+        for item in models:
+            if item.job is not None and item.job.id in by_id:
+                item.error = SafeError.model_validate(safe_error(by_id[item.job.id]))
     return models
 
 
@@ -495,6 +542,9 @@ async def list_investigations(
         .limit(_LIST_LIMIT)
     )
     async with engine(request).connect() as connection:
+        await connection.execution_options(
+            isolation_level="REPEATABLE READ", postgresql_readonly=True
+        )
         rows = (await connection.execute(query)).all()
         items = await read_models(connection, list(rows))
     return InvestigationListResponse(items=items)
@@ -505,5 +555,8 @@ async def get_investigation(
     request: Request, investigation_id: uuid.UUID, principal: CurrentPrincipal
 ) -> InvestigationReadModel:
     async with engine(request).connect() as connection:
+        await connection.execution_options(
+            isolation_level="REPEATABLE READ", postgresql_readonly=True
+        )
         row = await load_owned(connection, investigations, investigation_id, principal)
         return (await read_models(connection, [row]))[0]

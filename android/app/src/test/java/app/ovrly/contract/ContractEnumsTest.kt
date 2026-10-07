@@ -1,6 +1,9 @@
 package app.ovrly.contract
 
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -35,6 +38,31 @@ class ContractEnumsTest {
     }
 
     private val enums: List<Registered<*>> = listOf(
+        Registered("reconciliation_status", ReconciliationStatus.entries, { it.wireName }) {
+            ReconciliationStatus.fromWire(it)
+        },
+        Registered(
+            "extraction_coverage_status",
+            ExtractionCoverageStatus.entries,
+            { it.wireName }
+        ) {
+            ExtractionCoverageStatus.fromWire(it)
+        },
+        Registered("claim_taxonomy", ClaimTaxonomy.entries, { it.wireName }) {
+            ClaimTaxonomy.fromWire(it)
+        },
+        Registered("assertion_mode", AssertionMode.entries, { it.wireName }) {
+            AssertionMode.fromWire(it)
+        },
+        Registered("speaker_commitment", SpeakerCommitment.entries, { it.wireName }) {
+            SpeakerCommitment.fromWire(it)
+        },
+        Registered("eligibility_reason", EligibilityReason.entries, { it.wireName }) {
+            EligibilityReason.fromWire(it)
+        },
+        Registered("claim_uncertainty", ClaimUncertainty.entries, { it.wireName }) {
+            ClaimUncertainty.fromWire(it)
+        },
         Registered("analysis_status", AnalysisStatus.entries, { it.wireName }) {
             AnalysisStatus.fromWire(it)
         },
@@ -108,6 +136,18 @@ class ContractEnumsTest {
     )
 
     private val mirrors = listOf(
+        Mirror(
+            ReconciliationProgress.serializer().descriptor,
+            INVESTIGATION,
+            "reconciliation_progress"
+        ),
+        Mirror(
+            ReconciliationSummary.serializer().descriptor,
+            "report-version.schema.json",
+            "reconciliation"
+        ),
+        Mirror(ExtractionProgress.serializer().descriptor, INVESTIGATION, "extraction_progress"),
+        Mirror(ObservationProgress.serializer().descriptor, INVESTIGATION, "observation_progress"),
         Mirror(Investigation.serializer().descriptor, INVESTIGATION),
         Mirror(Coverage.serializer().descriptor, INVESTIGATION, "coverage"),
         Mirror(MediaCoverage.serializer().descriptor, INVESTIGATION, "media_coverage"),
@@ -132,8 +172,15 @@ class ContractEnumsTest {
         ),
         Mirror(Job.serializer().descriptor, "job.schema.json"),
         Mirror(ReportVersion.serializer().descriptor, "report-version.schema.json"),
+        Mirror(
+            ProcessingAttempt.serializer().descriptor,
+            "report-version.schema.json",
+            "processing_attempt"
+        ),
         Mirror(Claim.serializer().descriptor, "claim.schema.json"),
         Mirror(ClaimCorrection.serializer().descriptor, "claim.schema.json", "correction"),
+        Mirror(ClaimInterpretation.serializer().descriptor, "claim.schema.json", "interpretation"),
+        Mirror(ClaimSourceRef.serializer().descriptor, "claim.schema.json", "source_ref"),
         Mirror(Evidence.serializer().descriptor, "evidence.schema.json"),
         Mirror(EvidenceSource.serializer().descriptor, "evidence.schema.json", "source"),
         Mirror(Assessment.serializer().descriptor, "assessment.schema.json"),
@@ -370,6 +417,49 @@ class ContractEnumsTest {
         assertEquals(version, ContractJson.CONTRACT_VERSION)
         assertEquals(version, VoiceActionCodec.CONTRACT_VERSION)
         assertTrue(version, Regex("0\\.\\d+\\.\\d+-draft").matches(version))
+    }
+
+    @Test
+    fun wireSerializersRoundTripKnownNamesAndNeverEncodeUnknown() {
+        assertWireRoundTrip(SourceKindSerializer, SourceKind.CAPTURE, SourceKind.UNKNOWN)
+        assertWireRoundTrip(
+            MediaSpeechStatusSerializer,
+            MediaSpeechStatus.UNAVAILABLE,
+            MediaSpeechStatus.UNKNOWN
+        )
+        assertWireRoundTrip(
+            MediaTextStatusSerializer,
+            MediaTextStatus.PENDING,
+            MediaTextStatus.UNKNOWN
+        )
+        assertWireRoundTrip(
+            SpeechUnavailableReasonSerializer,
+            SpeechUnavailableReason.NO_AUDIO_TRACK,
+            SpeechUnavailableReason.UNKNOWN
+        )
+        assertWireRoundTrip(
+            ExtractionCoverageStatusSerializer,
+            ExtractionCoverageStatus.PROCESSED,
+            ExtractionCoverageStatus.UNKNOWN
+        )
+        assertWireRoundTrip(
+            ReconciliationStatusSerializer,
+            ReconciliationStatus.CANCELLED,
+            ReconciliationStatus.UNKNOWN
+        )
+    }
+
+    private fun <E : Enum<E>> assertWireRoundTrip(
+        serializer: KSerializer<E>,
+        known: E,
+        unknown: E
+    ) {
+        val encoded = Json.encodeToString(serializer, known)
+        assertEquals(known, Json.decodeFromString(serializer, encoded))
+        assertEquals(unknown, Json.decodeFromString(serializer, "\"$FUTURE\""))
+        assertThrows(SerializationException::class.java) {
+            Json.encodeToString(serializer, unknown)
+        }
     }
 
     private fun schemaNode(file: String, pointer: String): JsonObject {

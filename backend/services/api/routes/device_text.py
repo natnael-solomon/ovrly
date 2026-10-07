@@ -256,6 +256,9 @@ async def put_batch(
                     .returning(upload_text)
                 )
             ).one()
+        from services.pipeline.producers import admit_late_text
+
+        await admit_late_text(connection, JobQueue(request.app.state.database), investigation_id)
         return await snapshot(connection, investigation_id, source, document)
 
 

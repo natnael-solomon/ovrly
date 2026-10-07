@@ -4,6 +4,60 @@
 
 ### Added
 
+- Quote-grounded extraction prompt (BE-08, #25): `claim-window-v2` asks hosted
+  models to quote source text verbatim, and the backend resolves quotes to
+  character spans. The single extraction or reconciliation repair now states a
+  bounded validation reason (schema paths and fixed messages only, never model
+  values). Context references to a window's own targets are dropped. Extraction
+  output now defaults to 2048 tokens per window, with a separate
+  `OVRLY_RECONCILIATION_MAX_TOKENS` (8192) for whole-input reconciliation; the
+  candidate run budget is 196500 with a 102500 reconciliation reserve. The focused
+  live run's findings are recorded with the BE-08 evidence; live routes stay
+  disabled by default.
+
+- Real speech feeds claim extraction (BE-08, #25): committed uploaded and
+  captured speech segments enter the incremental ledger with their original
+  timebase and no invented speakers, under configurable run budgets. Worker
+  maintenance closes the run once upstream work settles and registers
+  reconciliation; keep-only-results captures never start inference. Late or
+  over-bound input is reported as skipped (`input_closed`/`budget_exhausted`),
+  and investigation reads keep speech and analysis while extraction runs.
+  Evidence handoff remains pending; live providers stay disabled.
+
+- Device text feeds claim extraction (BE-08, #25): recognized upload and capture
+  on-screen text enters the same ledger as frame-instant `text` observations with
+  stable producer identifiers, so replays never duplicate. Text-only uploads and
+  captures produce reports; pending upload text blocks settlement, and late text is
+  reported `skipped/input_closed`. Speech and text stay distinct, so claims citing
+  both are `modality: "both"` and disagreement can carry `source-text-conflict`.
+
+- Independent quality-reconciliation route gate (BE-08, #25): reconciliation
+  requires its own enablement, owner verification and Scholarxiv quality model
+  pool. Verified extraction routes no longer activate it implicitly, and all
+  live routes remain disabled by default.
+
+- Settled-input reconciliation (BE-08, #25): quality-only whole-context processing,
+  durable recovery and shared budget accounting, linked correction appearances,
+  immutable history and stale-verdict removal. Additive backend/shared/Android
+  contracts distinguish interpretation finality, reassessment handoff and explicit
+  reconciliation failure from assessment completion and modality coverage.
+  Real ASR/device-text producer integration and live semantic evidence remain gated.
+
+- Budgeted incremental claim extraction (BE-08, #25): deterministic overlapping
+  batches, cumulative provisional reports with stable source identities, durable
+  pre-send request/token reservations and protected reconciliation capacity.
+  Investigation/capture contracts and Android models expose explicit pending,
+  processed, skipped and failed observation intervals. Capture Stop fences the
+  fixture-backed producer; real ASR/OCR wiring and verified production budgets
+  remain gated. Migration `0017_extraction_runs` retains admitted input and
+  nonrefundable spending until investigation deletion.
+
+- Explicit claim-extraction provider recovery (BE-08, #25): durable cooldowns,
+  verified Scholarxiv routing fallbacks, independently authorized extraction-only
+  Groq recovery, bounded regenerated feedback and optional report provenance.
+  Restrictions and unknown outcomes fail closed; prior report versions survive
+  later failure. Both providers remain gated.
+
 - Report export and accessibility (AN-11, #39): the Report screen's "Share report" action
   sends the shown version to the Android share sheet as plain text with the claim summary,
   source links, limitations, provisional label, version, publication date and the date
@@ -202,6 +256,14 @@
   state, recorded by migration `0009_reanalysis_source` and echoed in the
   response. The field is optional in the `0.2.0-draft` contract so the addition
   is non-breaking; the server requires it whenever `match_confirmed` is true.
+
+- Internal single-window claim extraction (BE-08, #25): source-grounded,
+  provisional occurrences with taxonomy, attribution and eligibility metadata,
+  one durable invalid-output repair, explicit failures and atomic fenced report
+  publication. Shared schemas and Android parsers accept the additive metadata.
+  Hosted activation is disabled pending verified routes and approved input;
+  intake/ASR integration, scheduling, reconciliation and assessment remain
+  separate work.
 
 - Backend report versions, explicit saves, reanalysis, export and voice actions
   (BE-10, #33): immutable, owner-scoped report versions with change summaries

@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from services.api.schemas import Assessment, Interval, ReportVersion
 from services.captures import CAPTURE_STAGE
-from services.jobs.handlers import JobContext, JobHandler
+from services.jobs.handlers import JobContext, JobHandler, StageResult
 from services.jobs.models import jobs
 from services.jobs.queue import ClaimedJob
 from services.jobs.retries import NonRetriableInput
@@ -378,7 +378,7 @@ def _fixture_claim_ids() -> list[str]:
 def capture_with_stub_report(handler: JobHandler) -> JobHandler:
     """Wrap the ``media_validation`` handler: validate first, then sync the fixture report."""
 
-    async def run(job: ClaimedJob, context: JobContext) -> dict[str, Any]:
+    async def run(job: ClaimedJob, context: JobContext) -> dict[str, Any] | StageResult:
         result = await handler(job, context)
         async with context.queue.database.engine.begin() as connection:
             capture_id = await connection.scalar(

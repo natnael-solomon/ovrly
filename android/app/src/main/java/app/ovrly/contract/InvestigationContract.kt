@@ -240,6 +240,10 @@ internal data class Investigation(
     val processingStatus: ProcessingStatus,
     val job: Job?,
     val report: ReportVersion?,
+    @SerialName("extraction_progress")
+    val extractionProgress: ExtractionProgress? = null,
+    @SerialName("reconciliation_progress")
+    val reconciliationProgress: ReconciliationProgress? = null,
     val speech: SpeechResult? = null,
     val analysis: MediaAnalysis? = null
 ) {

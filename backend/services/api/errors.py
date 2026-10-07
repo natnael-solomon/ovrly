@@ -25,6 +25,17 @@ _IDENTITY_FIELDS = {"user_id", "owner_id", "principal_id"}
 _MESSAGE_LIMIT = 240
 
 
+def extraction_failure_code(failure: str | None) -> str:
+    return {
+        "ExtractionInvalid": "EXTRACTION_INVALID",
+        "ExtractionUnavailable": "EXTRACTION_UNAVAILABLE",
+        "ExtractionDenied": "EXTRACTION_DENIED",
+        "InvalidCooldown": "EXTRACTION_UNAVAILABLE",
+        "ExtractionBudgetExceeded": "EXTRACTION_BUDGET_EXHAUSTED",
+        "UnknownOutcome": "EXTRACTION_OUTCOME_UNKNOWN",
+    }.get(failure or "", "PROCESSING_FAILED")
+
+
 class ApiError(Exception):
     """Typed, client-safe error. Messages must never contain internals or secrets."""
 

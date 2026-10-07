@@ -68,7 +68,7 @@ round-trip check reports whole-file diffs).
 | `speech-retry-request.schema.json`, `speech-retry-response.schema.json` | `SpeechRetryRequest`, `SpeechRetryResponse` | `POST /v1/investigations/{id}/speech/retry`; the outcome is recorded once per Idempotency-Key. |
 | `job.schema.json` | `JobSummary` (client-visible columns of `jobs`) | Nested in an investigation; voice `job` targets. |
 | `report-version.schema.json` | `ReportVersion` | Nested in an investigation; `GET /v1/investigations/{id}/reports/{version}` and the `report` snapshot of the inline `SavedReport` component (BE-10, #33). The optional `fixture` boolean (absent reads as false; the server always sends it) is true only for development stub versions (`OVRLY_STUB_REPORTS`), which clients label as a fixture, never as live results; the Android `ReportVersion` mirrors it with a default of false. |
-| `claim.schema.json` | `Claim`, `ClaimCorrection` | Items of `report.claims`. |
+| `claim.schema.json` | `Claim`, `ClaimCorrection`, `Interpretation`, `SourceRef` | Items of `report.claims`; the interpretation types live in `services/claims.py`. |
 | `evidence.schema.json` | `Evidence`, `EvidenceSource` | Items of `report.evidence`. |
 | `assessment.schema.json` | `Assessment`, `EvidenceRelation` | Items of `report.assessments`. |
 | `capture-session.schema.json` | `CaptureSession` in `services/api/capture_schemas.py` | Live-overlay session read model. |
@@ -156,6 +156,24 @@ no server OCR, provider call, 60-second timer or aggregation is added here.
 
 ### Investigation read model
 
+BE-08 whole-input reconciliation adds optional nullable `reconciliation_progress`
+to investigation/capture reads and `reconciliation` to reports. Its typed status
+is separate from assessment completion: success publishes `status: complete` but
+does not change `report.provisional` to false. `coverage_limited` discloses settled
+upstream/observation gaps. `reassessment_claim_ids` and the immutable report/version
+form the downstream handoff for changed nonsuperseded claims; their old evidence
+and assessments are removed. `change_summary` explains the update.
+Optional reciprocal `claim.corrects_occurrence_id` and
+`claim.superseded_by_occurrence_id` preserve both original appearances. Earlier
+versions and original wording stay unchanged.
+
+Reconciliation failure preserves available provisional claims, with a safe error
+under `reconciliation_progress.error`; the top-level report/error branches stay
+unchanged. The new `reconciliation_status` enum is waiting, checking, complete,
+failed or cancelled. Android retains unknown values as `UNKNOWN`, not completion.
+These additions are backward-compatible in `0.2.0-draft`; older payloads omit them.
+Android/backend human review is still required before merge.
+
 `investigation.schema.json` keeps progress, stored state, the queue job, the
 error and the findings apart so a failure can never be read as a finding:
 
@@ -224,6 +242,27 @@ capture investigations and re-queues only quota-blocked chunks.
 stored failure is not tied to the request that reads it and `action` is not
 stored today (`services/api/errors.py safe_error`).
 
+Optional nullable `extraction_progress` on investigation and capture-status reads
+describes the internal incremental producer's accepted observations, not upstream
+ASR/OCR completeness. It is absent for legacy/non-incremental work. Each original
+interval has `observation_id`, `timebase`, `status` (`pending`, `processed`,
+`skipped`, `failed`) and nullable diagnostic `reason`. Budget gaps use
+`budget_exhausted` (including producer input beyond the run's observation bound);
+input arriving after the producer closed uses `input_closed`; missing/purged jobs use
+`job_unavailable`, cancellation and
+deletion are skipped, and unusable context uses `context_without_target`.
+Failed windows use allowlisted public extraction error codes, or
+`PROCESSING_FAILED` for an unknown internal failure; exception names are not
+part of the contract. A successful overlapping window counts its source
+observations as processed even if their first assigned window failed.
+Processed means its extraction window published, not that the content is true
+or that reconciliation finished. Unknown states remain `UNKNOWN` on Android.
+`closed` means producer input closed (or capture Stop disallowed continuation).
+The nonnegative int32 `requests_used`/`tokens_reserved` are conservative pre-send
+reservations, not actual usage; positive int32 ceilings and reconciliation
+reserves are disclosed alongside them. Failures retain the existing error/report
+branch rules; prior immutable reports stay available on their own endpoints.
+
 Capture sessions (`capture-session`, `capture-chunk-request`, `capture-chunk`)
 state the duplicate and out-of-order rules as data: `(session_id, seq)` is the
 idempotency key, a repeat with the same bytes replays the acknowledgement with
@@ -234,11 +273,31 @@ a shared video use `media`.
 
 ## Enums
 
+BE-08 adds optional nullable `claim.interpretation`: taxonomy, source/context
+references, assertion mode, speaker commitment, attribution, eligibility and
+uncertainty. Existing payloads without it remain readable; the server omits
+an absent interpretation rather than rewriting legacy fixtures with nulls.
+References are half-open character offsets into stable observation IDs.
+Source references are nonempty, spans ordered and uncertainty flags distinct.
+The bounded pipeline validates IDs and offsets against the original input.
+Normative content is not empirically eligible, and extraction alone never
+creates an assessment. Kotlin models retain typed unknown-enum fallbacks.
+The standard-library validator now also supports `minItems` and `uniqueItems`.
+
+Reports may include nullable `processing_attempts` diagnostic provenance:
+provider, actual model, completion decision ID when present, task, outcome,
+nullable nonnegative int32 token counters, hygiene flags, repair and feedback.
+Absent metadata is omitted by the server and remains compatible with older
+fixtures. These descriptive strings are not enums or client success states;
+unknown feedback/outcome values never imply a completed assessment. The Kotlin
+mirror preserves nullable identifiers and strictly validates token counters.
+
 Each value list is one `$def` in `enums.schema.json` so #62 maps it to one Kotlin
 enum with an `UNKNOWN` fallback. The source column says where the list comes
 from; `tests/test_results.py` diffs `job_state` and `retry_class` against the
-backend enums and every other list against the `Literal` alias of the same name
-in `backend/services/api/schemas.py`.
+backend enums and the read-model lists against their `Literal` aliases in
+`backend/services/api/schemas.py`. Interpretation lists are compared with the
+field schemas generated by `backend/services/claims.py`.
 
 | Enum | Values | Source |
 | --- | --- | --- |
@@ -254,6 +313,7 @@ in `backend/services/api/schemas.py`.
 | `asr_provider` | `groq` | `ASRProvider`; no fallback |
 | `processing_status` | `waiting`, `checking`, `partial`, `complete`, `failed`, `cancelled` | Build contract section 3 |
 | `coverage_status` | `not_started`, `partial`, `complete` | `routes/investigations.py COVERAGE_PLACEHOLDER` plus the two pipeline values |
+| `extraction_coverage_status` | `pending`, `processed`, `skipped`, `failed` | `schemas.py ObservationProgress`; accepted-observation coverage, not a finding |
 | `upload_state` | `pending`, `completed` | `schemas.py UploadState` (pre-existing) |
 | `source_kind` | `url`, `upload` | `schemas.py UrlSource` / `UploadSource` |
 | `timebase` | `capture`, `media` | Build contract section 4, decision record 0001 |
@@ -267,6 +327,11 @@ in `backend/services/api/schemas.py`.
 | `correction_attribution` | `user`, `pipeline` | BE-10 (#33) reanalyze with reason `correction` |
 | `capture_session_state` | `open`, `closed`, `abandoned` | Introduced here |
 | `chunk_disposition` | `stored`, `duplicate`, `out_of_order` | Introduced here |
+| `claim_taxonomy` | `empirical`, `causal`, `documentary`, `predictive`, `normative`, `mixed`, `unclear` | `claims.py Interpretation` |
+| `assertion_mode` | `asserted`, `reported`, `questioned`, `hypothetical`, `counterfactual`, `unclear` | `claims.py Interpretation` |
+| `speaker_commitment` | `endorsed`, `rejected`, `uncommitted`, `unclear` | `claims.py Interpretation` |
+| `eligibility_reason` | `factual-claim`, `factual-premise`, `opinion`, `quoted-not-endorsed`, `insufficient-context`, `not-a-claim` | `claims.py Interpretation` |
+| `claim_uncertainty` | `unresolved-reference`, `missing-context`, `ambiguous-attribution`, `ambiguous-commitment`, `ambiguous-meaning`, `source-text-conflict` | `claims.py Interpretation` |
 
 `processing_status`, `job_state` and `investigation_state` share no value with
 `relation` or `overall_assessment` (tested), so a failed or cancelled request is
@@ -671,7 +736,8 @@ as a cheap early signal; the full gate is this workflow. A maintainer adds
 The validator supports only the schema subset used here: `$ref` (local and
 cross-file, including `#/properties/...` paths), `$defs`, `type`, `const`,
 `enum`, `required`, `properties`, boolean `additionalProperties`, `items`,
-`oneOf`, `allOf`, `not`, `minLength`, `maxLength`, `pattern`, numeric `minimum`/
+`oneOf`, `allOf`, `not`, `minItems`, `uniqueItems`, `minLength`, `maxLength`,
+`pattern`, numeric `minimum`/
 `maximum`, and the annotation-only `default` (never injected into payloads).
 Capture create/close duration bounds are machine-readable and enforced by the
 validator as well as the server. Unsupported keywords (including `prefixItems`,

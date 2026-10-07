@@ -108,7 +108,11 @@ internal data class CaptureStatus(
     val work: List<CaptureWork>,
     val claims: List<CaptureClaimState>,
     @SerialName("claim_extraction_status")
-    val claimExtractionStatus: CoverageStatus
+    val claimExtractionStatus: CoverageStatus,
+    @SerialName("extraction_progress")
+    val extractionProgress: ExtractionProgress? = null,
+    @SerialName("reconciliation_progress")
+    val reconciliationProgress: ReconciliationProgress? = null
 ) {
     init {
         ContractSyntax.timestamp("expires_at", expiresAt)
