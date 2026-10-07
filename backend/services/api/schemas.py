@@ -128,6 +128,12 @@ SpeechReason = Literal[
     "unknown_outcome",
     "provider_unavailable",
     "cancelled",
+    "offline",
+    "invalid_response",
+    "missing_audio",
+    "chunk_exceeds_file_cap",
+    "model_unavailable",
+    "no_speech",
 ]
 ASRProvider = Literal["groq"]
 Timebase = Literal["capture", "media"]

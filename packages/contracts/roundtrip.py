@@ -51,6 +51,7 @@ from services.api.schemas import (  # noqa: E402
     SafeError,
     SourceInspectionLevel,
     SourceType,
+    SpeechResult,
     Timebase,
 )
 from services.jobs.retries import RetryClass  # noqa: E402
@@ -186,6 +187,7 @@ def _investigation(
     job: JobSummary | None,
     report: ReportVersion | None,
     updated_offset_seconds: int,
+    speech: SpeechResult | None = None,
 ) -> InvestigationReadModel:
     return InvestigationReadModel(
         id=_uuid(number),
@@ -200,6 +202,7 @@ def _investigation(
         processing_status=processing_status,
         job=job,
         report=report,
+        speech=speech,
     )
 
 
@@ -514,10 +517,22 @@ def no_claims() -> InvestigationReadModel:
         coverage=Coverage(status="complete", covered_ms=58_000, total_ms=58_000),
         version=1,
         error=None,
-        source=_url_source(58_000),
+        source=_upload_source(206, 58_000),
         job=_job(106, JobState.PUBLISHED, "publication", offset_seconds=150),
         report=report,
         updated_offset_seconds=150,
+        # The primary model failed, so the RFC-D27 fallback produced an observed empty result.
+        speech=SpeechResult(
+            status="completed",
+            reason="no_speech",
+            provider="groq",
+            model="whisper-large-v3",
+            processing_version=1,
+            source_sha256="a" * 64,
+            audio_sha256="b" * 64,
+            settings_sha256="c" * 64,
+            segments=[],
+        ),
     )
 
 
@@ -564,7 +579,8 @@ SCENARIOS: dict[str, tuple[Any, str, dict[str, Any]]] = {
         no_claims,
         "A complete check in which no assessable factual claims were found. The report version "
         "exists with empty claims, evidence and assessments; the change summary says so. This "
-        "is not a verdict that the video is true. Synthetic fixture.",
+        "is not a verdict that the video is true. Hosted speech completed on the fallback model "
+        "with no recognized speech (reason no_speech), which is not a failure. Synthetic fixture.",
         {"claim_count": 0, "assessment_count": 0},
     ),
 }

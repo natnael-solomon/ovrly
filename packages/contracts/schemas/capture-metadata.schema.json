@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft. Additive BE-06 multipart metadata envelope; existing chunk declaration is unchanged.",
+  "$comment": "Ovrly contracts 0.3.0-draft. Additive BE-06 multipart metadata envelope; existing chunk declaration is unchanged.",
   "title": "CaptureMetadata",
   "description": "UTF-8 JSON in the metadata text part of multipart/form-data. The content file part carries the declared bytes. Exactly these two parts are accepted. Identity and sequence must match the path. Modality is the client's declaration of what this chunk contains, not verified speech/text extraction. A both chunk carries both modalities in one media object. Distinct streams must be packaged into that object; the same sequence cannot name two separate files.",
   "type": "object",

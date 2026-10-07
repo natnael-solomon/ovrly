@@ -27,7 +27,7 @@ def transcription_parameters(model: str) -> dict[str, str]:
 
 
 class ASRUnavailable(Exception):
-    pass
+    """Speech could not be produced; the subclass name selects the public reason."""
 
 
 class ASRInvalidResponse(ASRUnavailable):
@@ -40,6 +40,54 @@ class ASRUnknownOutcome(ASRUnavailable):
 
 class ASRQuotaExhausted(ASRUnavailable):
     pass
+
+
+class ASROffline(ASRUnavailable):
+    """The connection was never established, so nothing reached the provider."""
+
+
+class ASRMissingAudio(ASRUnavailable):
+    """Absent, unreadable, changed or short audio: a visible gap, never silence."""
+
+
+class ASRChunkTooLarge(ASRUnavailable):
+    """The audio exceeds the configured file cap (or the provider answered HTTP 413)."""
+
+
+class ASRModelUnavailable(ASRUnavailable):
+    """The provider does not serve the requested model (HTTP 404)."""
+
+
+# Public ``speech.reason`` for each terminal speech failure (``jobs.failure`` stores the class
+# name) and for each per-model attempt outcome, matching ``evaluation/asr_policy.py``.
+REASON_BY_FAILURE = {
+    "ASRQuotaExhausted": "quota_exhausted",
+    "RateLimited": "quota_exhausted",
+    "ASRUnknownOutcome": "unknown_outcome",
+    "uncertain": "unknown_outcome",
+    "ASROffline": "offline",
+    "ASRInvalidResponse": "invalid_response",
+    "ASRMissingAudio": "missing_audio",
+    "ASRChunkTooLarge": "chunk_exceeds_file_cap",
+    "ASRModelUnavailable": "model_unavailable",
+    "Transient": "provider_unavailable",
+    "ASRUnavailable": "provider_unavailable",
+}
+FAILURE_BY_REASON: dict[str, type[ASRUnavailable]] = {
+    "quota_exhausted": ASRQuotaExhausted,
+    "unknown_outcome": ASRUnknownOutcome,
+    "offline": ASROffline,
+    "invalid_response": ASRInvalidResponse,
+    "missing_audio": ASRMissingAudio,
+    "chunk_exceeds_file_cap": ASRChunkTooLarge,
+    "model_unavailable": ASRModelUnavailable,
+    "provider_unavailable": ASRUnavailable,
+}
+
+
+def failure_reason(failure: str | None) -> str:
+    """Unknown or absent failure names are reported as provider unavailability."""
+    return REASON_BY_FAILURE.get(failure or "", "provider_unavailable")
 
 
 def _retry_after(value: str | None) -> float | None:
@@ -91,7 +139,12 @@ def _segments(data: Any, duration_ms: int, offset_ms: int) -> list[dict[str, Any
 
 class ASRAdapter(Protocol):
     async def transcribe(
-        self, audio: bytes, *, duration_ms: int, offset_ms: int = 0
+        self,
+        audio: bytes,
+        *,
+        duration_ms: int,
+        offset_ms: int = 0,
+        model: str | None = None,
     ) -> list[dict[str, Any]]: ...
 
 
@@ -116,10 +169,18 @@ class GroqAdapter:
         self.transport = transport
 
     async def transcribe(
-        self, audio: bytes, *, duration_ms: int, offset_ms: int = 0
+        self,
+        audio: bytes,
+        *,
+        duration_ms: int,
+        offset_ms: int = 0,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
-        if not audio or len(audio) > self.max_audio_bytes or duration_ms <= 0 or offset_ms < 0:
-            raise ASRUnavailable
+        """Transcribe with ``model`` (the configured model when omitted); one HTTP request."""
+        if not audio or duration_ms <= 0 or offset_ms < 0:
+            raise ASRMissingAudio
+        if len(audio) > self.max_audio_bytes:
+            raise ASRChunkTooLarge
         try:
             async with (
                 asyncio.timeout(self.timeout_seconds),
@@ -135,7 +196,7 @@ class GroqAdapter:
                         "Authorization": f"Bearer {self.api_key}",
                         "Accept-Encoding": "identity",
                     },
-                    data=transcription_parameters(self.model),
+                    data=transcription_parameters(model or self.model),
                     files={"file": ("audio.wav", audio, "audio/wav")},
                 ) as response,
             ):
@@ -167,13 +228,23 @@ class GroqAdapter:
                     raise RateLimited(delay)
                 if response.status_code == 503:
                     raise Transient
+                if response.status_code == 404:
+                    raise ASRModelUnavailable
+                if response.status_code == 413:
+                    raise ASRChunkTooLarge
                 if response.status_code == 408 or 500 <= response.status_code <= 599:
                     raise ASRUnknownOutcome
                 if response.status_code != 200:
                     raise ASRUnavailable
                 return _segments(data, duration_ms, offset_ms)
-        except UnsafeUrl:
-            # Refused before connecting, so nothing reached the provider.
+        except UnsafeUrl as refused:
+            # Refused before connecting, so nothing reached the provider. A name that does not
+            # resolve is how a missing network usually shows up.
+            if refused.reason == "unresolvable":
+                raise ASROffline from None
             raise ASRUnavailable from None
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            # No connection was established, so the request was never sent.
+            raise ASROffline from None
         except (httpx.HTTPError, TimeoutError):
             raise ASRUnknownOutcome from None

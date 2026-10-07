@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Every closed vocabulary of the contract, one $def each, so the Android models (#62) map each one to an enum with an UNKNOWN fallback. Removing or renaming a value is a breaking change; adding one is additive but read-side parsers must already tolerate it. The source of each list is named in its description.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Every closed vocabulary of the contract, one $def each, so the Android models (#62) map each one to an enum with an UNKNOWN fallback. Removing or renaming a value is a breaking change; adding one is additive but read-side parsers must already tolerate it. The source of each list is named in its description.",
   "title": "Enums",
   "description": "Definitions only; this file is not a payload schema. Read-model fields (investigation, job, report version, claim, evidence, assessment, capture session) tolerate values outside these lists by mapping them to UNKNOWN, never to a success or finding state. Request fields are validated strictly by the server.",
   "$defs": {
@@ -50,12 +50,12 @@
     },
     "speech_reason": {
       "type": "string",
-      "description": "Why speech is unavailable. An unknown outcome is never automatically resubmitted. Source: backend SpeechReason.",
-      "enum": ["disabled", "no_audio_track", "quota_exhausted", "unknown_outcome", "provider_unavailable", "cancelled"]
+      "description": "Why speech is unavailable (ASR_UNAVAILABLE reasons follow evaluation/asr_policy.py: the last of the primary and fallback model attempts), or no_speech on a completed result with no recognized speech. An unknown outcome is never resubmitted to the same model. Source: backend SpeechReason.",
+      "enum": ["disabled", "no_audio_track", "quota_exhausted", "unknown_outcome", "provider_unavailable", "cancelled", "offline", "invalid_response", "missing_audio", "chunk_exceeds_file_cap", "model_unavailable", "no_speech"]
     },
     "asr_provider": {
       "type": "string",
-      "description": "Hosted transcription provider. Source: backend ASRProvider; no fallback.",
+      "description": "Hosted transcription provider. Source: backend ASRProvider; the RFC-D27 fallback is a second model of the same provider, never another provider.",
       "enum": ["groq"]
     },
     "job_state": {

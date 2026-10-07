@@ -114,6 +114,16 @@ async def uploaded_analysis(
     return summarize(media, speech, text, state.text_deadline, state.text_expired)
 
 
+def speech_gap(reason: str | None) -> str:
+    """Gap code for an unavailable speech reason; the reason itself stays on ``speech``."""
+    return {
+        "no_audio_track": "NO_AUDIO_TRACK",
+        "quota_exhausted": "ASR_QUOTA_EXHAUSTED",
+        "unknown_outcome": "ASR_OUTCOME_UNKNOWN",
+        "disabled": "ASR_DISABLED",
+    }.get(reason or "", "ASR_UNAVAILABLE")
+
+
 def summarize(
     media: dict[str, Any],
     speech: dict[str, Any],
@@ -133,12 +143,7 @@ def summarize(
         pending.append("speech")
     else:
         unavailable.append("speech")
-        reason = {
-            "no_audio_track": "NO_AUDIO_TRACK",
-            "quota_exhausted": "ASR_QUOTA_EXHAUSTED",
-            "unknown_outcome": "ASR_OUTCOME_UNKNOWN",
-            "disabled": "ASR_DISABLED",
-        }.get(speech.get("reason", ""), "ASR_UNAVAILABLE")
+        reason = speech_gap(speech.get("reason"))
         gaps.append({"modality": "speech", "reason": reason, "interval": span})
     frames = [
         frame for batch in (text["batches"] if text else []) for frame in batch["body"]["frames"]

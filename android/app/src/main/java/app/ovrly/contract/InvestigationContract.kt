@@ -22,7 +22,7 @@ import kotlinx.serialization.json.jsonObject
 
 /*
  * Typed models for `investigation.schema.json`, `job.schema.json` and
- * `investigation-create-request.schema.json` (contract 0.2.0-draft). Progress, stored state,
+ * `investigation-create-request.schema.json` (contract 0.3.0-draft). Progress, stored state,
  * the queue job, the error and the findings are separate fields and the constructor enforces
  * the schema's three `oneOf` branches, so a failure can never be read as a finding. Parse and
  * encode with [InvestigationCodec].

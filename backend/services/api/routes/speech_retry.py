@@ -1,4 +1,9 @@
-"""Explicit retries reserve quota before making only missing speech runnable."""
+"""Explicit retries reserve quota before making only missing speech runnable.
+
+Under RFC-D27 a chunk is retried only after both models refused it for quota and neither
+attempt may have reached the provider: an unknown outcome is never resent. The retry reserves
+the primary model, or the fallback when the primary's windows are still full.
+"""
 
 import asyncio
 from collections.abc import Sequence
@@ -15,8 +20,9 @@ from services.api.errors import ApiError
 from services.api.routes.common import engine, settings
 from services.api.routes.investigations import _idempotency_key
 from services.api.schemas import SpeechRetryOutcome, SpeechRetryRequest, SpeechRetryResponse
+from services.asr.fallback import models
 from services.asr.groq import ASRQuotaExhausted, ASRUnavailable
-from services.asr.reservations import reserve_in
+from services.asr.reservations import replay_safe, reserve_in
 from services.captures import chunk_jobs, stage_key
 from services.jobs.models import job_results, jobs
 from services.models import (
@@ -108,6 +114,7 @@ async def retry_speech(
                 and media is not None
                 and media.state == "published"
                 and speech.payload.get("settings_sha256") == speech_settings_hash(config)
+                and await replay_safe(connection, speech.id, speech.payload, speech.retry_counts)
             ):
                 source = await load_owned(connection, uploads, investigation.upload_id, principal)
                 prepared = await connection.scalar(
@@ -133,7 +140,7 @@ async def retry_speech(
                             config.asr_audio_max_bytes,
                         )
                         number = int(speech.payload.get("speech_retry", 0)) + 1
-                        await reserve_in(
+                        await _reserve_either(
                             connection,
                             speech.id,
                             config,
@@ -267,6 +274,7 @@ async def _capture_outcome(
             and package is not None
             and package["audio"] is not None
             and await store.digest(chunk.storage_key) == (chunk.size_bytes, chunk.sha256)
+            and await replay_safe(connection, speech.id, speech.payload, speech.retry_counts)
         ):
             blocked.append((speech, package["audio"]["duration_ms"] / 1000))
     if not blocked:
@@ -279,7 +287,7 @@ async def _capture_outcome(
         async with connection.begin_nested():
             for speech, seconds in blocked:
                 number = int(speech.payload.get("speech_retry", 0)) + 1
-                await reserve_in(connection, speech.id, config, seconds, number * 100)
+                await _reserve_either(connection, speech.id, config, seconds, number * 100)
     except ASRQuotaExhausted:
         return "quota_exhausted"
     for speech, _ in blocked:
@@ -299,3 +307,19 @@ async def _capture_outcome(
             )
         )
     return "accepted"
+
+
+async def _reserve_either(
+    connection: AsyncConnection,
+    job_id: UUID,
+    config: Settings,
+    seconds: float,
+    index: int,
+) -> None:
+    """Reserve the first model with room; quota stays exhausted only when neither has any."""
+    primary, fallback = models(config)
+    try:
+        async with connection.begin_nested():
+            await reserve_in(connection, job_id, config, seconds, index, model=primary)
+    except ASRQuotaExhausted:
+        await reserve_in(connection, job_id, config, seconds, index, model=fallback)

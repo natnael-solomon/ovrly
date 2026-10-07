@@ -228,7 +228,11 @@ async def test_terminal_speech_starts_one_deadline_and_late_text_never_retranscr
             "partial" if outcome in {"quota", "unavailable"} else "complete"
         )
         assert late["analysis"]["text_deadline"] == first["analysis"]["text_deadline"]
-        assert len(calls) == 1
+        # A failed primary is followed by exactly one fallback request; late text adds none.
+        assert len(calls) == (2 if outcome in {"quota", "unavailable"} else 1)
+        if outcome == "empty":
+            assert first["speech"]["status"] == "completed"
+            assert first["speech"]["reason"] == "no_speech"
         assert late["report"] is None
 
 

@@ -191,8 +191,10 @@ aggregation timer in these routes.
 ### Hosted uploaded speech (disabled by default)
 
 `OVRLY_ASR_ENABLED=1` enables the Groq-only successor for prepared audio.
-There is no default model, alternate provider or local model. Startup rejects
-incomplete live configuration. An operator must first verify model availability,
+The models default to the RFC-D27 selection (decision 0004): primary
+`whisper-large-v3-turbo`, fallback `whisper-large-v3`. There is no alternate
+provider and no local model. Startup rejects incomplete live configuration and
+identical primary/fallback models. An operator must first verify model availability,
 free/no-card entitlement, exact byte cap, all applicable quotas, and billing
 rounding for the account. These facts remain unverified; the implementation and
 offline replay tests do not establish permission to upload media.
@@ -203,11 +205,12 @@ WAV headers included), activation requires:
 | Setting | Meaning; no implicit live value |
 | --- | --- |
 | `OVRLY_GROQ_API_KEY` | Server secret, supplied outside Git |
-| `OVRLY_GROQ_MODEL` | Explicitly selected available Groq model |
+| `OVRLY_GROQ_MODEL` | Primary Groq model; default `whisper-large-v3-turbo` (RFC-D27). Verify availability |
+| `OVRLY_GROQ_FALLBACK_MODEL` | Model tried once after a primary failure; default `whisper-large-v3`. Must differ from the primary |
 | `OVRLY_GROQ_ACCOUNT_ID` | Stable opaque accounting label, not a credential or personal identifier |
 | `OVRLY_ASR_LIMITS_VERIFIED_ON` | Date (`YYYY-MM-DD`) of operator verification; configuration is an attestation, not automated entitlement discovery |
-| `OVRLY_ASR_REQUESTS_PER_MINUTE`, `OVRLY_ASR_REQUESTS_PER_DAY` | Positive account/model request limits |
-| `OVRLY_ASR_AUDIO_SECONDS_PER_HOUR`, `OVRLY_ASR_AUDIO_SECONDS_PER_DAY` | Positive account/model audio-second limits |
+| `OVRLY_ASR_REQUESTS_PER_MINUTE`, `OVRLY_ASR_REQUESTS_PER_DAY` | Positive request limits, applied to each model separately |
+| `OVRLY_ASR_AUDIO_SECONDS_PER_HOUR`, `OVRLY_ASR_AUDIO_SECONDS_PER_DAY` | Positive audio-second limits, applied to each model separately |
 | `OVRLY_ASR_MINIMUM_BILLABLE_SECONDS` | Verified minimum charged seconds per request |
 | `OVRLY_ASR_RESPONSE_MAX_BYTES` | 1048576 by default, at most 4194304; streamed response bound |
 | `OVRLY_ASR_TIMEOUT_SECONDS` | 120 by default, at most 600; total HTTP wall-clock and I/O bound |
@@ -215,9 +218,11 @@ WAV headers included), activation requires:
 All workers for an account/model must share the same stable accounting label,
 database and limits; rotating credentials must not change the label. This local
 ledger cannot observe other applications using the account, and is not a billing
-report. Configure conservative headroom for that external usage. Rolling
+report. Configure conservative headroom for that external usage. Groq lists its
+limits per model at the organization level ([rate limits](https://console.groq.com/docs/rate-limits)),
+so each model keeps its own ledger windows with the configured values. Rolling
 minute/day request windows and hour/day audio windows serialize reservations
-with a PostgreSQL advisory lock. Audio is rounded up to whole seconds and to
+with a PostgreSQL advisory lock per account and model. Audio is rounded up to whole seconds and to
 the configured minimum. Every attempted request reserves both budgets before
 HTTP; known failures, cancellation and uncertain outcomes retain the reservation
 until its windows expire. No refund is assumed from an error or an empty transcript.
@@ -236,32 +241,59 @@ captured-chunk transport remains later work.
 
 Investigation list/detail reads expose optional `speech` separately from
 `coverage.media`: status, reason, timed segments, provider/model, processing
-version and source/audio/settings digests. Empty completed segments mean no
-recognized speech, not absent audio, no claims or completed analysis. Preparation
+version and source/audio/settings digests. Empty completed segments
+(`reason: "no_speech"`) mean no recognized speech, not absent audio, a failure,
+no claims or completed analysis. Preparation
 coverage remains unchanged and text pending. No-audio video skips ASR with
 `no_audio_track`; disabled processing reports `disabled`. Successful speech
 leaves the investigation queued for downstream work. Terminal speech failure
 (`ASR_QUOTA_EXHAUSTED` or `ASR_UNAVAILABLE`) is an explicit speech gap in the
 separate `analysis` read model; usable device text keeps the analysis partial.
 
-Short 429 responses with a finite, nonnegative `Retry-After` within
-`OVRLY_JOB_RETRY_MAX_BACKOFF_SECONDS` use the existing bounded rate-limit policy.
-Explicit quota errors, absent/unusable hints and longer waits stop automatic
-attempts with `ASR_QUOTA_EXHAUSTED`. HTTP 503 service unavailability uses the
-bounded transient policy. Other 5xx responses (including gateway failures) and
-HTTP 408 are terminal `unknown_outcome`: upstream processing may have completed.
-Other HTTP failures and malformed successful output are terminal
-unavailability. Transport interruption/timeout is also `unknown_outcome`, not evidence
-that the call was uncharged. Quota reset admits new work only; failed jobs do
-not resume automatically.
+#### Model fallback and `ASR_UNAVAILABLE` (RFC-D27, #117)
+
+`services/asr/fallback.py` follows the reference policy in
+`evaluation/asr_policy.py` for uploads and capture chunks alike:
+
+- Missing, unreadable, changed or short audio (`missing_audio`; a capture chunk
+  whose PCM covers less than 90% of its interval) and audio over
+  `OVRLY_ASR_AUDIO_MAX_BYTES` (`chunk_exceeds_file_cap`) are unavailable before any
+  reservation or call.
+- The primary model is called once. After any provider failure it tries the
+  fallback model once; there are no further automatic attempts in the job.
+- Failure classes and their reasons: 429 (quota or rate limit, with or without
+  `Retry-After`) and a full ledger window are `quota_exhausted`; HTTP 503, other
+  4xx and a refused destination are `provider_unavailable`; HTTP 404 is
+  `model_unavailable`; HTTP 413 is `chunk_exceeds_file_cap`; an unreachable host
+  (connection refused, connect timeout, unresolvable name) is `offline`;
+  malformed successful output is `invalid_response`; other 5xx, HTTP 408 and
+  interrupted transfers are `unknown_outcome`, because Groq may have processed the
+  audio. ([Groq error codes](https://console.groq.com/docs/errors))
+- If both models fail, speech is `unavailable` with the **last** attempt's reason
+  (job failure `ASRQuotaExhausted` maps to gap `ASR_QUOTA_EXHAUSTED`,
+  `ASRUnknownOutcome` to `ASR_OUTCOME_UNKNOWN`, the rest to `ASR_UNAVAILABLE`).
+- An observed empty result is `completed` with `reason: "no_speech"` and no
+  segments; it is never a failure. `model` names the model that answered.
+
+Each attempt writes its own ledger row (model and retry index) as `uncertain`
+before HTTP. A model whose row is `uncertain` or `ASRUnknownOutcome` is never sent
+the same audio again in that run: a crash, lease loss or timeout during the
+primary call moves on to the fallback, and an unknown fallback ends the chunk. A
+stored success is reused without another call. Quota reset admits new work only;
+failed jobs do not resume automatically.
 
 `POST /v1/investigations/{id}/speech/retry` (body `{"protocol_version": 1}`,
 required `Idempotency-Key`) is the owner's explicit retry for upload speech that
-failed with `ASR_QUOTA_EXHAUSTED`. Migration `0015_speech_retries` records each
+failed with `ASR_QUOTA_EXHAUSTED` after both models were tried. It still applies
+once both models are exhausted, but only when no attempt in that run may have
+reached Groq (no `uncertain`, unknown-outcome or completed ledger row); a quota
+gap after an unknown primary outcome is `not_eligible`, so the primary is never
+resent. Migration `0015_speech_retries` records each
 owner/key outcome, so replays and concurrent duplicates return the first answer.
 The request rechecks the investigation, source bytes, prepared audio, enablement
-and provider settings, then reserves quota before re-queuing only the speech job
-under a new generation. If quota is still exhausted it answers
+and provider settings, then reserves quota for the primary model (or the
+fallback when the primary's windows are still full) before re-queuing only the
+speech job under a new generation. If neither model has quota it answers
 `quota_exhausted`, queues nothing and makes no provider call. Validation, prepared
 audio, device text and the original text deadline are reused; partial analysis
 stays readable while speech runs. `unknown_outcome`, other failures, completed
@@ -269,8 +301,8 @@ or running speech, cancelled/deleted work and changed settings are not
 retriable (`not_eligible`, `already_complete` or `in_progress`).
 
 For a capture-source investigation the same endpoint retries only chunks whose
-`asr` stage failed with `ASR_QUOTA_EXHAUSTED` and whose stored package still
-holds the same audio bytes. It locks the capture session before its jobs (the
+`asr` stage failed with `ASR_QUOTA_EXHAUSTED` with no uncertain attempt and whose
+stored package still holds the same audio bytes. It locks the capture session before its jobs (the
 order close and stage publication use), reserves quota for **all** blocked
 chunks together or none, and re-queues only those chunks' `asr` jobs. Chunks
 that already have speech, unknown outcomes and other failures are never
@@ -281,9 +313,10 @@ is still running, `already_complete` when every chunk has speech, otherwise
 Migration `0012_asr_requests` (after `0011_quotas`) stores reservations, local request markers and
 known outcomes. Reservation and request marker commit together before the call.
 There is no verified Groq reconciliation or idempotency mechanism: a crash after
-this commit but before durable outcome storage stops speech as unknown, even if
-the call might not have started. This deliberately favors avoiding duplicate
-spend over availability. A stored successful response is reused after a crash
+this commit but before durable outcome storage marks that model's attempt
+unknown, even if the call might not have started, and the run continues with the
+fallback model. RFC-D27 accepts that one fallback request may duplicate spend
+when the primary did process the audio; the same model is never resent. A stored successful response is reused after a crash
 before fenced publication; known transient outcomes replay their retry decision
 before another reservation, so crashes cannot bypass retry caps. Reuse is scoped
 to the same job/investigation, source bytes, prepared audio, model, processing
@@ -948,7 +981,9 @@ with `CAPTURE_CHUNK_INVALID`; other chunks continue. Other content types still
 validate as bytes but carry no package, so their speech/text stages fail
 without a provider call.
 
-Speech wraps the PCM as WAV, reserves shared quota under the same
+Speech refuses PCM covering less than 90% of the chunk interval (`missing_audio`)
+or a WAV over the byte cap (`chunk_exceeds_file_cap`) before any call, wraps the
+PCM as WAV, applies the same RFC-D27 model fallback and per-model
 reservation/request-marker rules as upload speech, and transcribes with
 `offset_ms = seq * chunk_duration_ms`, so segments are converted to capture
 time exactly once. Segments are clamped to the chunk's end. Capture time is
@@ -1369,7 +1404,7 @@ API and worker processes share it:
 | Provider | Shared mechanism | Taken before |
 | --- | --- | --- |
 | Scholarxiv | `provider_buckets` row `scholarxiv` (1000/hour) plus request slots | Evidence Papers/Router calls; with quotas on, every extraction and reconciliation routing, completion and feedback request |
-| Groq speech | The BE-07 `asr_requests` rolling windows (requests per minute/day, audio seconds per hour/day) | Every speech request, as before (`ASR_QUOTA_EXHAUSTED`) |
+| Groq speech | The BE-07 `asr_requests` rolling windows (requests per minute/day, audio seconds per hour/day), kept per model since RFC-D27 | Every speech request to either model (`ASR_QUOTA_EXHAUSTED` when both are full) |
 | Groq extraction fallback | `provider_buckets` rows `groq_llm:requests_minute`, `:requests_day`, `:tokens_minute`, `:tokens_day` | With quotas on, every fallback request |
 
 `TokenBucket` now takes a `period_seconds` (an hour by default), and
@@ -1389,7 +1424,8 @@ from cancellation, because nothing was sent.
 
 The global stop covers new checks, captures, upload targets and reanalyses. It
 pauses while any **configured** provider is near exhaustion: the Scholarxiv
-bucket below its reserve, a Groq speech window (with `OVRLY_ASR_ENABLED`) within
+bucket below its reserve, a primary-model Groq speech window (with `OVRLY_ASR_ENABLED`; the
+fallback model's windows are left as headroom) within
 the reserve fraction of its limit or under a `Retry-After` recorded in the
 ledger, or a Groq fallback bucket (with `OVRLY_GROQ_EXTRACTION_ENABLED`) below
 the fraction. `Retry-After` is the longest time until every paused provider is

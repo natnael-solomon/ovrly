@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py Claim.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py Claim.",
   "title": "Claim",
   "description": "One factual claim occurrence found in the media: where it was observed (interval and modality), what was actually said or shown (original_text) and the normalized proposition the pipeline assessed. Normalization must not strengthen the claim. When a user or the pipeline later corrected the proposition, correction records who and what it replaced; the original wording is never rewritten. A claim says nothing about truth; see assessment.schema.json.",
   "type": "object",
