@@ -159,5 +159,123 @@ class MeasurementTest(unittest.TestCase):
                     self.assertTrue(json.loads(comparison_path.read_text())["baseline_available"])
 
 
+def report(covered=95):
+    return {
+        "totals": {"covered_lines": covered, "num_statements": 100},
+        "files": {"services/worker/runtime.py": {
+            "summary": {"covered_lines": covered, "num_statements": 100}
+        }},
+    }
+
+
+class CachedBaselineTest(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        (self.root / "backend").mkdir()
+        self.config = self.root / "backend/pyproject.toml"
+        self.config.write_text("[tool.coverage.run]\nbranch = false\n")
+        self.cache = self.root / "cache"
+        self.cache.mkdir()
+
+    def identity(self, sha="a" * 40):
+        with patch("backend_checks.importlib.metadata.version", return_value="7.16.1"):
+            return backend_checks.baseline_identity(sha, self.config)
+
+    def stage(self, identity, data=None):
+        (self.cache / "baseline.json").write_text(json.dumps(identity))
+        (self.cache / "coverage.json").write_text(json.dumps(data or report()))
+
+    def run_main(self, measured):
+        errors = io.StringIO()
+        output = io.StringIO()
+        with patch.object(backend_checks, "ROOT", self.root), \
+                patch("backend_checks.baseline_commit", return_value="a" * 40), \
+                patch("backend_checks.tracked_services",
+                      return_value={"services/worker/runtime.py"}), \
+                patch("backend_checks.importlib.metadata.version", return_value="7.16.1"), \
+                patch("backend_checks.baseline_checkout",
+                      side_effect=lambda root, sha: contextlib.nullcontext(
+                          None if sha is None else self.root / "old-main")), \
+                patch("backend_checks.measure", side_effect=measured) as measurement, \
+                patch.dict(os.environ, {}, clear=True), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            (self.root / "old-main/backend").mkdir(parents=True, exist_ok=True)
+            (self.root / "old-main/backend/pyproject.toml").write_text("[project]\n")
+            code = backend_checks.main(["--cached-baseline", str(self.cache)])
+        comparison = self.root / "backend/reports/comparison.json"
+        return code, measurement, output.getvalue(), (
+            json.loads(comparison.read_text()) if comparison.exists() else None)
+
+    def test_matching_cache_replaces_the_second_suite(self):
+        self.stage(self.identity())
+        code, measurement, output, comparison = self.run_main([report()])
+        self.assertEqual(0, code)
+        self.assertEqual(1, measurement.call_count)
+        self.assertEqual("cache", comparison["baseline_source"])
+        self.assertNotIn("::warning::", output)
+
+    def test_cached_regression_still_fails(self):
+        self.stage(self.identity(), report(covered=99))
+        code, measurement, _, comparison = self.run_main([report(covered=95)])
+        self.assertEqual(1, code)
+        self.assertEqual(1, measurement.call_count)
+        self.assertEqual("cache", comparison["baseline_source"])
+
+    def test_missing_mismatched_or_invalid_cache_warns_and_remeasures(self):
+        cases = {
+            "missing": None,
+            "other commit": (self.identity("b" * 40), report()),
+            "other coverage version": ({**self.identity(), "coverage_version": "7.0.0"}, report()),
+            "other inventory": (self.identity(), {**report(), "files": {"services/x.py": {
+                "summary": {"covered_lines": 95, "num_statements": 100}}}}),
+        }
+        for name, cached in cases.items():
+            with self.subTest(name=name):
+                for path in self.cache.iterdir():
+                    path.unlink()
+                if cached is not None:
+                    self.stage(*cached)
+                code, measurement, output, comparison = self.run_main([report(), report()])
+                self.assertEqual(0, code)
+                self.assertEqual(2, measurement.call_count)
+                self.assertIn("::warning::", output)
+                self.assertIn("remeasuring main " + "a" * 40, output)
+                self.assertEqual("remeasured", comparison["baseline_source"])
+
+    def test_failed_remeasurement_after_a_cache_miss_is_never_a_pass(self):
+        code, _, _, comparison = self.run_main(
+            [report(), subprocess.CalledProcessError(1, ["pytest"])])
+        self.assertEqual(1, code)
+        self.assertIsNone(comparison)
+
+    def test_main_push_stages_its_own_report_for_its_commit(self):
+        reports = self.root / "backend/reports"
+        reports.mkdir()
+        for name in ("coverage.json", "coverage.xml"):
+            (reports / name).write_text(name)
+        target = self.root / "saved"
+        with patch("backend_checks.subprocess.check_output", return_value="c" * 40 + "\n"), \
+                patch("backend_checks.importlib.metadata.version", return_value="7.16.1"):
+            backend_checks.save_baseline(reports, target, self.root, self.config)
+        self.assertEqual("coverage.xml", (target / "coverage.xml").read_text())
+        self.assertEqual(self.identity("c" * 40),
+                         json.loads((target / "baseline.json").read_text()))
+
+    def test_coverage_settings_change_invalidates_the_identity(self):
+        before = self.identity()
+        self.config.write_text("[tool.coverage.run]\nbranch = true\n")
+        self.assertNotEqual(before["coverage_settings"], self.identity()["coverage_settings"])
+        self.config.write_text("[project]\nname = 'x'\n[tool.coverage.run]\nbranch = false\n")
+        self.assertEqual(before, self.identity())
+
+    def test_baseline_sha_option_prints_the_commit_only(self):
+        output = io.StringIO()
+        with patch("backend_checks.baseline_commit", return_value="d" * 40), \
+                patch.dict(os.environ, {}, clear=True), contextlib.redirect_stdout(output):
+            self.assertEqual(0, backend_checks.main(["--baseline-sha"]))
+        self.assertEqual("d" * 40 + "\n", output.getvalue())
+
 if __name__ == "__main__":
     unittest.main()

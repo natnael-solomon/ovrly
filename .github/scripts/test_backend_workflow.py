@@ -28,10 +28,28 @@ class BackendWorkflowTest(unittest.TestCase):
         self.assertIn("save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", SOURCE)
         validate = SOURCE.split("  validate:\n", 1)[1].split("  recovery:\n", 1)[0]
         recovery = SOURCE.split("  recovery:\n", 1)[1].split("  result:\n", 1)[0]
-        self.assertIn("timeout-minutes: 25", validate)
+        self.assertIn("timeout-minutes: 40", validate)
         self.assertIn("timeout-minutes: 15", recovery)
         self.assertIn("retention-days: 7", SOURCE)
 
+    def test_main_baseline_cache_is_exact_main_only_and_falls_back(self):
+        validate = SOURCE.split("  validate:\n", 1)[1].split("  recovery:\n", 1)[0]
+        restore = validate.split("- name: Restore main coverage baseline", 1)[1].split("- name:", 1)[0]
+        self.assertIn("actions/cache/restore@", restore)
+        self.assertIn("key: backend-coverage-main-${{ steps.baseline.outputs.sha }}", restore)
+        self.assertNotIn("restore-keys", validate)
+        self.assertIn("--baseline-sha", validate)
+        checks = validate.split("- name: Test and compare coverage with main", 1)[1].split("- name:", 1)[0]
+        self.assertIn("--cached-baseline reports/main-cache", checks)
+        self.assertIn(
+            "SAVE_BASELINE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
+            checks)
+        save = validate.split("- name: Save main coverage baseline", 1)[1].split("- name:", 1)[0]
+        self.assertIn("actions/cache/save@", save)
+        self.assertIn("if: github.event_name == 'push' && github.ref == 'refs/heads/main' "
+                      "&& steps.checks.outcome == 'success'", save)
+        self.assertIn("key: backend-coverage-main-${{ github.sha }}", save)
+        self.assertEqual(1, SOURCE.count("actions/cache/save@"))
     def test_postgres_is_skipped_for_docs_without_skipping_required_result(self):
         validate = SOURCE.split("  validate:\n", 1)[1].split("  recovery:\n", 1)[0]
         self.assertIn("if: needs.changes.outputs.backend == 'true'", validate)

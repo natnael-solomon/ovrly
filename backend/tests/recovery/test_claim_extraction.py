@@ -499,6 +499,169 @@ async def test_exhausted_quota_uses_separately_authorized_groq_extraction(
                 assert body["report"]["processing_attempts"][1]["feedback"] == "not_applicable"
 
 
+async def test_quota_admission_charges_shared_buckets_and_provider_cooldown_pauses_intake(
+    harness, database_url
+):
+    from sqlalchemy import delete
+
+    from services.models import provider_buckets
+    from services.pipeline.extraction import ExtractionStage
+    from services.pipeline.llm import GroqAdapter
+    from services.provider_budgets import LlmAdmission, provider_statuses
+    from services.providers.budget import TokenBucket
+    from services.settings import Settings
+
+    def scholarxiv(request):
+        return httpx.Response(429, headers={"Retry-After": "120"})
+
+    groq_requests = []
+
+    def groq(request):
+        groq_requests.append(request)
+        return httpx.Response(200, json={**completion(extraction()), "model": "openai/gpt-oss-20b"})
+
+    config = Settings(
+        database_url=database_url,
+        quotas_enabled=True,
+        scholarxiv_api_key="synthetic-key",
+        groq_extraction_enabled=False,
+        _env_file=None,
+    )
+    names = [
+        "scholarxiv",
+        "groq_llm:requests_minute",
+        "groq_llm:requests_day",
+        "groq_llm:tokens_minute",
+        "groq_llm:tokens_day",
+    ]
+
+    async def reset():
+        async with harness.control.engine.begin() as connection:
+            await connection.execute(
+                delete(provider_buckets).where(provider_buckets.c.name.in_(names))
+            )
+
+    await reset()
+    try:
+        async with (
+            httpx.AsyncClient(
+                transport=httpx.MockTransport(scholarxiv), base_url="https://router.example"
+            ) as primary,
+            httpx.AsyncClient(
+                transport=httpx.MockTransport(groq), base_url="https://groq.example"
+            ) as fallback,
+        ):
+            adapter = ScholarxivAdapter(
+                primary, allowed_models=["fixture-free-model"], max_tokens=2048
+            )
+            groq_adapter = GroqAdapter(fallback, max_tokens=2048)
+            handlers = dict(default_handlers(llm=adapter, fallback_llm=groq_adapter))
+            handlers["claim_extraction"] = ExtractionStage(
+                adapter, groq_adapter, LlmAdmission(config)
+            ).run
+            app = harness.app(None, stages=handlers)
+            async with app.router.lifespan_context(app), harness.client(app) as client:
+                investigation_id = await create_investigation(client)
+                source = window().model_copy(update={"groq_processing_approved": True})
+                async with harness.control.engine.begin() as connection:
+                    queued = await enqueue_extraction(
+                        connection, harness.queue, investigation_id, harness.owner.id, source
+                    )
+                terminal = await harness.wait_for_state(queued.job_id, "published", "failed")
+                assert terminal.status.state.value == "published"
+        assert len(groq_requests) == 1
+        async with harness.control.engine.connect() as connection:
+            # The Scholarxiv 429 held the account-wide bucket for its Retry-After and kept
+            # the balance (999 after the one refused-by-provider request).
+            assert 998.9 <= await TokenBucket.balance(connection, "scholarxiv", 1000) <= 1000
+            assert 100 < await TokenBucket.held_seconds(connection, "scholarxiv") <= 120
+            # The Groq fallback took one request and its token estimate from shared buckets.
+            day = await TokenBucket.balance(connection, "groq_llm:requests_day", 900, 86400)
+            assert 899 <= day < 899.5
+            tokens = await TokenBucket.balance(connection, "groq_llm:tokens_day", 180000, 86400)
+            assert tokens <= 180000 - 2048 - 256
+            statuses = {s.provider: s for s in await provider_statuses(connection, config)}
+        scholarxiv_status = statuses["scholarxiv"]
+        assert scholarxiv_status.pauses_intake
+        # Intake waits for the provider hold only, not for a drained budget.
+        assert 100 < scholarxiv_status.retry_after_seconds <= 120
+        assert not statuses["groq_llm"].pauses_intake
+    finally:
+        await reset()
+
+
+async def test_units_return_when_the_request_record_loses_its_lease(
+    harness, database_url, monkeypatch
+):
+    from sqlalchemy import delete
+
+    from services.jobs.queue import JobQueue, LeaseLost
+    from services.models import provider_buckets
+    from services.pipeline.extraction import ExtractionStage
+    from services.provider_budgets import LlmAdmission
+    from services.providers.budget import TokenBucket
+    from services.settings import Settings
+
+    lost = []
+    original = JobQueue.save_stage_data
+
+    async def lose_request_record(self, lease, data, *, connection=None):
+        # Fence the in-flight record written in the same transaction as the reservation.
+        if connection is not None and data.get("in_flight") and not lost:
+            lost.append(lease.job_id)
+            raise LeaseLost("Injected lease fence while recording the request")
+        await original(self, lease, data, connection=connection)
+
+    monkeypatch.setattr(JobQueue, "save_stage_data", lose_request_record)
+    calls = []
+
+    def provider(request):
+        calls.append(request)
+        return httpx.Response(200, json=completion(extraction()))
+
+    # Two units per hour: a leaked unit could not refill before the bucket wait limit.
+    config = Settings(
+        database_url=database_url,
+        quotas_enabled=True,
+        scholarxiv_requests_per_hour=2,
+        quota_provider_reserve=1,
+        _env_file=None,
+    )
+
+    async def reset():
+        async with harness.control.engine.begin() as connection:
+            await connection.execute(
+                delete(provider_buckets).where(provider_buckets.c.name == "scholarxiv")
+            )
+
+    await reset()
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(provider), base_url="https://router.example"
+        ) as http:
+            adapter = ScholarxivAdapter(
+                http, allowed_models=["fixture-free-model"], max_tokens=2048
+            )
+            handlers = dict(default_handlers(llm=adapter))
+            handlers["claim_extraction"] = ExtractionStage(adapter, None, LlmAdmission(config)).run
+            app = harness.app(None, stages=handlers)
+            async with app.router.lifespan_context(app), harness.client(app) as client:
+                investigation_id = await create_investigation(client)
+                async with harness.control.engine.begin() as connection:
+                    queued = await enqueue_extraction(
+                        connection, harness.queue, investigation_id, harness.owner.id, window()
+                    )
+                terminal = await harness.wait_for_state(queued.job_id, "published", "failed")
+                assert terminal.status.state.value == "published"
+        assert len(lost) == 1
+        assert len(calls) == 1
+        async with harness.control.engine.connect() as connection:
+            # Fenced attempt refunded; only the request actually sent was spent.
+            assert 0.99 <= await TokenBucket.balance(connection, "scholarxiv", 2) < 1.1
+    finally:
+        await reset()
+
+
 async def test_feedback_failure_is_observable_without_hiding_the_repaired_result(harness, caplog):
     inference = []
     feedback = []
@@ -559,6 +722,10 @@ async def test_feedback_outcomes_control_further_requests_honestly(harness, fail
             stages=default_handlers(
                 llm=ScholarxivAdapter(http, allowed_models=["fixture-free-model"], max_tokens=2048)
             ),
+            # This test checks feedback outcomes, not lease timing. Under coverage on slow
+            # runners the 0.5 s harness lease raced the strict renewal fence and was lost
+            # mid-stage (unknown_outcome), flaking twice on #125; 2 s removes that race.
+            job_lease_seconds=2,
         )
         async with app.router.lifespan_context(app), harness.client(app) as client:
             investigation_id = await create_investigation(client)

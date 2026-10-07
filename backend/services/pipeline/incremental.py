@@ -16,7 +16,7 @@ from services.jobs.retries import NonRetriableInput
 from services.models import capture_sessions, extraction_runs, investigations
 from services.pipeline.capture import lock_extraction_capture
 from services.pipeline.extraction import Observation, ObservationWindow, enqueue_extraction
-from services.pipeline.llm import ExtractionBudgetExceeded
+from services.pipeline.llm import ExtractionBudgetExceeded, reserved_tokens
 from services.reports import latest_reports
 
 
@@ -337,7 +337,7 @@ async def record_request(
             )
         ).scalar_one()
     )
-    tokens = input_bytes + output_tokens + 256
+    tokens = reserved_tokens(input_bytes, output_tokens)
     policy = ExtractionPolicy.model_validate(data["policy"])
     if data["requests_used"] + 1 > policy.max_requests - (
         0 if reconciliation else policy.reconciliation_requests
