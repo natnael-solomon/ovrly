@@ -48,11 +48,21 @@ def test_invalid_database_url(value):
         ("retention_batch_size", 0),
         ("retention_batch_size", 1001),
         ("retention_enabled", "maybe"),
+        ("job_idle_poll_max_seconds", 0),
+        ("job_idle_poll_max_seconds", 601),
     ],
 )
 def test_invalid_options(field, value):
     with pytest.raises(ValidationError):
         Settings(database_url=URL, _env_file=None, **{field: value})
+
+
+def test_idle_poll_cap_defaults_off_and_cannot_undercut_the_poll():
+    assert Settings(database_url=URL, _env_file=None).job_idle_poll_max_seconds is None
+    settings = Settings(database_url=URL, _env_file=None, job_idle_poll_max_seconds=30)
+    assert settings.job_idle_poll_max_seconds == 30
+    with pytest.raises(ValidationError, match="at least job_poll_seconds"):
+        Settings(database_url=URL, _env_file=None, job_poll_seconds=5, job_idle_poll_max_seconds=2)
 
 
 def test_intake_limit_defaults():

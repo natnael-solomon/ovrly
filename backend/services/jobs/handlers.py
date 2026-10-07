@@ -22,11 +22,14 @@ class JobContext:
         lease: Lease,
         lease_seconds: float,
         faults: FaultInjector | None = None,
+        *,
+        on_heartbeat: Callable[[], None] | None = None,
     ):
         self.queue = queue
         self.lease = lease
         self.lease_seconds = lease_seconds
         self.faults: FaultInjector = faults if faults is not None else NoFaults()
+        self.on_heartbeat = on_heartbeat
         self.successors: list[tuple[StageKey, dict[str, Any]]] = []
 
     def enqueue_after_publish(self, key: StageKey, payload: dict[str, Any]) -> None:
@@ -35,7 +38,10 @@ class JobContext:
 
     async def heartbeat(self) -> None:
         """Extend the lease; raise if it was lost or cancellation was requested."""
-        if await self.queue.heartbeat(self.lease, self.lease_seconds):
+        cancel_requested = await self.queue.heartbeat(self.lease, self.lease_seconds)
+        if self.on_heartbeat is not None:
+            self.on_heartbeat()
+        if cancel_requested:
             raise CancellationRequested(f"Cancellation requested for job {self.lease.job_id}")
 
     async def record_request_id(self, request_id: str) -> None:

@@ -4,12 +4,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import SQLAlchemyError
 
 from services.api import routes
 from services.api.auth.google import IdTokenVerifier
 from services.api.intake import InvestigationDispatcher, QueueDispatcher
 from services.database import Database
+from services.health import migration_heads, readiness
 from services.jobs.faults import FaultInjector
 from services.jobs.handlers import JobHandler, default_handlers
 from services.jobs.queue import JobQueue
@@ -33,6 +33,7 @@ def create_app(
 ) -> FastAPI:
     configure_logging()
     config = settings if settings is not None else load_settings()
+    heads = migration_heads()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -59,6 +60,7 @@ def create_app(
                 faults=faults,
                 lease_seconds=config.job_lease_seconds,
                 poll_seconds=config.job_poll_seconds,
+                idle_poll_max_seconds=config.job_idle_poll_max_seconds,
                 retry_policy=RetryPolicy.from_settings(config),
             )
             if config.embed_worker
@@ -84,15 +86,7 @@ def create_app(
 
     @app.get("/healthz")
     async def health() -> JSONResponse:
-        try:
-            await app.state.database.ping()
-        except (SQLAlchemyError, OSError, TimeoutError):
-            logger.warning("Readiness failed: database unavailable")
-            return JSONResponse({"status": "unavailable", "reason": "database"}, status_code=503)
-        worker = app.state.worker
-        if config.embed_worker and (worker is None or not worker.running):
-            logger.warning("Readiness failed: embedded worker unavailable")
-            return JSONResponse({"status": "unavailable", "reason": "worker"}, status_code=503)
-        return JSONResponse({"status": "ok"})
+        status, body = await readiness(app.state.database, app.state.worker, config, heads)
+        return JSONResponse(body, status_code=status)
 
     return app
