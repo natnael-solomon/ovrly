@@ -34,8 +34,7 @@ async def test_renewal_starts_with_the_call_and_latency_does_not_stretch_the_cad
     assert await wait_for_provider(provider(), context) == "done"
     assert context.starts[0] - began < 0.1
     gaps = [
-        later - earlier
-        for earlier, later in zip(context.starts, context.starts[1:], strict=False)
+        later - earlier for earlier, later in zip(context.starts, context.starts[1:], strict=False)
     ]
     assert len(gaps) >= 3
     assert max(gaps) < 0.3
