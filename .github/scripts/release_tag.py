@@ -115,6 +115,11 @@ def check_environment(github, owner):
     logins = [(r.get("reviewer") or {}).get("login", "").lower() for r in reviewers[0].get("reviewers", [])]
     if logins != [owner.lower()]:
         fail(f"Environment '{ENVIRONMENT}' must list {owner} as the sole required reviewer; found {logins}")
+    if reviewers[0].get("prevent_self_review") is not False:
+        fail(
+            f"Environment '{ENVIRONMENT}' must allow self-review (prevent_self_review=false) so the owner "
+            "can request a build and then approve it"
+        )
     policy = env.get("deployment_branch_policy") or {}
     if policy.get("custom_branch_policies") is not True:
         fail(f"Environment '{ENVIRONMENT}' must use custom deployment policies limited to tag v*")

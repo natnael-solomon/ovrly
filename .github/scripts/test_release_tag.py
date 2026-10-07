@@ -115,6 +115,10 @@ class GateTest(unittest.TestCase):
             "no reviewer": lambda r: r["environments/release"].update(protection_rules=[]),
             "other reviewer": lambda r: r["environments/release"]["protection_rules"][0].update(
                 reviewers=[{"reviewer": {"login": "someone"}}]),
+            "self-review blocked": lambda r: r["environments/release"]["protection_rules"][0].update(
+                prevent_self_review=True),
+            "self-review unobserved": lambda r: r["environments/release"]["protection_rules"][0].pop(
+                "prevent_self_review"),
             "any ref": lambda r: r["environments/release"].update(
                 deployment_branch_policy={"custom_branch_policies": False}),
             "branch policy": lambda r: r.update({"environments/release/deployment-branch-policies": {

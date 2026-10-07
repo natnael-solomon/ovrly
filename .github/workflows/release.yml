@@ -7,7 +7,8 @@ name: Release
 #   build            two independent unsigned release builds of the same commit (different runners and
 #                    checkout paths, no caches), plus Android and backend SBOMs.
 #   reproducibility  compares the two builds entry by entry; unexplained differences fail.
-#   attest           GitHub build provenance for the unsigned APK, mapping and SBOMs.
+#   attest           only after the comparison passes: GitHub build provenance for the unsigned APK,
+#                    mapping and SBOMs.
 #   sign             owner approval (`release` environment), then demo-key or throwaway-debug-key signing,
 #                    provenance for the signed APK and one artifact bundle. Nothing is published.
 #
@@ -218,7 +219,7 @@ jobs:
 
   attest:
     name: Attest build provenance
-    needs: [gate, build]
+    needs: [gate, build, reproducibility]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
