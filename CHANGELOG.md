@@ -13,6 +13,29 @@
   control has a 48 dp target, report and evidence cards grow with 200% text, and the
   Settings recording timer has a spoken description.
 
+- REPO-06 security tests (#28): outbound evidence fetches now go through an SSRF
+  guard that resolves each host once, dials only the checked public address (private,
+  loopback, link-local and metadata, shared, IPv6 unique-local and IPv4-embedding
+  addresses are refused, which defeats DNS rebinding), re-checks every redirect hop
+  (at most three, no HTTPS to HTTP downgrade), allows only http(s) on default ports and
+  caps response size. New negative tests cover that guard, an authorization matrix
+  generated from the OpenAPI paths, prompt-injection fixtures under
+  `evaluation/adversarial/`, a media intake fuzz smoke, quota abuse and error-response
+  hygiene. Validation errors no longer echo unknown client field names, and
+  credential-shaped text is redacted from assessment notes. `MEDIA_INVALID` from a codec
+  stage remains blocked by #20.
+
+- Deployment gates for the EthioDeploy backend (#21): `/healthz` now also fails on a
+  schema behind the shipped migration head, an unwritable upload directory or a stuck
+  embedded worker (no poll or lease extension for two minutes), and reports queue depth,
+  the oldest claimable job's age and the worker heartbeat age. A post-deploy smoke test
+  (`python -m services.smoke`, **Deployment smoke** workflow), an opt-in **Keep-alive**
+  schedule, a manual **Database backup** workflow with a restore check, an optional idle
+  poll backoff (`OVRLY_JOB_IDLE_POLL_MAX_SECONDS`), the
+  [deployment runbook](docs/operations/deployment.md) and the proposed
+  [RFC-D53](docs/decisions/RFC-D53-deployment-topology.md) record. Nothing is deployed or
+  verified on the host yet.
+
 - Backend `.env.example` now lists every `OVRLY_` setting with its default (job timing
   and retries, stub reports, evidence stages), and the backend README has a
   single-service deployment note for EthioDeploy (#21).

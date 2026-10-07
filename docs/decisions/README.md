@@ -19,6 +19,7 @@ evidence, and what would reverse it.
 | [BC-D07: account link flow](BC-D07-account-link.md) | Accepted | Google sign-in only; guest upgraded in place; second device merges saved reports and continues as the account. |
 | [BC-D09: hackathon dates](BC-D09-deadline-evidence.md) | Conditional | 25 September submission, 9 October final deadline, 11 October winners announcement. Timezone assumed. |
 | [RFC-D22: companion navigation](RFC-D22-companion-navigation.md) | Accepted | Keep Your space / Explore / Settings; Your space holds the Inbox above the Library, Explore stays the labeled sample gallery and the voice `open_tab` targets are unchanged. |
+| [RFC-D53: deployment topology](RFC-D53-deployment-topology.md) | Proposed | EthioDeploy Free, one Web Service with the embedded worker and the Postgres add-on; Koyeb with Neon as the fallback; awaiting owner confirmation and a support answer. |
 
 ## Milestones
 

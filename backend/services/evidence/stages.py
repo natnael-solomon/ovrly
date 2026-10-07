@@ -40,6 +40,7 @@ from services.models import (
 )
 from services.providers.budget import TokenBucket
 from services.providers.crossref import CrossrefClient
+from services.providers.egress import GuardedTransport
 from services.providers.fulltext import FullTextClient
 from services.providers.http import ProviderRejected
 from services.providers.papers import PapersClient
@@ -285,10 +286,13 @@ class EvidenceStages:
         return budget.deeper() if depth == "deeper" else budget
 
     def _client(self) -> httpx.AsyncClient:
+        # Production traffic dials only checked public addresses (SSRF guard, #28); tests
+        # inject a mock transport.
         return httpx.AsyncClient(
             timeout=self.settings.evidence_provider_timeout_seconds,
-            transport=self.transport,
+            transport=self.transport if self.transport is not None else GuardedTransport(),
             follow_redirects=False,
+            trust_env=False,
         )
 
     def _clients(self, client: httpx.AsyncClient) -> tuple[RouterClient, PapersClient]:
