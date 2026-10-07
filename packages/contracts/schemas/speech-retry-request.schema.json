@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend SpeechRetryRequest.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Mirrors backend SpeechRetryRequest.",
   "title": "Speech retry request",
   "description": "Owner-requested retry of quota-blocked upload speech. Identity and idempotency come from the bearer credential and Idempotency-Key header.",
   "type": "object",

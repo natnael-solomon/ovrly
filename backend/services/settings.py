@@ -41,7 +41,9 @@ class Settings(BaseSettings):
     asr_enabled: bool = False
     text_grace_seconds: int = Field(default=60, ge=0, le=3600)
     groq_api_key: SecretStr = SecretStr("")
-    groq_model: str = Field(default="", max_length=128)
+    # RFC-D27 (decision 0004): turbo first, then large-v3 once after a provider failure.
+    groq_model: str = Field(default="whisper-large-v3-turbo", max_length=128)
+    groq_fallback_model: str = Field(default="whisper-large-v3", max_length=128)
     groq_account_id: str = Field(default="", max_length=128)
     asr_limits_verified_on: date | None = None
     asr_requests_per_minute: int | None = Field(default=None, gt=0)
@@ -177,6 +179,8 @@ class Settings(BaseSettings):
         if self.asr_enabled and (
             not self.groq_api_key.get_secret_value().strip()
             or not self.groq_model.strip()
+            or not self.groq_fallback_model.strip()
+            or self.groq_fallback_model.strip() == self.groq_model.strip()
             or not self.groq_account_id.strip()
             or self.asr_limits_verified_on is None
             or self.asr_requests_per_minute is None

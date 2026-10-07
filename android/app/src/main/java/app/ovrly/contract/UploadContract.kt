@@ -12,7 +12,7 @@ import kotlinx.serialization.UseSerializers
 
 /*
  * Typed models for `upload-declare-request.schema.json`, `upload-complete-request.schema.json`
- * and `upload.schema.json` (contract 0.2.0-draft); the declare and complete responses are
+ * and `upload.schema.json` (contract 0.3.0-draft); the declare and complete responses are
  * both the [Upload] read model. Parse and encode with [UploadCodec].
  */
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py Evidence and EvidenceSource.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py Evidence and EvidenceSource.",
   "title": "Evidence",
   "description": "One retrieved source considered for one claim. Evidence records identity (source), kind (source_type), how much of it was actually read (inspection_level), how relevant retrieval judged it (retrieval_relevance) and whether the source itself has since been corrected, retracted or withdrawn (retraction_status). It deliberately carries no support relation: whether it supports, challenges or qualifies the claim lives in the assessment, so relevance and support can never be confused.",
   "type": "object",

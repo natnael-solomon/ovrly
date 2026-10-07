@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py InvestigationCreateRequest and the UrlSource | UploadSource union discriminated on kind, field for field.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py InvestigationCreateRequest and the UrlSource | UploadSource union discriminated on kind, field for field.",
   "title": "InvestigationCreateRequest",
   "description": "Request body for POST /v1/investigations (BE-05, #19). Requires the Idempotency-Key header: the same key with the same body replays the original 202, the same key with a different body is 409 IDEMPOTENCY_KEY_REUSED. Exactly one source: a complete accessible video by URL, or a completed upload. A declared duration above OVRLY_MAX_SHARED_DURATION_SECONDS is 422 DURATION_LIMIT_EXCEEDED.",
   "type": "object",

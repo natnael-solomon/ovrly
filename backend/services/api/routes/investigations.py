@@ -30,6 +30,7 @@ from services.api.schemas import (
     SpeechResult,
     UploadSource,
 )
+from services.asr.groq import failure_reason
 from services.captures import CAPTURE_STAGES
 from services.jobs.models import job_results, jobs
 from services.jobs.states import JobState
@@ -125,16 +126,7 @@ def investigation_response(row: Row[Any], job: PipelineJob | None = None) -> Inv
                 else {"status": "running" if job.state == "running" else "pending"}
             )
             if job.state == "failed":
-                speech = {
-                    "status": "unavailable",
-                    "reason": (
-                        "quota_exhausted"
-                        if job.failure == "ASRQuotaExhausted"
-                        else "unknown_outcome"
-                        if job.failure == "ASRUnknownOutcome"
-                        else "provider_unavailable"
-                    ),
-                }
+                speech = {"status": "unavailable", "reason": failure_reason(job.failure)}
             elif job.state in {"cancelled", "deleted"}:
                 speech = {"status": "unavailable", "reason": "cancelled"}
     if job is not None and job.state != "published":

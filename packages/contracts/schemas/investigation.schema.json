@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py InvestigationReadModel: the nine InvestigationResponse fields plus processing_status, job and report, returned by the investigation routes since BE-10 (#33); the round-trip fixtures under fixtures/results are produced from the Pydantic model.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Mirrors backend/services/api/schemas.py InvestigationReadModel: the nine InvestigationResponse fields plus processing_status, job and report, returned by the investigation routes since BE-10 (#33); the round-trip fixtures under fixtures/results are produced from the Pydantic model.",
   "title": "Investigation",
   "description": "Read model of one investigation (a check), returned by POST /v1/investigations (202), GET /v1/investigations/{id} and as items of GET /v1/investigations. Processing progress (processing_status), the coarse stored state, the current job and the published report are separate fields: a failed or cancelled investigation carries an error and no report, so a failure can never be read as a finding. Clients map unknown state, stage, processing_status, job and report enum values to UNKNOWN and keep reading the rest of the payload.",
   "type": "object",

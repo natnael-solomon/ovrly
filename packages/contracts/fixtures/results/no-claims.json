@@ -1,6 +1,6 @@
 {
   "synthetic": true,
-  "description": "A complete check in which no assessable factual claims were found. The report version exists with empty claims, evidence and assessments; the change summary says so. This is not a verdict that the video is true. Synthetic fixture.",
+  "description": "A complete check in which no assessable factual claims were found. The report version exists with empty claims, evidence and assessments; the change summary says so. This is not a verdict that the video is true. Hosted speech completed on the fallback model with no recognized speech (reason no_speech), which is not a failure. Synthetic fixture.",
   "expect": {
     "payload": "valid",
     "processing_status": "complete",
@@ -21,13 +21,23 @@
     "version": 1,
     "error": null,
     "source": {
-      "kind": "url",
-      "url": "https://video.example/synthetic/clip-0001",
+      "kind": "upload",
+      "upload_id": "00000000-0000-4000-8000-000000000206",
       "duration_ms": 58000
     },
     "created_at": "2026-10-04T12:00:00Z",
     "updated_at": "2026-10-04T12:02:30Z",
-    "speech": null,
+    "speech": {
+      "status": "completed",
+      "reason": "no_speech",
+      "provider": "groq",
+      "model": "whisper-large-v3",
+      "processing_version": 1,
+      "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "audio_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "settings_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "segments": []
+    },
     "analysis": null,
     "processing_status": "complete",
     "job": {

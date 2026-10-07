@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend SpeechResult.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Mirrors backend SpeechResult.",
   "title": "Timed speech",
-  "description": "Owner-scoped hosted speech observations on the original timebase. Empty completed segments mean no speech was recognized, not absent audio or no claims. No provider request IDs, quota account identifiers or artifact paths are exposed. Source/audio/settings digests scope reuse within one investigation.",
+  "description": "Owner-scoped hosted speech observations on the original timebase. Empty completed segments (reason no_speech) mean no speech was recognized, not absent audio, a failure or no claims. model names the model that produced the result, which is the RFC-D27 fallback model when the primary failed. No provider request IDs, quota account identifiers or artifact paths are exposed. Source/audio/settings digests scope reuse within one investigation.",
   "type": "object",
   "additionalProperties": false,
   "required": ["status", "reason", "provider", "model", "processing_version", "source_sha256", "audio_sha256", "settings_sha256", "segments"],

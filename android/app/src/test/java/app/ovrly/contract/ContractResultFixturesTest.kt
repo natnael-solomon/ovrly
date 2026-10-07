@@ -245,6 +245,11 @@ class ContractResultFixturesTest {
         assertTrue(report.assessesEveryClaim)
         assertTrue(report.changeSummary.contains("not a statement that the content is accurate"))
         assertTrue(checkNotNull(investigation.job).isPublished)
+        val speech = checkNotNull(investigation.speech)
+        assertEquals(SpeechStatus.COMPLETED, speech.status)
+        assertEquals(SpeechReason.NO_SPEECH, speech.reason)
+        assertEquals("whisper-large-v3", speech.model)
+        assertTrue(speech.segments.isEmpty())
     }
 
     @Test
