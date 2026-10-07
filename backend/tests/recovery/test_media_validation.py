@@ -438,18 +438,17 @@ async def test_silent_video_preserves_pending_text_and_absent_speech(harness, tm
         tmp_path,
         """
 import json
-import subprocess
-import sys
 
-completed = subprocess.run(["ffprobe", *sys.argv[1:]], capture_output=True, check=False)
-if completed.returncode != 0:
-    sys.stdout.buffer.write(completed.stdout)
-    sys.stderr.buffer.write(completed.stderr)
-    sys.exit(completed.returncode)
-payload = json.loads(completed.stdout)
-payload.get("format", {}).pop("duration", None)
-print(json.dumps(payload))
+print(json.dumps({"format": {}, "streams": [{"codec_type": "video"}]}))
 """,
+    )
+    ffmpeg_with_decoded_duration = executable(
+        tmp_path,
+        """
+print("out_time_us=1000000")
+print("progress=end")
+""",
+        "media-ffmpeg",
     )
     config = media_settings(
         harness,
@@ -457,6 +456,7 @@ print(json.dumps(payload))
         storage_dir=tmp_path / "uploads",
         artifacts_dir=tmp_path / "artifacts",
         ffprobe_path=ffprobe_without_format_duration,
+        ffmpeg_path=ffmpeg_with_decoded_duration,
     )
     app = create_app(config)
     async with (
