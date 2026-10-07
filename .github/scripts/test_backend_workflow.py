@@ -1,5 +1,8 @@
+import gzip
+import hashlib
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -49,7 +52,33 @@ class BackendWorkflowTest(unittest.TestCase):
         self.assertIn("if: github.event_name == 'push' && github.ref == 'refs/heads/main' "
                       "&& steps.checks.outcome == 'success'", save)
         self.assertIn("key: backend-coverage-main-${{ github.sha }}", save)
-        self.assertEqual(1, SOURCE.count("actions/cache/save@"))
+        self.assertEqual(1, SOURCE.count("key: backend-coverage-main-${{ github.sha }}"))
+
+    def test_media_tools_are_pinned_cached_and_bounded(self):
+        self.assertNotIn("apt-get", SOURCE)
+        for name in ("FFMPEG_GZ_SHA256", "FFPROBE_GZ_SHA256"):
+            self.assertRegex(SOURCE, rf"\n  {name}: [0-9a-f]{{64}}\n")
+        self.assertRegex(SOURCE, r"\n  MEDIA_TOOLS_RELEASE: b\d+\.\d+(?:\.\d+)?\n")
+        for job in ("validate", "recovery"):
+            with self.subTest(job=job):
+                body = SOURCE.split(f"  {job}:\n", 1)[1].split("\n  result:\n", 1)[0]
+                if job == "validate":
+                    body = body.split("  recovery:\n", 1)[0]
+                restore = body.split("- name: Restore pinned media tools", 1)[1].split("- name:", 1)[0]
+                self.assertIn("actions/cache/restore@", restore)
+                install = body.split("- name: Install pinned media tools", 1)[1].split("- name:", 1)[0]
+                self.assertIn("timeout-minutes: 5", install)
+                self.assertIn("bash .github/scripts/media_tools.sh", install)
+                self.assertLess(body.index("Install pinned media tools"), body.index("uv run --frozen alembic"))
+        saves = [step for step in SOURCE.split("      - name: ") if "actions/cache/save@" in step]
+        self.assertEqual(2, len(saves))
+        for step in saves:
+            self.assertIn("if: github.event_name == 'push' && github.ref == 'refs/heads/main'", step)
+        media = [step for step in saves if "media-tools" in step][0]
+        restore = SOURCE.split("- name: Restore pinned media tools", 1)[1].split("- name:", 1)[0]
+        for field in ("path", "key"):
+            self.assertEqual(re.search(rf"{field}: (.+)", restore).group(1),
+                             re.search(rf"{field}: (.+)", media).group(1))
 
     def test_baseline_restore_and_save_use_identical_path_and_key_family(self):
         # actions/cache hashes the path list into the cache version: a differing path
@@ -125,6 +154,81 @@ class BackendWorkflowTest(unittest.TestCase):
     def test_backend_dependabot_uses_native_uv(self):
         source = (ROOT / ".github/dependabot.yml").read_text()
         self.assertIn("package-ecosystem: uv\n    directory: /backend", source)
+
+
+@unittest.skipUnless(os.name == "posix" and shutil.which("prlimit") and shutil.which("sha256sum"),
+                     "needs a Linux runner with util-linux and coreutils")
+class MediaToolsScriptTest(unittest.TestCase):
+    CURL = textwrap.dedent("""\
+        #!/usr/bin/env python3
+        import os, shutil, sys
+        args = sys.argv[1:]
+        output = args[args.index("--output") + 1]
+        with open(os.environ["CURL_LOG"], "a") as log:
+            log.write(args[-1] + "\\n")
+        shutil.copyfile(os.path.join(os.environ["FIXTURES"], os.path.basename(args[-1])), output)
+        """)
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        fixtures, stubs = self.root / "fixtures", self.root / "stubs"
+        fixtures.mkdir()
+        stubs.mkdir()
+        self.sums = {}
+        for tool in ("ffmpeg", "ffprobe"):
+            binary = f"#!/bin/sh\necho '{tool} version fixture'\n".encode()
+            data = gzip.compress(binary, mtime=0)
+            (fixtures / f"{tool}-linux-x64.gz").write_bytes(data)
+            self.sums[tool] = hashlib.sha256(data).hexdigest()
+        curl = stubs / "curl"
+        curl.write_text(self.CURL)
+        curl.chmod(0o755)
+        self.cache = self.root / "cache"
+        self.env = {
+            **os.environ, "PATH": f"{stubs}:{os.environ['PATH']}", "FIXTURES": str(fixtures),
+            "CURL_LOG": str(self.root / "curl.log"), "MEDIA_TOOLS_CACHE": str(self.cache),
+            "RUNNER_TEMP": str(self.root / "runner"), "GITHUB_PATH": str(self.root / "path"),
+            "MEDIA_TOOLS_RELEASE": "b0.0", "FFMPEG_GZ_SHA256": self.sums["ffmpeg"],
+            "FFPROBE_GZ_SHA256": self.sums["ffprobe"],
+        }
+
+    def run_script(self, **env):
+        return subprocess.run(["bash", str(ROOT / ".github/scripts/media_tools.sh")],
+                              env={**self.env, **env}, capture_output=True, text=True)
+
+    def downloads(self):
+        log = self.root / "curl.log"
+        return log.read_text().split() if log.exists() else []
+
+    def test_downloads_verifies_installs_then_reuses_cache(self):
+        result = self.run_script()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(2, len(self.downloads()))
+        self.assertTrue(all("/releases/download/b0.0/" in url for url in self.downloads()))
+        bin_dir = (self.root / "path").read_text().strip()
+        self.assertEqual(str(self.root / "runner/ovrly-media-tools/bin"), bin_dir)
+        self.assertIn("ffprobe version fixture", subprocess.check_output([bin_dir + "/ffprobe"], text=True))
+        again = self.run_script()
+        self.assertEqual(0, again.returncode, again.stderr)
+        self.assertEqual(2, len(self.downloads()))
+        self.assertIn("cached archive verified", again.stdout)
+
+    def test_corrupt_cache_is_replaced(self):
+        self.cache.mkdir()
+        (self.cache / "ffmpeg-linux-x64.gz").write_bytes(b"tampered")
+        result = self.run_script()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(2, len(self.downloads()))
+
+    def test_checksum_mismatch_fails_without_installing(self):
+        result = self.run_script(FFPROBE_GZ_SHA256="0" * 64)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("does not match its pinned SHA-256", result.stdout)
+        self.assertFalse((self.cache / "ffprobe-linux-x64.gz").exists())
+        self.assertFalse((self.cache / "ffprobe-linux-x64.gz.part").exists())
+        self.assertFalse((self.root / "path").exists())
 
 
 if __name__ == "__main__":

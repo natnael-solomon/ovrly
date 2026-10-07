@@ -1625,7 +1625,10 @@ server round-trip check (the full contract gate, including OpenAPI, spectral,
 oasdiff and the Android tests, is the separate **Contract checks** workflow),
 tests, PostgreSQL 16, migration upgrade/drift
 checks and the real test suite. Only pushes to `main` save uv caches; PRs can read
-them. Dependabot checks the `/backend` uv project weekly with grouped minor/patch
+them. CI does not use apt: `.github/scripts/media_tools.sh` installs static
+ffmpeg/ffprobe 6.0 from release assets pinned by SHA-256 in `backend.yml`, verified
+on every use and cached by `main`, within a five-minute step limit. Local setup
+still uses the distribution packages above. Dependabot checks the `/backend` uv project weekly with grouped minor/patch
 updates. There are no production secrets or live providers in this workflow.
 
 Run the same test/coverage pipeline locally after fetching `origin/main`, from

@@ -14,6 +14,14 @@ concurrency:
   group: backend-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Static ffmpeg/ffprobe 6.0 (same major as Ubuntu 24.04's apt ffmpeg 6.1) from pinned,
+# checksum-verified GitHub release assets, instead of an apt update and install on every
+# run (median 0.4 min, but up to 3 min and once a 40-minute hang).
+env:
+  MEDIA_TOOLS_RELEASE: b6.0
+  FFMPEG_GZ_SHA256: 17c1ae10b52ac499180679fe6ba77e17642390c4eedb0f1e3b0ac045da55128f
+  FFPROBE_GZ_SHA256: 88ca6818d82a70e87de2bb6166026ad411528c72eda0e4e11ed25d185116ee17
+
 jobs:
   changes:
     name: Detect backend changes
@@ -81,8 +89,23 @@ jobs:
           save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Install locked dependencies
         run: uv sync --frozen
-      - name: Install media tools
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg util-linux
+      - name: Restore pinned media tools
+        id: media-tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ovrly-media-tools
+          key: media-tools-ffmpeg-static-${{ env.MEDIA_TOOLS_RELEASE }}-${{ env.FFMPEG_GZ_SHA256 }}-${{ env.FFPROBE_GZ_SHA256 }}
+      - name: Install pinned media tools
+        # Bounded: a stalled download fails in minutes instead of hanging the job.
+        timeout-minutes: 5
+        working-directory: .
+        run: bash .github/scripts/media_tools.sh
+      - name: Save pinned media tools (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.media-tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ovrly-media-tools
+          key: media-tools-ffmpeg-static-${{ env.MEDIA_TOOLS_RELEASE }}-${{ env.FFMPEG_GZ_SHA256 }}-${{ env.FFPROBE_GZ_SHA256 }}
       - name: Lint and formatting
         run: uv run --frozen ruff check . && uv run --frozen ruff format --check .
       - name: Strict types
@@ -182,8 +205,17 @@ jobs:
           save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Install locked dependencies
         run: uv sync --frozen
-      - name: Install media tools
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg util-linux
+      - name: Restore pinned media tools
+        id: media-tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ovrly-media-tools
+          key: media-tools-ffmpeg-static-${{ env.MEDIA_TOOLS_RELEASE }}-${{ env.FFMPEG_GZ_SHA256 }}-${{ env.FFPROBE_GZ_SHA256 }}
+      - name: Install pinned media tools
+        # Bounded: a stalled download fails in minutes instead of hanging the job.
+        timeout-minutes: 5
+        working-directory: .
+        run: bash .github/scripts/media_tools.sh
       - name: Upgrade database
         run: uv run --frozen alembic upgrade head
       - name: Job state machine properties and recovery cases
