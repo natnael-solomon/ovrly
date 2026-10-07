@@ -1,19 +1,19 @@
-"""Skip backend execution only for an entirely known-documentation diff."""
+"""Skip backend execution only when every changed path is documentation or Android-only."""
 
 import json
 import os
 from pathlib import Path
 
-from ci_changes import changed_paths, is_documentation
+from ci_changes import changed_paths, is_android_only, is_documentation
 
 
 def needs_backend(event_name, event, repository):
     names, reason = changed_paths(event_name, event, repository)
     if names is None:
         return True, f"{reason}: running all backend checks."
-    if not names or any(not is_documentation(name) for name in names):
-        return True, "Code, tooling, unknown paths or an empty diff: full backend checks."
-    return False, f"Only documentation changed ({len(names)} paths); backend work skipped."
+    if not names or any(not (is_documentation(name) or is_android_only(name)) for name in names):
+        return True, "Backend, shared, unknown paths or an empty diff: full backend checks."
+    return False, f"Only documentation/Android changed ({len(names)} paths); backend work skipped."
 
 
 def main():

@@ -219,7 +219,7 @@ jobs:
             exit 1
           fi
           if [[ "$REQUIRED" == false && "$VALIDATION" == skipped ]]; then
-            echo "Documentation-only change: backend execution skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "No backend paths changed: backend execution skipped." >> "$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUIRED" == true && "$VALIDATION" == success ]]; then
             echo "Backend validation passed." >> "$GITHUB_STEP_SUMMARY"
           else
@@ -246,7 +246,7 @@ jobs:
             exit 1
           fi
           if [[ "$REQUIRED" == false && "$VALIDATION" == skipped ]]; then
-            echo "Documentation-only change: recovery suite skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "No backend paths changed: recovery suite skipped." >> "$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUIRED" == true && "$VALIDATION" == success ]]; then
             echo "Recovery suite passed." >> "$GITHUB_STEP_SUMMARY"
           else

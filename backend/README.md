@@ -1609,12 +1609,14 @@ the gate; no advisories are currently ignored.
 
 **Backend CI** runs on PRs to any branch (including stacked targets and
 retargeting), pushes to `main`, and manual dispatch. A lightweight job always
-tests change detection and coverage policy. Only entirely known-documentation
-diffs skip backend execution; unknown paths, evaluation, Android and tooling
-changes conservatively run it. The stable **Backend checks** result fails if
-detection or required validation fails/is cancelled; docs-only skips still
-produce that check. PostgreSQL and Python setup are not started for docs-only
-changes in this Backend CI workflow; the separate Quality checks job still runs.
+tests change detection and coverage policy. Diffs made only of documentation and
+Android-only paths (`android/**`, the Android workflows and their scripts) skip
+backend execution; backend, `packages/contracts`, evaluation, shared tooling and
+unknown paths conservatively run it (see [WORKFLOW](../WORKFLOW.md#continuous-integration)).
+The stable **Backend checks** result fails if detection or required validation
+fails/is cancelled; skips still produce that check. PostgreSQL and Python setup
+are not started for skipped changes in this Backend CI workflow; the separate
+Quality checks job still runs.
 
 The validation job uses Python 3.11, pinned setup-uv, the frozen lockfile, Ruff,
 strict MyPy with the Pydantic plugin, the

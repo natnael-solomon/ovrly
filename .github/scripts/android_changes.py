@@ -1,10 +1,10 @@
-"""Skip Android work only for known documentation or isolated evaluation paths."""
+"""Skip Android work only for documentation, isolated evaluation or backend-only paths."""
 
 import json
 import os
 from pathlib import Path
 
-from ci_changes import changed_paths, is_documentation
+from ci_changes import changed_paths, is_backend_only, is_documentation
 
 
 def is_evaluation(name):
@@ -16,9 +16,13 @@ def needs_android(event_name, event, repository):
     names, reason = changed_paths(event_name, event, repository)
     if names is None:
         return True, f"{reason}: running all Android checks."
-    if not names or any(not (is_documentation(name) or is_evaluation(name)) for name in names):
-        return True, "Code, tooling, unknown paths or an empty diff: full checks."
-    return False, f"Only documentation/evaluation changed ({len(names)} paths); Android work skipped."
+    if not names or any(
+        not (is_documentation(name) or is_evaluation(name) or is_backend_only(name)) for name in names
+    ):
+        return True, "Android, shared, unknown paths or an empty diff: full checks."
+    return False, (
+        f"Only documentation/evaluation/backend changed ({len(names)} paths); Android work skipped."
+    )
 
 
 def main():

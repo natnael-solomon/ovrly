@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from android_changes import is_documentation, is_evaluation, main, needs_android
+from ci_changes import is_android_only, is_backend_only
 
 
 class DocumentationPathsTest(unittest.TestCase):
@@ -35,6 +36,28 @@ class DocumentationPathsTest(unittest.TestCase):
                      ".gitignore", "docs/example.kt", "backend/server.py", "new-file"]:
             with self.subTest(name=name):
                 self.assertFalse(is_documentation(name))
+
+    def test_one_sided_paths(self):
+        for name in ["backend/services/app.py", "backend/uv.lock", ".github/workflows/backend.yml",
+                     ".github/scripts/backend_changes.py", ".github/scripts/test_backend_checks.py"]:
+            with self.subTest(name=name):
+                self.assertTrue(is_backend_only(name))
+                self.assertFalse(is_android_only(name))
+        for name in ["android/app/build.gradle.kts", ".github/workflows/android.yml",
+                     ".github/workflows/android-instrumented.yml",
+                     ".github/scripts/android_instrumented.py", ".github/scripts/test_android_changes.py"]:
+            with self.subTest(name=name):
+                self.assertTrue(is_android_only(name))
+                self.assertFalse(is_backend_only(name))
+        for name in ["packages/contracts/openapi.json", ".github/scripts/ci_changes.py",
+                     ".github/scripts/test_ci_changes.py", ".github/scripts/release_publish.py",
+                     ".github/scripts/nested/backend_x.py", ".github/workflows/backend-other.yml",
+                     ".github/workflows/quality.yml", ".github/workflows/contracts.yml",
+                     "backend-other/x.py", "android-other/x.py", "evaluation/validate.py",
+                     ".github/dependabot.yml", "unknown"]:
+            with self.subTest(name=name):
+                self.assertFalse(is_backend_only(name))
+                self.assertFalse(is_android_only(name))
 
 
 class ChangeDetectionTest(unittest.TestCase):
@@ -84,6 +107,31 @@ class ChangeDetectionTest(unittest.TestCase):
     def test_mixed_evaluation_and_android_still_requires_checks(self):
         self.write("evaluation/validate.py")
         self.write("android/app/source.kt", "changed\n")
+        self.commit()
+        self.assertTrue(self.required())
+
+    def test_backend_only_can_skip_android(self):
+        self.write("backend/services/app.py")
+        self.write(".github/workflows/backend.yml")
+        self.write(".github/scripts/backend_checks.py")
+        self.write("README.md", "changed\n")
+        self.commit()
+        self.assertFalse(self.required())
+        self.assertFalse(self.required("pull_request"))
+
+    def test_backend_with_shared_paths_requires_checks(self):
+        for name in ["packages/contracts/openapi.json", ".github/scripts/ci_changes.py",
+                     ".github/workflows/contracts.yml", "unknown"]:
+            with self.subTest(name=name):
+                self.write("backend/services/app.py", name + "\n")
+                self.write(name)
+                self.commit()
+                self.assertTrue(self.required())
+                self.base = self.git("rev-parse", "HEAD")
+
+    def test_source_moved_into_backend_requires_checks(self):
+        (self.repo / "backend").mkdir()
+        self.git("mv", "android/app/source.kt", "backend/source.kt")
         self.commit()
         self.assertTrue(self.required())
 
