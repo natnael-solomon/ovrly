@@ -1,6 +1,14 @@
 package app.ovrly.data
 
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -142,6 +150,59 @@ class AccountLinkTest {
         )
         assertEquals(0, server.server.requestCount)
         assertNull(server.credentials.read())
+    }
+
+    @Test
+    fun aStaleGuestRefusalAfterALinkKeepsTheAccountCredential() = withServer { server ->
+        server.credentials.write("guest-token")
+        val guestCallArrived = CountDownLatch(1)
+        val linkDone = CountDownLatch(1)
+        val seen = CopyOnWriteArrayList<String>()
+        server.server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val bearer = request.getHeader("Authorization").orEmpty()
+                seen += "${request.path} $bearer"
+                fun json(status: Int, body: String) = MockResponse().setResponseCode(status)
+                    .setHeader("Content-Type", "application/json").setBody(body)
+                return when {
+                    request.path == "/v1/principals/link" ->
+                        json(200, linked(credential = "account-token", merged = 1))
+
+                    bearer == "Bearer guest-token" -> {
+                        // In flight with the guest token while the link revokes it.
+                        guestCallArrived.countDown()
+                        linkDone.await(5, TimeUnit.SECONDS)
+                        json(
+                            401,
+                            """{"code":"INVALID_CREDENTIAL","message":"Revoked",""" +
+                                """"retryable":false,"action":"authenticate",""" +
+                                """"request_id":"synthetic-request"}"""
+                        )
+                    }
+
+                    else -> json(200, """{"items":[]}""")
+                }
+            }
+        }
+        val account = MemoryAccountStore()
+        val api = OvrlyApi(server.client, server.credentials, account)
+        val saved = SavedReports(api, MemorySavedReportDao())
+        val result = runBlocking(Dispatchers.IO) {
+            val poll = async { saved.sync() }
+            assertTrue(guestCallArrived.await(5, TimeUnit.SECONDS))
+            val outcome = AccountLinker(api, FakeTokens(IdTokenResult.Token(idToken))).link()
+            linkDone.countDown()
+            assertTrue(outcome is LinkOutcome.Linked)
+            poll.await()
+        }
+
+        // The stale refusal is retried with the account credential, never a new guest.
+        assertNull(result)
+        assertEquals("account-token", server.credentials.read())
+        assertTrue(account.linked())
+        assertTrue(api.linked)
+        assertFalse(seen.toString(), seen.any { it.startsWith("/v1/principals/guest") })
+        assertEquals("/v1/reports/saved Bearer account-token", seen.last())
     }
 
     @Test

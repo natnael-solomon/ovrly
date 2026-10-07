@@ -95,9 +95,10 @@ internal class OvrlyApi(
 
     private inner class AuthenticatedCall(private val build: (String) -> ApiCall) {
         suspend operator fun <T> invoke(parse: (String) -> T): ApiResult<T> {
-            val first = sendWith(credential(), parse)
+            val token = credential()
+            val first = sendWith(token, parse)
             val rejected = first is ApiResult.Failure && first.failure.isCredentialRejected
-            if (rejected) forgetCredential()
+            if (rejected && token is ApiResult.Success) forgetCredential(token.value)
             return if (rejected) sendWith(credential(), parse) else first
         }
 
@@ -127,7 +128,14 @@ internal class OvrlyApi(
         }
     }
 
-    private fun forgetCredential() {
+    /**
+     * Drops [rejected] if it is still the current credential. A request sent with an older one
+     * (for example the guest token a second-device link just revoked) must not clear the
+     * credential that replaced it; the caller then retries with the current one.
+     */
+    private suspend fun forgetCredential(rejected: String) = minting.withLock {
+        val current = cached ?: credentials.read()
+        if (current != rejected) return@withLock
         cached = null
         credentials.clear()
         // A replacement guest is a new identity; it is not the linked account.
