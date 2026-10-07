@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import socket
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from uuid import UUID, uuid4
@@ -35,6 +36,7 @@ class Worker:
         retry_policy: RetryPolicy | None = None,
         worker_id: str | None = None,
         maintenance: Callable[[], Awaitable[None]] | None = None,
+        idle_poll_max_seconds: float | None = None,
     ):
         configure_logging()
         self.database = database
@@ -43,6 +45,8 @@ class Worker:
         self.faults: FaultInjector = faults if faults is not None else NoFaults()
         self.lease_seconds = lease_seconds
         self.poll_seconds = poll_seconds
+        # Idle waits double from poll_seconds up to this cap and reset after a claim.
+        self.idle_poll_max_seconds = max(poll_seconds, idle_poll_max_seconds or poll_seconds)
         self.retry_policy = retry_policy if retry_policy is not None else RetryPolicy()
         self.worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}-{uuid4().hex[:8]}"
         self.queue = JobQueue(database)
@@ -51,10 +55,19 @@ class Worker:
         self._stop = asyncio.Event()
         self._started = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
+        self._beat: float | None = None
 
     @property
     def running(self) -> bool:
         return self._started.is_set() and self._task is not None and not self._task.done()
+
+    @property
+    def heartbeat_age(self) -> float | None:
+        """Seconds since the loop last polled or an in-flight job extended its lease."""
+        return None if self._beat is None else time.monotonic() - self._beat
+
+    def _touch(self) -> None:
+        self._beat = time.monotonic()
 
     @property
     def owned_leases(self) -> frozenset[UUID]:
@@ -66,17 +79,22 @@ class Worker:
             await self.database.ping()
         except (SQLAlchemyError, OSError, TimeoutError):
             raise RuntimeError("Worker startup failed: database unavailable") from None
+        self._touch()
         self._started.set()
         stages = list(self.handlers)
         logger.info("Worker ready (%s, %d stage handlers)", self.worker_id, len(stages))
+        delay = self.poll_seconds
         while not self._stop.is_set():
+            self._touch()
             if self.maintenance is not None:
                 await self.maintenance()
             job = await self.queue.claim(self.worker_id, stages, self.lease_seconds)
             if job is None:
                 with suppress(TimeoutError):
-                    await asyncio.wait_for(self._stop.wait(), self.poll_seconds)
+                    await asyncio.wait_for(self._stop.wait(), delay)
+                delay = min(delay * 2, self.idle_poll_max_seconds)
                 continue
+            delay = self.poll_seconds
             await self._execute(job)
 
     async def _execute(self, job: ClaimedJob) -> None:
@@ -91,7 +109,9 @@ class Worker:
                 else:
                     logger.warning("Job %s lease lost before it started", job.id)
                 return
-            context = JobContext(self.queue, lease, self.lease_seconds, self.faults)
+            context = JobContext(
+                self.queue, lease, self.lease_seconds, self.faults, on_heartbeat=self._touch
+            )
             try:
                 result = await self.handlers[job.key.stage](job, context)
             except CancellationRequested:
