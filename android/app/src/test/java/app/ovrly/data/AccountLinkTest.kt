@@ -111,7 +111,9 @@ class AccountLinkTest {
         refusals.forEach { (status, code, action) ->
             withServer { server ->
                 server.credentials.write("guest-token")
-                server.error(status, code, action = action)
+                // A cold first call repeats once on a gateway answer (502 to 504).
+                val attempts = if (status in 502..504) 2 else 1
+                repeat(attempts) { server.error(status, code, action = action) }
                 val account = MemoryAccountStore()
                 val outcome = runBlocking {
                     linker(server, account, FakeTokens(IdTokenResult.Token(idToken))).link()
@@ -119,7 +121,7 @@ class AccountLinkTest {
                 val failure = (outcome as LinkOutcome.Failed).failure as ApiFailure.Server
                 assertEquals(code, ApiErrorCode.valueOf(code), failure.code)
                 // A refused credential is not replaced by a new guest during a link.
-                assertEquals(code, 1, server.server.requestCount)
+                assertEquals(code, attempts, server.server.requestCount)
                 assertEquals(code, "guest-token", server.credentials.read())
                 assertFalse(code, account.linked())
             }
