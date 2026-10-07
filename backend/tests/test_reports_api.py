@@ -334,7 +334,9 @@ async def test_stub_intake_publishes_one_fixture_report(database_url, tmp_path, 
             investigation_id = await create_investigation(client, headers)
             principal = await _owner_of(app, investigation_id)
             job = SimpleNamespace(payload=intake_payload(uuid.UUID(investigation_id), principal))
-            context = SimpleNamespace(queue=SimpleNamespace(database=app.state.database))
+            context = SimpleNamespace(
+                queue=SimpleNamespace(database=app.state.database), successors=[]
+            )
             # A re-leased intake job runs the stage again; the stub is published once.
             for _ in range(2):
                 result = await intake_with_stub_report(job, context)

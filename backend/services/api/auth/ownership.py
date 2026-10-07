@@ -26,10 +26,11 @@ async def load_owned(
     principal: Principal,
     *,
     for_update: bool = False,
+    for_no_key_update: bool = False,
 ) -> Row[Any]:
     query = owned_rows(table, principal).where(table.c.id == object_id)
-    if for_update:
-        query = query.with_for_update()
+    if for_update or for_no_key_update:
+        query = query.with_for_update(key_share=for_no_key_update)
     result = await connection.execute(query)
     row: Row[Any] | None = result.first()
     if row is None:

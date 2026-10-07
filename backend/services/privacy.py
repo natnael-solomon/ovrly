@@ -1,7 +1,9 @@
 """Opt-in demo retention on the durable queue; see the Proposed BC-D06 policy."""
 
+import asyncio
 import hashlib
 import logging
+import shutil
 import time
 from collections.abc import Sequence
 from datetime import datetime, timedelta
@@ -55,6 +57,7 @@ class Retention:
         ).all()
         for row in rows:
             await self.queue.delete(row.id, connection=connection)
+            await self._delete_artifacts(row.id)
             # Keep only a detached fence until the tombstone window ends.
             await connection.execute(
                 update(jobs)
@@ -68,6 +71,12 @@ class Retention:
                 )
             )
         return len(rows)
+
+    async def _delete_artifacts(self, job_id: UUID) -> None:
+        try:
+            await asyncio.to_thread(shutil.rmtree, self.settings.artifacts_dir / job_id.hex)
+        except FileNotFoundError:
+            pass
 
     @staticmethod
     def _expired_workspace(now: datetime, lifetime: timedelta) -> ColumnElement[bool]:
@@ -236,6 +245,7 @@ class Retention:
             )
             for job_id in expired_jobs:
                 await self.queue.delete(job_id, connection=connection)
+                await self._delete_artifacts(job_id)
                 await connection.execute(
                     update(jobs)
                     .where(jobs.c.id == job_id)
@@ -256,7 +266,10 @@ class Retention:
                 .limit(self.settings.retention_batch_size)
                 .with_for_update(skip_locked=True)
             )
-            purged = await connection.execute(delete(jobs).where(jobs.c.id.in_(old)))
+            old_ids: Sequence[UUID] = (await connection.execute(old)).scalars().all()
+            for job_id in old_ids:
+                await self._delete_artifacts(job_id)
+            purged = await connection.execute(delete(jobs).where(jobs.c.id.in_(old_ids)))
             counts["purged"] = purged.rowcount
         logging.getLogger(__name__).info(
             "Retention completed (%d principals, %d uploads, %d jobs, %d purged)",

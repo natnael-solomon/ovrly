@@ -95,6 +95,34 @@
     policy with local test doubles, and the debug-only `ScreenTextReplayTest`.
   - The 20-frames-per-minute cap dropping a brief card is tracked in #110.
 
+- Separate media-analysis progress with truthful partial/no-usable outcomes,
+  persisted configurable device-text deadlines, and late-text enrichment without
+  retranscribing successful speech. This does not create research reports or
+  claim continuous coverage between sampled frames.
+
+- Owner-requested, idempotent retry of quota-blocked upload speech
+  (`POST /v1/investigations/{id}/speech/retry`). It reserves quota before
+  re-queuing only speech, reuses validation, audio and device text, keeps the
+  text deadline, and never replays an uncertain provider outcome or resumes
+  automatically after a quota reset.
+
+- Incremental processing of live capture chunks (BE-07, #20): each accepted
+  Android chunk package is validated (size/hash, allowed entries, identity,
+  audio bounds, frame times) and its speech and device text are processed
+  before close, on the capture timebase. Investigation reads combine chunks in
+  sequence with per-chunk gaps, including new `CAPTURE_CHUNK_MISSING` and
+  `CAPTURE_CHUNK_INVALID` reasons. Capture text is complete when the chunk
+  arrives, so captures have no text grace period. The owner's speech retry now
+  re-queues only quota-blocked capture chunks, reserving quota for them
+  together. Verified with synthetic packages and replayed provider responses
+  only; real Android packages, device OCR and live Groq use remain unverified.
+
+- Backend-only completed-upload device-text v1: bounded owner-scoped batches,
+  media-time/frame/box provenance, checked-empty and failed outcomes, explicit
+  empty completion, immutable replay, cancellation/deletion fences and retention.
+  Shared synthetic fixtures verify the backend handoff; Android sending and
+  physical-device end-to-end verification remain separate.
+
 - On-device screen text for live capture (AN-06, #100): frames are probed once a second and
   kept on a visible change or a 5-second heartbeat, at most 20 per minute; likely text regions
   are cropped and read on the phone by bundled ML Kit Text Recognition Latin 16.0.1. Chunks now
@@ -256,6 +284,10 @@
 - Non-phone RES-02 follow-up: whole-subtitle-cue timestamp diagnostics that flag raw provider overruns, actual three-minute request-prefix accounting, local Tesseract screenshot/source-frame comparison helpers, selected-region scoring and fixed/change window coverage. Native empty OCR iterator entries are handled explicitly, and tests cover coordinate assignment, missing detections and timestamp anchors. Detailed measurement artifacts remain private; source-video simulation is not phone evidence or a full-screen missed-text benchmark.
 - Android contract models and compatibility tests for the whole `packages/contracts` package, completing AN-13 (#62) against the merged #15 handoff (PR #82): one `UNKNOWN`-tolerant Kotlin enum per `$def` in `enums.schema.json`, typed models for uploads, investigation creation, the investigation read model with its job and report version, claims, evidence, assessments, capture sessions and chunks, whose constructors enforce the schema rules (identifier, hash, timestamp and URL syntax, interval ordering, the investigation `oneOf` branches so a failed investigation can never carry a report, report cross-references), production codecs (`InvestigationCodec`, `UploadCodec`, `CaptureCodec`) with strict requests, additive-tolerant read models and explicit `ContractParseException`s instead of success-shaped defaults, and unit tests that read the six result fixtures, the intake fixtures and the schemas in place, assert the typed values of each fixture, map `"__future_value__"` to `UNKNOWN` for every enum, cross-check every enum and model against the committed schemas, and reject Android-only incompatible fixtures. #18 reuses these entry points; no endpoint is called.
 - Opt-in BE-01 router experiment CLI (`services.experiments.router`, offline by default, HTTP-mocked tests) and the proposed [BC-D03](docs/decisions/BC-D03-provider-hosting.md) record for the claim-extraction provider order, EthioDeploy hosting and the limited BE-08 development go, confirmed by the product owner on 4 October 2026 and Conditional until its metrics summary is committed.
+- Optional Groq-only uploaded speech (BE-07): disabled-by-default, explicitly configured hosted processing; bounded HTTP and timed-response validation; durable account/model quota reservations and conservative interrupted-call recovery; owner-scoped timed speech and provenance separate from media coverage. No automatic quota-reset resumption, fallback provider, server OCR or live-use entitlement is implied.
+
+- Upload-backed media validation (BE-07 first slice): fenced intake-to-media handoff, bounded ffprobe/ffmpeg execution, complete 16 kHz mono PCM16 WAV artifacts, and safe investigation progress/failures. Silent video preserves absent speech and pending text without claiming completed analysis. Optional shared `coverage.media` records preparation facts.
+
 - Core contract in `packages/contracts` (still `0.1.0-draft`): JSON Schemas for upload declaration and completion, investigation creation and the investigation read model, jobs, capture sessions and chunks, report versions, claims, evidence and assessments; one `$def` per enum (job state, retry class, investigation state, stage, processing status, coverage, timebase, modality, relation, overall assessment, source inspection level, source type, retrieval relevance, retraction status and more) so the Android parser maps each to an `UNKNOWN`-tolerant enum; six result fixtures (complete, partial, failed, cancelled, insufficient-evidence, no-claims) generated from new backend Pydantic read models and checked for drift by `roundtrip.py --check`; intake fixtures; an OpenAPI 3.1 document whose schemas are references into the package, validated with `openapi-spec-validator` and spectral (all errors use the error shape, no untyped enums); a required **Contract checks** workflow that runs the validator, the round trip, the contract tests, pinned checksum-verified `oasdiff` (a breaking change fails without a `VERSION` bump) and the Android contract unit tests against the same fixtures; and the contract review rule (one Android and one backend reviewer) in WORKFLOW and CODEOWNERS.
 - Durable backend job engine: a PostgreSQL queue claimed with `FOR UPDATE SKIP LOCKED`, idempotent stage keys `(version, stage, input hash)`, leases with fencing tokens and a cancellation/deletion generation, fenced compare-and-set publication, a property-tested job state machine (Hypothesis), lease draining on graceful shutdown in standalone and embedded worker modes, and a required **Backend recovery** CI job running the recovery cases against PostgreSQL. Typed retry classes (`transient` with jittered backoff, `rate_limited` honouring the provider hint, `non_retriable_input`, bounded `invalid_model_schema` repair and `unknown_outcome` reconciled by a request id recorded before the provider call) are scheduled through `available_at` with per-class caps from `OVRLY_JOB_RETRY_*` settings; infrastructure errors mid-stage re-lease the job instead of failing it. The recovery suite covers kill before commit, after the provider call and after the artifact store, lease expiry, cancel mid-retrieval, delete with a delayed callback, database connection drop, API lifespan restart, every retry class and duplicate provider callbacks.
 - Draft voice-actions contract in `packages/contracts` (version `0.1.0-draft`): JSON Schemas for the `POST /v1/voice/actions` request and response, the shared BE-05 error shape, four typed error codes, synthetic accepted/denied/negative fixtures, a standard-library validator and pytest checks run by Backend CI. Mirrors the BC-D04 allowlist; the client-local tab switch stays out of the server contract. No endpoint or Android wiring.
@@ -328,7 +360,7 @@
 
 ### Known limitations
 
-- Research, transcription, OCR and evidence retrieval are not connected; shared media is recorded by the backend intake API and queued as an `intake` job, but no media stage processes it yet.
+- Research, OCR and evidence retrieval are not connected. Uploaded media is validated and prepared; optional Groq speech remains disabled until an operator supplies verified account/model settings. Speech is not completed analysis, and no live provider behavior or entitlement has been verified. URL references remain intake-only. Media artifacts use private local storage; automatic orphan cleanup and Android investigation parsing are not implemented.
 - Gallery and report content are labeled samples. Gallery selection does not change the live overlay.
 - Native blur depends on device/system support; no backdrop refraction is implemented.
 - Physical-device testing is partial. Full cross-app capture/lifecycle behavior and live Voxide authorization/compatibility remain unverified.

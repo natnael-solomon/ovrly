@@ -91,6 +91,8 @@ overrides:
       - "openapi.json#/components/schemas/CaptureChunkRequest"
       - "openapi.json#/components/schemas/Job"
       - "openapi.json#/components/schemas/Upload"
+      - "openapi.json#/components/schemas/Speech"
+      - "openapi.json#/components/schemas/Analysis"
       - "openapi.json#/components/schemas/Claim"
       - "openapi.json#/components/schemas/Evidence"
       - "openapi.json#/components/schemas/Assessment"

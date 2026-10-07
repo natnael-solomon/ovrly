@@ -12,18 +12,26 @@ import hashlib
 import json
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 import pytest
 from recovery.test_captures import DATA, parts
+from sqlalchemy import update
 from test_intake_api import CONTENT, URL_BODY, guest
 from test_reports_api import publish
 from test_security_errors import assert_safe_error
 
 from services.api.main import create_app
+from services.jobs.handlers import default_handlers
+from services.jobs.models import jobs
+from services.media.runner import CommandLimits, run_command
+from services.pipeline.intake import intake_stage_key
+from services.pipeline.media_validation import media_stage_key
 from services.settings import Settings
+from services.worker.runtime import Worker
 
 PUBLIC = {("POST", "/v1/principals/guest"), ("GET", "/healthz")}
 
@@ -37,6 +45,13 @@ class Workspace:
     upload: str
     capture: str
     version: int = 1
+    # An upload investigation whose video passed media validation, for device text and speech.
+    text_investigation: str = ""
+    text_source: dict[str, Any] = field(default_factory=dict)
+
+
+def device_text(w: Workspace, suffix: str = "") -> str:
+    return f"/v1/investigations/{w.text_investigation}/device-text{suffix}"
 
 
 Request = tuple[str, str, dict[str, Any]]
@@ -97,6 +112,37 @@ CASES: dict[tuple[str, str], Callable[[Workspace], Request]] = {
         "POST",
         {},
     ),
+    ("POST", "/v1/investigations/{investigation_id}/speech/retry"): lambda w: (
+        f"/v1/investigations/{w.text_investigation}/speech/retry",
+        "POST",
+        {
+            "json": {"protocol_version": 1},
+            "headers": {"Idempotency-Key": "authz-matrix"},
+        },
+    ),
+    ("GET", "/v1/investigations/{investigation_id}/device-text"): lambda w: (
+        device_text(w),
+        "GET",
+        {},
+    ),
+    ("PUT", "/v1/investigations/{investigation_id}/device-text/batches/{batch_id}"): lambda w: (
+        device_text(w, "/batches/0"),
+        "PUT",
+        {"json": {**w.text_source, "frames": []}},
+    ),
+    ("POST", "/v1/investigations/{investigation_id}/device-text/complete"): lambda w: (
+        device_text(w, "/complete"),
+        "POST",
+        {
+            "json": {
+                **w.text_source,
+                "batch_count": 1,
+                "dropped_frames": 0,
+                "capped_frames": 0,
+                "unfinished_frames": 0,
+            }
+        },
+    ),
     ("DELETE", "/v1/reports/{report_id}/save"): lambda w: (
         f"/v1/reports/{w.report}/save",
         "DELETE",
@@ -126,7 +172,12 @@ def operations(app):
 @pytest.fixture
 async def app(database_url, tmp_path):
     application = create_app(
-        Settings(database_url=database_url, storage_dir=tmp_path / "uploads", _env_file=None)
+        Settings(
+            database_url=database_url,
+            storage_dir=tmp_path / "uploads",
+            artifacts_dir=tmp_path / "artifacts",
+            _env_file=None,
+        )
     )
     async with application.router.lifespan_context(application):
         yield application
@@ -141,8 +192,70 @@ async def client(app):
         yield client
 
 
+async def validated_video(client, app, headers) -> tuple[str, dict[str, Any]]:
+    """Create an upload investigation and run only its intake and media validation jobs."""
+    video = app.state.settings.storage_dir.parent / f"{uuid.uuid4().hex}.mkv"
+    generated = await run_command(
+        ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=size=16x16:rate=4"]
+        + ["-t", "1", "-c:v", "ffv1", str(video)],
+        CommandLimits(10, 5, 65536, 1048576),
+    )
+    assert generated.returncode == 0
+    content = video.read_bytes()
+    declared = await client.post(
+        "/v1/uploads",
+        json={"size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()},
+        headers=headers,
+    )
+    assert declared.status_code == 201, declared.text
+    upload = declared.json()
+    stored = await client.put(upload["target"], headers=headers, content=content)
+    assert stored.status_code == 204, stored.text
+    completed = await client.post(f"/v1/uploads/{upload['id']}/complete", headers=headers)
+    assert completed.status_code == 200, completed.text
+    created = await client.post(
+        "/v1/investigations",
+        json={"source": {"kind": "upload", "upload_id": upload["id"]}},
+        headers={**headers, "Idempotency-Key": uuid.uuid4().hex},
+    )
+    assert created.status_code == 202, created.text
+    investigation = created.json()["id"]
+    worker = Worker(
+        app.state.database,
+        2,
+        handlers=default_handlers(app.state.upload_store, settings=app.state.settings),
+    )
+    for key in (
+        intake_stage_key(uuid.UUID(investigation)),
+        media_stage_key(uuid.UUID(investigation)),
+    ):
+        # Leave every other queued job, including the URL intake jobs the matrix cancels, alone.
+        async with app.state.database.engine.begin() as connection:
+            await connection.execute(
+                update(jobs)
+                .where(jobs.c.stage == key.stage, jobs.c.input_hash == key.input_hash)
+                .values(available_at=datetime(1970, 1, 1, tzinfo=UTC))
+            )
+        claim = await worker.queue.claim("authz-matrix", [key.stage], 30)
+        assert claim is not None and claim.key == key
+        await worker._execute(claim)
+    read = await client.get(f"/v1/investigations/{investigation}", headers=headers)
+    assert read.json()["coverage"]["media"]["has_video"] is True, read.text
+    return investigation, {
+        "protocol_version": 1,
+        "upload_id": upload["id"],
+        "source_sha256": hashlib.sha256(content).hexdigest(),
+        "timebase": "media",
+        "rotation_degrees": 0,
+        "box_space": "normalized_10000",
+        "recognizer": {"name": "mlkit-text-recognition-latin-bundled", "version": "16.0.1"},
+        "sampling": None,
+    }
+
+
 async def workspace(client, app) -> Workspace:
     headers = await guest(client)
+    text_investigation, text_source = await validated_video(client, app, headers)
     created = await client.post(
         "/v1/investigations", json=URL_BODY, headers={**headers, "Idempotency-Key": "authz"}
     )
@@ -168,7 +281,14 @@ async def workspace(client, app) -> Workspace:
     )
     assert capture.status_code == 201, capture.text
     return Workspace(
-        headers, investigation, job, report.id, upload.json()["id"], capture.json()["id"]
+        headers,
+        investigation,
+        job,
+        report.id,
+        upload.json()["id"],
+        capture.json()["id"],
+        text_investigation=text_investigation,
+        text_source=text_source,
     )
 
 
@@ -218,6 +338,8 @@ async def test_object_routes_owner_other_owner_guest_and_unauthenticated(client,
             str(uuid.uuid4()),
             str(uuid.uuid4()),
             str(uuid.uuid4()),
+            text_investigation=str(uuid.uuid4()),
+            text_source=owner.text_source,
         )
         absent = await call(client, case, missing, owner.headers)
         assert_safe_error(absent, 404, "NOT_FOUND")

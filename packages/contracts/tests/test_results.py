@@ -120,6 +120,29 @@ def test_fixture_scenarios_say_what_they_mean() -> None:
 # Enums against their backend sources -----------------------------------
 
 
+def media_coverage() -> dict[str, Any]:
+    return {
+        "has_audio": False,
+        "has_video": True,
+        "speech_status": "unavailable",
+        "text_status": "pending",
+        "speech_unavailable_reason": "no_audio_track",
+    }
+
+
+def test_prepared_media_coverage_roundtrips_without_becoming_analysis(
+    validator: validate.Validator,
+) -> None:
+    body = payload("cancelled")
+    body.update(state="queued", stage="media_validation", processing_status="waiting", job=None)
+    body["coverage"] = {"status": "not_started", "total_ms": 1000, "media": media_coverage()}
+    validator.validate(body, INVESTIGATION)
+    assert (
+        backend.Coverage.model_validate(body["coverage"]).model_dump(exclude_unset=True)
+        == body["coverage"]
+    )
+
+
 def test_job_state_and_retry_class_enums_come_from_the_job_engine() -> None:
     assert enums()["job_state"] == [state.value for state in JobState]
     assert enums()["retry_class"] == [retry_class.value for retry_class in RetryClass]
@@ -133,6 +156,13 @@ def test_job_state_and_retry_class_enums_come_from_the_job_engine() -> None:
         ("stage", backend.Stage),
         ("processing_status", backend.ProcessingStatus),
         ("coverage_status", backend.CoverageStatus),
+        ("media_speech_status", backend.MediaSpeechStatus),
+        ("media_text_status", backend.MediaTextStatus),
+        ("speech_unavailable_reason", backend.SpeechUnavailableReason),
+        ("speech_status", backend.SpeechStatus),
+        ("analysis_status", backend.AnalysisStatus),
+        ("speech_reason", backend.SpeechReason),
+        ("asr_provider", backend.ASRProvider),
         ("timebase", backend.Timebase),
         ("modality", backend.Modality),
         ("relation", backend.Relation),
@@ -262,10 +292,17 @@ def test_no_claims_report_cannot_carry_assessments(
 # The UNKNOWN fallback on read models -------------------------------------
 
 READ_ENUM_PATHS: dict[str, tuple[str, tuple[Any, ...]]] = {
+    "analysis_status": ("complete", ("analysis", "status")),
+    "speech_status": ("complete", ("speech", "status")),
+    "speech_reason": ("complete", ("speech", "reason")),
+    "asr_provider": ("complete", ("speech", "provider")),
     "investigation_state": ("complete", ("state",)),
     "stage": ("complete", ("stage",)),
     "processing_status": ("complete", ("processing_status",)),
     "coverage_status": ("complete", ("coverage", "status")),
+    "media_speech_status": ("complete", ("coverage", "media", "speech_status")),
+    "media_text_status": ("complete", ("coverage", "media", "text_status")),
+    "speech_unavailable_reason": ("complete", ("coverage", "media", "speech_unavailable_reason")),
     "source_kind": ("complete", ("source", "kind")),
     "job_state": ("complete", ("job", "state")),
     "retry_class": ("partial", ("job", "retry_class")),
@@ -299,6 +336,22 @@ def test_unknown_enum_values_are_tolerated_on_the_investigation_read_model(
     the payload is still structurally readable so the parser maps it to UNKNOWN."""
     fixture, path = READ_ENUM_PATHS[name]
     body = payload(fixture)
+    if path[:2] == ("coverage", "media"):
+        body["coverage"]["media"] = media_coverage()
+    if path[0] == "speech":
+        body["speech"] = backend.SpeechResult(status="unavailable", reason="disabled").model_dump()
+    if path[0] == "analysis":
+        body["analysis"] = {
+            "status": "pending",
+            "text_deadline": None,
+            "text_expired": False,
+            "analyzed_modalities": [],
+            "pending_modalities": ["text"],
+            "unavailable_modalities": [],
+            "gaps": [],
+            "text": None,
+            "captions": [],
+        }
     set_path(body, path, "__future_value__")
     with pytest.raises(validate.Invalid, match="not one of"):
         validator.validate(body, INVESTIGATION)
@@ -489,11 +542,37 @@ def test_items_keyword_validates_every_element(tmp_path: Path) -> None:
 def test_validator_fails_closed_on_other_array_keywords(tmp_path: Path) -> None:
     schema_dir = tmp_path / "schemas"
     schema_dir.mkdir()
-    for keyword in ("prefixItems", "minItems", "uniqueItems", "contains"):
+    for keyword in ("prefixItems", "uniqueItems", "contains"):
         (schema_dir / "x.schema.json").write_text(
             json.dumps({"type": "array", keyword: 1}), encoding="utf-8"
         )
         with pytest.raises(validate.Invalid, match="unsupported keywords"):
+            validate.Validator(schema_dir)
+
+
+def test_array_bounds_apply_without_an_items_schema(tmp_path: Path) -> None:
+    schema_dir = tmp_path / "schemas"
+    schema_dir.mkdir()
+    (schema_dir / "x.schema.json").write_text(
+        json.dumps({"type": "array", "minItems": 1, "maxItems": 2}), encoding="utf-8"
+    )
+    validator = validate.Validator(schema_dir)
+    validator.validate([None], "x.schema.json")
+    validator.validate([1, "two"], "x.schema.json")
+    for value in ([], [1, 2, 3]):
+        with pytest.raises(validate.Invalid, match="array too"):
+            validator.validate(value, "x.schema.json")
+
+
+@pytest.mark.parametrize("bound", [-1, True, 1.5, "2"])
+def test_array_bound_schema_requires_nonnegative_integer(tmp_path: Path, bound: object) -> None:
+    schema_dir = tmp_path / "schemas"
+    schema_dir.mkdir()
+    for keyword in ("minItems", "maxItems"):
+        (schema_dir / "x.schema.json").write_text(
+            json.dumps({"type": "array", keyword: bound}), encoding="utf-8"
+        )
+        with pytest.raises(validate.Invalid, match="nonnegative integer"):
             validate.Validator(schema_dir)
 
 

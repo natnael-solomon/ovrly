@@ -308,3 +308,78 @@ provider_buckets = Table(
     Column("tokens", Float, nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
+
+asr_requests = Table(
+    "asr_requests",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("job_id", UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True),
+    Column("account_id", String(128), nullable=False),
+    Column("model", String(128), nullable=False),
+    Column("audio_seconds", BigInteger, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("outcome", String(32), nullable=False),
+    Column("result", JSONB, nullable=True),
+    Column("retry_index", Integer, nullable=False),
+    Column("retry_after", Integer, nullable=True),
+    Index("ix_asr_requests_quota", "account_id", "model", "created_at"),
+    Index("ix_asr_requests_job", "job_id"),
+)
+
+upload_text = Table(
+    "upload_text",
+    metadata,
+    Column(
+        "id",
+        UUID(as_uuid=True),
+        ForeignKey("investigations.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("job_id", UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL")),
+    Column("media_job_id", UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL")),
+    Column("batches", JSONB, nullable=False),
+    Column("completion", JSONB),
+    Index("ix_upload_text_job", "job_id"),
+    Index("ix_upload_text_media_job", "media_job_id"),
+)
+
+media_analysis = Table(
+    "media_analysis",
+    metadata,
+    Column(
+        "media_job_id",
+        UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "investigation_id",
+        UUID(as_uuid=True),
+        ForeignKey("investigations.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("grace_seconds", Integer, nullable=False),
+    Column("text_deadline", DateTime(timezone=True)),
+    Column("text_expired", Boolean, nullable=False, server_default="false"),
+    Index("ix_media_analysis_investigation", "investigation_id"),
+    Index("ix_media_analysis_deadline", "text_deadline"),
+)
+
+speech_retries = Table(
+    "speech_retries",
+    metadata,
+    Column(
+        "owner_id",
+        UUID(as_uuid=True),
+        ForeignKey("principals.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("request_key", String(200), primary_key=True),
+    Column(
+        "investigation_id",
+        UUID(as_uuid=True),
+        ForeignKey("investigations.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("response", JSONB, nullable=False),
+)

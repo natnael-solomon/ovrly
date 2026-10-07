@@ -7,10 +7,12 @@ from services.api.auth.google import GoogleIdTokenVerifier, IdTokenVerifier
 from services.api.intake import InvestigationDispatcher
 from services.api.routes import (
     captures,
+    device_text,
     investigations,
     jobs,
     principals,
     reports,
+    speech_retry,
     uploads,
     voice,
 )
@@ -43,5 +45,7 @@ def register(
     app.include_router(investigations.router, prefix="/v1")
     app.include_router(jobs.router, prefix="/v1")
     app.include_router(captures.router, prefix="/v1")
+    app.include_router(device_text.router, prefix="/v1")
+    app.include_router(speech_retry.router, prefix="/v1")
     app.include_router(reports.router, prefix="/v1")
     app.include_router(voice.router, prefix="/v1")

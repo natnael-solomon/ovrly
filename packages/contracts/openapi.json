@@ -27,6 +27,116 @@
     { "name": "captures", "description": "Owner-scoped incremental capture intake, close and polling (BE-06)." }
   ],
   "paths": {
+    "/v1/investigations/{investigation_id}/device-text": {
+      "parameters": [{ "$ref": "#/components/parameters/InvestigationId" }],
+      "get": {
+        "tags": ["investigations"],
+        "operationId": "getUploadDeviceText",
+        "summary": "Read bounded device text and delivery progress separately from speech.",
+        "description": "Backend-only upload-text v1. Requires an owned, validated video upload. Reports not_started, receiving, completed or cancelled; completion does not imply continuous sampling, successful OCR or completed investigation analysis. The job_id is an unclaimed cancellation/deletion fence reserved for later aggregation, not completed research.",
+        "responses": {
+          "200": {
+            "description": "Current owner-scoped text snapshot; completion seals delivery only.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceTextRead" } } }
+          },
+          "400": { "$ref": "#/components/responses/DeviceTextBadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/DeviceTextConflict" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/investigations/{investigation_id}/device-text/batches/{batch_id}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/InvestigationId" },
+        { "name": "batch_id", "in": "path", "required": true,
+          "schema": { "type": "integer", "minimum": 0, "maximum": 63 } }
+      ],
+      "put": {
+        "tags": ["investigations"],
+        "operationId": "putUploadDeviceTextBatch",
+        "summary": "Persist one immutable, bounded device-text batch.",
+        "description": "At most 262144 JSON bytes, 100 frames/batch, 100 observations/frame, 4096 characters/text. Per investigation: 64 batches, 1200 frames, 5000 observations and 2097152 canonical JSON batch bytes. Duplicate JSON keys, noninteger times/coordinates and unknown fields fail. Batch IDs may arrive out of order; identical parsed-content replay returns the current snapshot; conflicting identities, duplicate frame timestamps or observation IDs fail atomically. Metadata must match across batches and completion. Boxes are [left,top,right,bottom], normalized 0..10000 against the full upright display frame, with rotation already applied; original media timestamps must be before validated duration.",
+        "requestBody": { "required": true, "content": { "application/json": {
+          "schema": { "$ref": "#/components/schemas/DeviceTextBatch" }
+        } } },
+        "responses": {
+          "200": {
+            "description": "Current owner-scoped text snapshot after atomic batch acceptance or replay.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceTextRead" } } }
+          },
+          "400": { "$ref": "#/components/responses/DeviceTextBadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/DeviceTextConflict" },
+          "413": { "$ref": "#/components/responses/DeviceTextTooLarge" },
+          "415": { "$ref": "#/components/responses/DeviceTextContentType" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/investigations/{investigation_id}/device-text/complete": {
+      "parameters": [{ "$ref": "#/components/parameters/InvestigationId" }],
+      "post": {
+        "tags": ["investigations"],
+        "operationId": "completeUploadDeviceText",
+        "summary": "Seal explicit delivery, including an empty observation set.",
+        "description": "Every batch 0..batch_count-1 must exist and no other batch may exist. Zero batches is valid. Completion is immutable and replayable, preserving dropped/capped/unfinished-frame counts. New batches after completion conflict, but exact existing-batch replays remain safe. Cancellation/deletion supersedes replay. No timer, aggregation, server OCR or provider call is launched.",
+        "requestBody": { "required": true, "content": { "application/json": {
+          "schema": { "$ref": "#/components/schemas/DeviceTextCompletion" }
+        } } },
+        "responses": {
+          "200": {
+            "description": "Current owner-scoped text snapshot after sealing delivery or exact replay.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceTextRead" } } }
+          },
+          "400": { "$ref": "#/components/responses/DeviceTextBadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/DeviceTextConflict" },
+          "413": { "$ref": "#/components/responses/DeviceTextTooLarge" },
+          "415": { "$ref": "#/components/responses/DeviceTextContentType" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
+    "/v1/investigations/{investigation_id}/speech/retry": {
+      "parameters": [{ "$ref": "#/components/parameters/InvestigationId" }],
+      "post": {
+        "tags": ["investigations"],
+        "operationId": "retryUploadSpeech",
+        "summary": "Explicitly retry quota-blocked upload or capture-chunk speech.",
+        "description": "Owner-scoped and idempotent per Idempotency-Key; replay returns the first recorded outcome. Only speech that failed with ASR_QUOTA_EXHAUSTED under unchanged provider settings is eligible. Quota is reserved before the speech job becomes runnable; when quota is still exhausted, nothing is queued and no provider call is made. Validation, prepared audio and device text are reused, the text deadline is unchanged, and partial analysis stays readable while the retry runs. For a capture investigation only the quota-blocked chunks are re-queued, with quota reserved for all of them or none; chunks with speech are never resubmitted. Uncertain provider outcomes are never replayed, and nothing resumes automatically when quota resets.",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "application/json": {
+          "schema": { "$ref": "#/components/schemas/SpeechRetryRequest" }
+        } } },
+        "responses": {
+          "200": {
+            "description": "Recorded retry outcome; read the investigation for speech and analysis progress.",
+            "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SpeechRetryResponse" } } }
+          },
+          "400": { "$ref": "#/components/responses/SpeechRetryBadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/SpeechRetryConflict" },
+          "422": { "$ref": "#/components/responses/ValidationFailed" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/DatabaseUnavailable" }
+        }
+      }
+    },
     "/v1/captures": {
       "post": {
         "tags": ["captures"],
@@ -801,6 +911,36 @@
         "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
+      "DeviceTextBadRequest": {
+        "description": "CLIENT_IDENTITY_REJECTED: identity comes only from the bearer credential.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "SpeechRetryBadRequest": {
+        "description": "IDEMPOTENCY_KEY_REQUIRED, IDEMPOTENCY_KEY_INVALID or CLIENT_IDENTITY_REJECTED.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "SpeechRetryConflict": {
+        "description": "IDEMPOTENCY_KEY_REUSED: the key already recorded a retry for another investigation.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "DeviceTextConflict": {
+        "description": "DEVICE_TEXT_CONFLICT, DEVICE_TEXT_SOURCE_INVALID, DEVICE_TEXT_NOT_READY or DEVICE_TEXT_INELIGIBLE. The source, immutable identity or current job state prevents submission.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "DeviceTextTooLarge": {
+        "description": "DEVICE_TEXT_TOO_LARGE: request bytes or the per-source budget were exceeded.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "DeviceTextContentType": {
+        "description": "DEVICE_TEXT_CONTENT_TYPE: only application/json is accepted.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
       "CaptureConflict": {
         "description": "IDEMPOTENCY_KEY_REUSED, CAPTURE_CHUNK_CONFLICT, CAPTURE_CLOSED, CAPTURE_FINAL_CHUNK or CAPTURE_CLOSE_CONFLICT. The supplied request conflicts with durable capture state.",
         "headers": { "X-Request-Id": { "$ref": "#/components/headers/X-Request-Id" } },
@@ -915,6 +1055,13 @@
       "UploadCompleteResponse": { "$ref": "schemas/upload-complete-response.schema.json" },
       "InvestigationCreateRequest": { "$ref": "schemas/investigation-create-request.schema.json" },
       "Investigation": { "$ref": "schemas/investigation.schema.json" },
+      "Speech": { "$ref": "schemas/speech.schema.json" },
+      "Analysis": { "$ref": "schemas/analysis.schema.json" },
+      "DeviceTextBatch": { "$ref": "schemas/device-text.schema.json#/$defs/TextBatch" },
+      "DeviceTextCompletion": { "$ref": "schemas/device-text.schema.json#/$defs/TextCompletion" },
+      "DeviceTextRead": { "$ref": "schemas/device-text.schema.json#/$defs/DeviceTextRead" },
+      "SpeechRetryRequest": { "$ref": "schemas/speech-retry-request.schema.json" },
+      "SpeechRetryResponse": { "$ref": "schemas/speech-retry-response.schema.json" },
       "Job": { "$ref": "schemas/job.schema.json" },
       "ReportVersion": { "$ref": "schemas/report-version.schema.json" },
       "ReportVersionList": {

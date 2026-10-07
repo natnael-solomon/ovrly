@@ -6,14 +6,17 @@ mints guest principals, links them to a Google account (BC-D07), accepts
 uploads and records investigations behind bearer authentication (see
 [Identity and intake API](#identity-and-intake-api)). Each recorded
 investigation is handed to the queue as an `intake` job in the same
-transaction; the worker's `intake` stage only confirms the record today, so no
-research processing happens yet (BE-07, #20). The worker can also run opt-in
-privacy-retention jobs (see [Privacy operations](#privacy-operations)). See
+transaction; publishing intake schedules upload-backed `media_validation`.
+Opt-in Groq transcription follows preparation; neither is completed research
+(BE-07, #20). The worker also preserves capture byte validation, configured evidence
+stages and opt-in privacy retention (see [Privacy operations](#privacy-operations)). See
 [Durable jobs and recovery](#durable-jobs-and-recovery).
 
 ## Local setup (Linux / WSL)
 
-Install [uv](https://docs.astral.sh/uv/) and Docker with Compose, and start Docker.
+Install [uv](https://docs.astral.sh/uv/), Docker with Compose, ffmpeg/ffprobe,
+and util-linux (`prlimit`), and start Docker. On Ubuntu the media tools are
+provided by `sudo apt-get install ffmpeg util-linux`.
 Use Linux tools and a Linux checkout in WSL. From the repository root:
 
 ```sh
@@ -85,8 +88,15 @@ password. Do not delete a volume to resolve that without reviewing its data.
 | `OVRLY_JOB_IDLE_POLL_MAX_SECONDS` | Unset; positive, at most 600 and at least the poll. When set, consecutive idle waits double from `OVRLY_JOB_POLL_SECONDS` up to this cap and reset after a claim, so an idle worker queries a free-tier database less often |
 | `OVRLY_UPLOAD_MAX_BYTES` | 268435456 (256 MiB); positive. Placeholder until BC-D06 fixes the budget |
 | `OVRLY_UPLOAD_TARGET_SECONDS` | 900; how long an upload target accepts bytes and completion, at most 86400 |
-| `OVRLY_MAX_SHARED_DURATION_SECONDS` | 600; declared shared-media duration limit from BC-D01 |
+| `OVRLY_MAX_SHARED_DURATION_SECONDS` | 600; declared and measured shared-media duration limit from BC-D01 |
 | `OVRLY_STORAGE_DIR` | `.data/uploads`, relative to `backend/` and Git-ignored; local filesystem upload store |
+| `OVRLY_ARTIFACTS_DIR` | `.data/artifacts`; private, Git-ignored preparation artifacts; shared with all workers for this database |
+| `OVRLY_FFPROBE_PATH`, `OVRLY_FFMPEG_PATH` | `ffprobe`, `ffmpeg`; executable names or operator-configured paths |
+| `OVRLY_MEDIA_PROBE_TIMEOUT_SECONDS` | 10; positive wall-clock budget, at most 60 |
+| `OVRLY_MEDIA_EXTRACT_TIMEOUT_SECONDS` | 120; positive wall-clock budget, at most 600 |
+| `OVRLY_MEDIA_CPU_SECONDS` | 60; per-command CPU budget, positive and at most 300 |
+| `OVRLY_MEDIA_OUTPUT_MAX_BYTES` | 65536; per-stream stdout/stderr budget, positive and at most 1048576 |
+| `OVRLY_ASR_AUDIO_MAX_BYTES` | 25000000 decimal bytes; extracted WAV cap including headers. Provisional configuration, not verified Groq entitlement |
 | `OVRLY_JOB_RETRY_TRANSIENT_ATTEMPTS` | 5; 0 to 20. Scheduled retries for the `transient` class before the job fails |
 | `OVRLY_JOB_RETRY_RATE_LIMITED_ATTEMPTS` | 5; 0 to 20. Retries for the `rate_limited` class |
 | `OVRLY_JOB_RETRY_SCHEMA_REPAIR_ATTEMPTS` | 2; 0 to 10. Repair attempts for the `invalid_model_schema` class |
@@ -103,6 +113,169 @@ roll back downloads, or monitor unrelated filesystems containing custom caches.
 Keep additional headroom and inspect `df -h .` and `docker system df` as data grows.
 Use of PostgreSQL-only Docker avoids an API image/build cache. No Android SDK is
 needed for backend work.
+
+### Uploaded media preparation
+
+Media validation rechecks owned, completed uploads against their actual bytes,
+SHA-256 and measured duration. Commands use argument lists, restricted local
+formats/protocols and CPU, wall-clock, output and file-size limits. Extraction
+produces complete 16 kHz mono PCM16 WAV, including at the exact configured byte
+cap; over-limit or partial output is rejected, never silently truncated.
+Timestamp-aware resampling retains leading silence and timestamp gaps so the
+WAV timeline remains aligned with the original media, including delayed tracks.
+
+Investigation list/detail reads expose the current stage and safe failures.
+Published preparation adds `coverage.total_ms` and `coverage.media` with track
+presence, pending speech/text, and `no_audio_track` when appropriate. Video
+without audio remains eligible for text. Silence in an existing audio track is
+not absent audio. Coverage stays `not_started` and state stays `queued` after
+preparation: neither means analysis succeeded.
+
+Missing executables report `MEDIA_PROCESSING_UNAVAILABLE`; malformed media,
+size/duration limits and exhausted media timeouts have distinct safe codes.
+Tool stderr, filesystem paths and artifact keys never enter investigation
+responses. Readiness is not a media-tool capability check.
+
+Private temporary files are cleaned on ordinary completion or cancellation.
+Complete WAVs are linked atomically under job/content identities; fenced
+database publication alone makes an artifact usable by later stages.
+Crashes or cancellation after the link can leave unreferenced files. Opt-in
+retention removes the job's artifact directory at workspace/legacy-job expiry,
+serialized with artifact linking by the job lease lock. Crash-left preparation
+scratch directories still need operator cleanup with workers stopped. Keep upload/artifact directories private
+to the backend, outside served roots, and shared by workers using this database.
+This is local storage, not a distributed artifact store.
+
+Hosted ASR is disabled by default; its opt-in is described below. These stages add
+no server OCR or URL downloader. Device-text ingestion is a separate endpoint below.
+Existing report/evidence
+and labelled development-stub behavior is preserved. Android parses the optional
+media/speech fields; provider eligibility remains a separate live-use gate.
+
+`OVRLY_STUB_REPORTS=1` keeps uploaded investigations on the labelled fixture path
+after intake instead of launching real preparation or hosted speech. Capture
+fixtures still require successful capture byte validation.
+
+### Completed-upload device text
+
+Completed-upload device text is independently available through the authenticated
+batch/completion/read routes documented in
+[the upload-text contract](../packages/contracts/README.md#completed-upload-device-text-backend-only-v1).
+Migration `0013_upload_text` follows the ASR ledger. It stores bounded device
+observations and frame outcomes, including checked-empty/failed samples, without
+changing speech or research coverage. This approved backend-only handoff has
+synthetic API/PostgreSQL tests; the Android completed-upload sender and physical
+end-to-end verification remain separate. There is no OCR/provider call or
+aggregation timer in these routes.
+
+### Hosted uploaded speech (disabled by default)
+
+`OVRLY_ASR_ENABLED=1` enables the Groq-only successor for prepared audio.
+There is no default model, alternate provider or local model. Startup rejects
+incomplete live configuration. An operator must first verify model availability,
+free/no-card entitlement, exact byte cap, all applicable quotas, and billing
+rounding for the account. These facts remain unverified; the implementation and
+offline replay tests do not establish permission to upload media.
+
+In addition to explicitly setting `OVRLY_ASR_AUDIO_MAX_BYTES` (decimal bytes,
+WAV headers included), activation requires:
+
+| Setting | Meaning; no implicit live value |
+| --- | --- |
+| `OVRLY_GROQ_API_KEY` | Server secret, supplied outside Git |
+| `OVRLY_GROQ_MODEL` | Explicitly selected available Groq model |
+| `OVRLY_GROQ_ACCOUNT_ID` | Stable opaque accounting label, not a credential or personal identifier |
+| `OVRLY_ASR_LIMITS_VERIFIED_ON` | Date (`YYYY-MM-DD`) of operator verification; configuration is an attestation, not automated entitlement discovery |
+| `OVRLY_ASR_REQUESTS_PER_MINUTE`, `OVRLY_ASR_REQUESTS_PER_DAY` | Positive account/model request limits |
+| `OVRLY_ASR_AUDIO_SECONDS_PER_HOUR`, `OVRLY_ASR_AUDIO_SECONDS_PER_DAY` | Positive account/model audio-second limits |
+| `OVRLY_ASR_MINIMUM_BILLABLE_SECONDS` | Verified minimum charged seconds per request |
+| `OVRLY_ASR_RESPONSE_MAX_BYTES` | 1048576 by default, at most 4194304; streamed response bound |
+| `OVRLY_ASR_TIMEOUT_SECONDS` | 120 by default, at most 600; total HTTP wall-clock and I/O bound |
+
+All workers for an account/model must share the same stable accounting label,
+database and limits; rotating credentials must not change the label. This local
+ledger cannot observe other applications using the account, and is not a billing
+report. Configure conservative headroom for that external usage. Rolling
+minute/day request windows and hour/day audio windows serialize reservations
+with a PostgreSQL advisory lock. Audio is rounded up to whole seconds and to
+the configured minimum. Every attempted request reserves both budgets before
+HTTP; known failures, cancellation and uncertain outcomes retain the reservation
+until its windows expire. No refund is assumed from an error or an empty transcript.
+
+The adapter posts English, temperature-zero `verbose_json` to the fixed Groq
+transcription endpoint through the SSRF guard's `GuardedTransport`; redirects and
+environment proxy routing are disabled, and a refused destination is unavailability.
+Audio bytes/hash/cap are checked before reservation and HTTP. Responses have a
+byte limit and compressed responses are refused. Each finite, nonempty segment
+interval must start at or after zero and end within one second past the audio
+duration; seconds are rounded to nearest milliseconds, collapsed or inverted
+intervals are rejected, and a quantised overrun is clamped to the audio end.
+Prepared uploads start at media time zero, preserving delayed audio as leading
+silence; the adapter also supports explicit offset conversion, but
+captured-chunk transport remains later work.
+
+Investigation list/detail reads expose optional `speech` separately from
+`coverage.media`: status, reason, timed segments, provider/model, processing
+version and source/audio/settings digests. Empty completed segments mean no
+recognized speech, not absent audio, no claims or completed analysis. Preparation
+coverage remains unchanged and text pending. No-audio video skips ASR with
+`no_audio_track`; disabled processing reports `disabled`. Successful speech
+leaves the investigation queued for downstream work. Terminal speech failure
+(`ASR_QUOTA_EXHAUSTED` or `ASR_UNAVAILABLE`) is an explicit speech gap in the
+separate `analysis` read model; usable device text keeps the analysis partial.
+
+Short 429 responses with a finite, nonnegative `Retry-After` within
+`OVRLY_JOB_RETRY_MAX_BACKOFF_SECONDS` use the existing bounded rate-limit policy.
+Explicit quota errors, absent/unusable hints and longer waits stop automatic
+attempts with `ASR_QUOTA_EXHAUSTED`. HTTP 503 service unavailability uses the
+bounded transient policy. Other 5xx responses (including gateway failures) and
+HTTP 408 are terminal `unknown_outcome`: upstream processing may have completed.
+Other HTTP failures and malformed successful output are terminal
+unavailability. Transport interruption/timeout is also `unknown_outcome`, not evidence
+that the call was uncharged. Quota reset admits new work only; failed jobs do
+not resume automatically.
+
+`POST /v1/investigations/{id}/speech/retry` (body `{"protocol_version": 1}`,
+required `Idempotency-Key`) is the owner's explicit retry for upload speech that
+failed with `ASR_QUOTA_EXHAUSTED`. Migration `0015_speech_retries` records each
+owner/key outcome, so replays and concurrent duplicates return the first answer.
+The request rechecks the investigation, source bytes, prepared audio, enablement
+and provider settings, then reserves quota before re-queuing only the speech job
+under a new generation. If quota is still exhausted it answers
+`quota_exhausted`, queues nothing and makes no provider call. Validation, prepared
+audio, device text and the original text deadline are reused; partial analysis
+stays readable while speech runs. `unknown_outcome`, other failures, completed
+or running speech, cancelled/deleted work and changed settings are not
+retriable (`not_eligible`, `already_complete` or `in_progress`).
+
+For a capture-source investigation the same endpoint retries only chunks whose
+`asr` stage failed with `ASR_QUOTA_EXHAUSTED` and whose stored package still
+holds the same audio bytes. It locks the capture session before its jobs (the
+order close and stage publication use), reserves quota for **all** blocked
+chunks together or none, and re-queues only those chunks' `asr` jobs. Chunks
+that already have speech, unknown outcomes and other failures are never
+resubmitted. With no blocked chunk it answers `in_progress` while chunk speech
+is still running, `already_complete` when every chunk has speech, otherwise
+`not_eligible`.
+
+Migration `0012_asr_requests` (after `0011_quotas`) stores reservations, local request markers and
+known outcomes. Reservation and request marker commit together before the call.
+There is no verified Groq reconciliation or idempotency mechanism: a crash after
+this commit but before durable outcome storage stops speech as unknown, even if
+the call might not have started. This deliberately favors avoiding duplicate
+spend over availability. A stored successful response is reused after a crash
+before fenced publication; known transient outcomes replay their retry decision
+before another reservation, so crashes cannot bypass retry caps. Reuse is scoped
+to the same job/investigation, source bytes, prepared audio, model, processing
+version and request settings. No cross-owner/source cache exists.
+
+Quota/outcome writes are fenced and serialize with job cancellation/deletion.
+HTTP runs with lease heartbeats; cancelled or stale work cannot publish.
+Deleting a job clears its stored speech payload but retains non-content quota
+accounting. Only the existing fenced job-result transaction exposes speech.
+Tests use invented HTTP replay responses and real PostgreSQL/media tools,
+never live credentials or private files. Android integration and actual hosted
+account/model behavior remain unverified.
 
 ### Separate processes and migrations
 
@@ -186,7 +359,7 @@ fault-injection hooks used only by tests.
 | Stage key | `(version, stage, input_hash)` is unique on `jobs` and `job_results`; re-enqueueing returns the existing job. `JobQueue.enqueue` takes the caller's connection so the business record and the queue row commit in one transaction. |
 | Claim | `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)`; each claim bumps the fencing token and attempt count, grants a lease and first returns expired leases to the queue (or makes a pending cancellation effective). Only jobs whose `available_at` has passed are claimable. |
 | Lease | Owner, expiry and a monotonically increasing fencing token. `heartbeat` extends it and reports a cancellation request; a lost lease raises `LeaseLost`. |
-| Publish | Compare-and-set on owner, fencing token, generation, `running` state and no pending cancellation; the result row is written in the same transaction. Any mismatch raises `PublishRejected`. |
+| Publish | Compare-and-set on owner, fencing token, generation, `running` state and no pending cancellation; the result row and deferred successor jobs are written in the same transaction. Any mismatch raises `PublishRejected`. |
 | Retry | A handler raises a typed outcome (table below). The policy either schedules the job through `available_at`, recording the class and a per-class counter in `retry_counts`, or declares the class exhausted so the job fails with `retry_class` set. A pending cancellation wins over a retry. |
 | Request id | `JobContext.record_request_id` persists the provider request id before the call (fenced). A re-leased attempt sees it on `ClaimedJob.provider_request_id` and reconciles instead of calling again; `find_by_request_id` routes callbacks. The policy refuses to retry an `UnknownOutcome` when no id was recorded. |
 | Infrastructure errors | Database, socket and timeout errors raised during a stage leave the outcome unknown: the worker never marks the job failed, hands the lease back if it can and otherwise lets it expire, so the job is re-leased. The worker loop survives. |
@@ -203,12 +376,13 @@ fault-injection hooks used only by tests.
 | `invalid_model_schema` | `InvalidModelSchema` | Backoff; `OVRLY_JOB_RETRY_SCHEMA_REPAIR_ATTEMPTS` repair attempts, visible to the handler through `retry_counts` |
 | `unknown_outcome` | `UnknownOutcome` (provider timeout) | Backoff only when a request id was recorded; `OVRLY_JOB_RETRY_UNKNOWN_OUTCOME_ATTEMPTS` reconciliation attempts; never a silent re-call |
 
-Workers execute only the stages they have handlers for. `default_handlers()`
-registers the `intake` stage from `services/pipeline/intake.py`: it checks that
-the investigation still exists and belongs to the owner in the job payload,
-confirms `queued` at stage `intake` with the coverage placeholder and publishes
-a result row; a missing or foreign investigation is `NonRetriableInput`. Media
-stages arrive with BE-07 (#20). Handlers receive a `JobContext`
+Workers execute only the stages they have handlers for. `default_handlers(store, settings=settings)`
+registers `intake`, `media_validation` and `upload_asr`. Intake checks the owned investigation
+and publishes its placeholder result without resetting later progress. For an
+upload source it defers the media job until the same fenced publication
+transaction; stale or cancelled attempts cannot schedule successors.
+URL references remain intake-only and are not downloaded.
+Handlers receive a `JobContext`
 whose `heartbeat()` must be called by long stages. Other handler exceptions
 mark the job `failed` with the exception type only; messages are never
 persisted or logged. The owner-scoped cancel/delete API uses the same
@@ -227,9 +401,10 @@ API from the queue (`create_app(dispatcher=...)`).
 
 `tests/recovery/` holds the in-process API + worker harness with
 `ScriptedFaults` checkpoints (`claimed`, `before_publish`, `after_publish`,
-plus the stage-level `after_provider_call` and `after_artifact_store` that stub
-stages hit through `JobContext.checkpoint`). No provider or artifact store is
-integrated yet, so those stages are stubs registered only in tests. Covered:
+plus the stage-level `before_provider_call`, `after_provider_call` and
+`after_artifact_store` checkpoints). Legacy job-engine cases use stubs;
+uploaded speech uses the real Groq adapter with invented HTTP replay responses,
+and media preparation uses synthetic inputs with real ffprobe/ffmpeg. Covered:
 
 - Worker killed before the state commit, after the provider call (request id
   recorded, reconciled on re-lease, provider called once) and after the
@@ -440,11 +615,59 @@ cancels all queued/in-flight stages, not just byte validation. A publication
 transaction failure releases the lease for retry. No migration or replay of
 already published pre-orchestration validation jobs is performed.
 
-The production **ASR, device-text and claim handlers remain #20/#25**; absent
-handlers leave their jobs queued, never successful placeholders. Register them
-under `asr`, `device_text` and `claim_extraction` in both worker modes. Their
-published results must contain the real stage artifacts; orchestration neither
-transcribes nor extracts claims. Retrieval/assessment remain #27.
+The **claim handler remains #25**; without it `claim_extraction` jobs stay
+queued, never successful placeholders. Retrieval/assessment remain #27.
+
+### Captured chunk speech and device text (BE-07 #20)
+
+When both a store and settings are configured (the API's embedded worker and
+the separate worker), `asr` and `device_text` handlers process each chunk as
+soon as its validation publishes, before close. A chunk with content type
+`application/zip` is a version-1 Android package (AN-04/AN-06) containing only:
+
+- `chunk.json` (at most 2 MiB, strict JSON without duplicate keys): `seq`,
+  `start_ms`/`end_ms` on `timebase: "capture"`, `modality`, optional `audio`,
+  `frames_uploaded: false`, per-frame outcomes, text observations with
+  `frame_pts`, and `sampling`/`recognizer` as in the device-text contract.
+- optional `audio-16000-mono-s16le.pcm` (16 kHz mono signed 16-bit PCM).
+
+Validation re-reads the stored bytes, checks size/hash again and rejects other
+entries, oversized or truncated entries, identity/modality mismatches with the
+accepted transport metadata, audio absent for `speech`/`both` or present for
+`text`, frames absent for `text`/`both` or present for `speech`, audio longer
+than the chunk plus 1000ms (Android assigns each whole buffer to the chunk its
+first sample falls in), duplicate or out-of-interval frame times, and
+observations without a frame. Invalid packages fail the chunk
+with `CAPTURE_CHUNK_INVALID`; other chunks continue. Other content types still
+validate as bytes but carry no package, so their speech/text stages fail
+without a provider call.
+
+Speech wraps the PCM as WAV, reserves shared quota under the same
+reservation/request-marker rules as upload speech, and transcribes with
+`offset_ms = seq * chunk_duration_ms`, so segments are converted to capture
+time exactly once. Segments are clamped to the chunk's end. Capture time is
+milliseconds since recording started, **not** a playback position in the
+external video. A chunk without audio publishes `unavailable/no_audio_track`;
+disabled ASR publishes `unavailable/disabled` with no call.
+
+Device text is **complete when the chunk arrives**. Frames still being read
+when the device seals a chunk are dropped there, so captures have no late-text
+channel, no text deadline and do not use `OVRLY_TEXT_GRACE_SECONDS`; a newly
+submitted late chunk is ordinary chunk delivery. Frames publish with stable observation IDs derived from the package; a
+speech-only chunk has no frames and reads as `unavailable/no_frames`
+(`DEVICE_TEXT_MISSING`) immediately.
+
+Investigation reads for a capture combine published chunks in sequence order:
+`speech` concatenates segments, and `analysis.text` is
+`{"timebase":"capture","chunks":[...]}` with each chunk's interval, package
+hash, sampling, recognizer and frames. Gaps are per chunk and half-open:
+`CAPTURE_CHUNK_INVALID`, `NO_AUDIO_TRACK`, the `ASR_*` failures,
+`DEVICE_TEXT_MISSING`, `DEVICE_TEXT_FRAME_FAILED`, and `CAPTURE_CHUNK_MISSING`
+for the manifest's missing intervals. Missing or failed chunks never block
+other chunks, and duplicate delivery reuses the existing jobs and results.
+Synthetic coverage lives in `tests/recovery/test_capture_processing.py`; real
+Android packages, device OCR quality and live Groq entitlement remain
+unverified.
 
 Capture polling keeps each validation job ID as the stable chunk receipt while
 reporting failures, cancellation and active work across its downstream stages.
@@ -460,7 +683,7 @@ The #33 capture stub exercises report progression with `OVRLY_STUB_REPORTS=1`;
 it still generates only explicitly labelled fixture reports after validation
 and does not install pretend production ASR/text/claim handlers. Recovery tests
 use synthetic observation results to exercise the fan-in separately. The final
-end-to-end run with real claims waits for #20/#25. See
+end-to-end run with real claims waits for #25. See
 [Reports, saves and voice actions](#reports-saves-and-voice-actions).
 Android device upload and polling integration remain AN-07.
 
@@ -512,6 +735,12 @@ schema with the contracts validator.
 | `GET /v1/investigations` | Newest-first list of the caller's investigations (at most 100). |
 | `GET /v1/investigations/{id}` | The contract read model (`packages/contracts/schemas/investigation.schema.json`): `state`, `stage`, a coverage placeholder, `version`, a safe `error` object or `null`, `source`, timestamps, plus `processing_status`, `job` and `report`. `state` reflects the intake job: `queued` or `leased` read as `queued`, `running` as `running`, `failed` as `failed` with a `PROCESSING_FAILED` error unless a specific code was recorded, `cancelled` or `deleted` as `cancelled`; a published job leaves the stored state. `report` is the latest published version or `null`; a provisional report reads `processing_status: partial` (state `running`), a final one `complete` (state `completed`), and `version` then equals `report.version`. Without a report, queued reads `waiting` and running `checking`. A failed investigation has `processing_status: failed`, an error and never a report; cancelled keeps a report published before the cancel. `job` is the most recently created live job of the investigation (intake, reanalysis or capture chunk), with only the client-visible columns of `JobSummary`; it is `null` when every job is deleted. Lease owners, fencing tokens and failure types are never exposed. POST 202 and list items use the same model. |
 
+For uploaded sources, progress follows intake, media validation and uploaded speech.
+Published preparation coverage and optional timed `speech` augment the full read model;
+media/speech failures use safe stage-specific codes. Job summaries include these successors.
+The internal `upload_asr` handler reads as contract stage `asr`, so unsupported capture
+`asr` jobs remain queued. Artifacts and provider request identifiers are never exposed.
+
 Every route except guest minting requires `Authorization: Bearer <token>`.
 Missing credentials return 401 `AUTHENTICATION_REQUIRED`; malformed, unknown or
 revoked ones (including a guest credential revoked by a second-device link)
@@ -531,15 +760,16 @@ decided. Uploaded media is development data on the local disk; consent must be
 recorded separately and automatic retention requires the explicit opt-in above.
 
 Recorded investigations are handed to the queue as described under
-[Durable jobs and recovery](#durable-jobs-and-recovery); until BE-07 (#20)
-adds media stages they stay `queued` at stage `intake` after the intake job
-publishes. Account linking follows
+[Durable jobs and recovery](#durable-jobs-and-recovery); uploaded media advances
+to `media_validation`, then optionally `asr`, and stays queued for later analysis.
+URL references remain at intake. Account linking follows
 [BC-D07](../docs/decisions/BC-D07-account-link.md): identity is verified
 server-side from the Google ID token (`services/api/auth/google.py`), and
 `services/api/auth/linking.py` performs the upgrade or second-device merge in
-one transaction, with every write restricted to the calling principal. Quotas
-beyond the two limits and deletion remain open (#77 retention, #75 user
-deletion). `packages/contracts` holds the shared error shape, the voice-actions schemas
+one transaction, with every write restricted to the calling principal. Hosted
+speech uses the account/model quotas above; other quotas and deletion remain
+open (#77 retention, #75 user deletion). `packages/contracts` holds the shared
+error shape, the voice-actions schemas
 and, from BE-03 (#15), the upload, investigation, job, capture, report, claim,
 evidence and assessment schemas with their enums and the OpenAPI document. The
 intake and account-link request and response models in `services/api/schemas.py`
@@ -786,7 +1016,7 @@ independent opt-in. All API and worker processes must have the same configuratio
 | Setting | Proposed default / meaning |
 | --- | --- |
 | `OVRLY_QUOTAS_ENABLED` | `0`; opt in only after reviewing the proposed policy |
-| `OVRLY_QUOTA_ACTIVE_CHECKS` | 2 per principal; distinct checks with active queued/leased/running jobs, plus unexpired open captures |
+| `OVRLY_QUOTA_ACTIVE_CHECKS` | 2 per principal; distinct checks with active queued/leased/running jobs (never-claimed `upload_device_text` fences excluded), plus unexpired open captures |
 | `OVRLY_QUOTA_DAILY_CHECKS` | 6 new investigations, captures or reanalyses per principal per UTC day |
 | `OVRLY_QUOTA_DAILY_UPLOAD_BYTES` | 268435456 (256 MiB); shared daily reservation budget for uploads and capture chunks |
 | `OVRLY_QUOTA_CLAIMS_PER_RUN` | 5; further caps `OVRLY_EVIDENCE_MAX_CLAIMS` for retrieval, including deeper searches; remaining claims stay unassessed |
@@ -859,7 +1089,7 @@ The RFC section 15 threat-model controls are negative tests in CI:
 
 | Control | Implementation | Tests |
 | --- | --- | --- |
-| SSRF on outbound fetches | `services/providers/egress.py`. Production evidence clients use `GuardedTransport` (no environment proxies): each connection resolves the host once, refuses it if **any** answer is private, loopback, link-local (including `169.254.169.254`), shared (`100.64.0.0/10`), reserved, multicast, IPv6 unique-local/site-local or an IPv6 form embedding such an IPv4 address (mapped, compatible, NAT64, 6to4, Teredo), and dials exactly the checked address while TLS still verifies the host name, so DNS rebinding cannot reach an internal host. `fetch` validates every URL (only `http`/`https`, no credentials, default ports, no `localhost`/`.internal`/`.local`/single-label names or internal literals including legacy numeric IPv4 spellings), follows at most 3 redirects with each hop re-checked and no HTTPS to HTTP downgrade, and bodies are capped (`Content-Length` and bytes read, 4 MiB). A refusal is `UnsafeUrl` (a `ProviderError`) with a fixed `reason`; neither URL nor address is logged. Open-access full text (arXiv, Europe PMC) goes through `fetch`; any future fetch of a provider- or user-supplied URL (for example #20 URL intake) must too. | `tests/test_security_ssrf.py` (database-free) |
+| SSRF on outbound fetches | `services/providers/egress.py`. Production evidence clients and the Groq speech adapter use `GuardedTransport` (no environment proxies): each connection resolves the host once, refuses it if **any** answer is private, loopback, link-local (including `169.254.169.254`), shared (`100.64.0.0/10`), reserved, multicast, IPv6 unique-local/site-local or an IPv6 form embedding such an IPv4 address (mapped, compatible, NAT64, 6to4, Teredo), and dials exactly the checked address while TLS still verifies the host name, so DNS rebinding cannot reach an internal host. `fetch` validates every URL (only `http`/`https`, no credentials, default ports, no `localhost`/`.internal`/`.local`/single-label names or internal literals including legacy numeric IPv4 spellings), follows at most 3 redirects with each hop re-checked and no HTTPS to HTTP downgrade, and bodies are capped (`Content-Length` and bytes read, 4 MiB). A refusal is `UnsafeUrl` (a `ProviderError`) with a fixed `reason`; neither URL nor address is logged. Open-access full text (arXiv, Europe PMC) goes through `fetch`; any future fetch of a provider- or user-supplied URL (for example #20 URL intake) must too. | `tests/test_security_ssrf.py` (database-free) |
 | Object authorization | Owner-scoped loaders; other owners get the same 404 as a missing object. | `tests/test_security_authz.py`: every OpenAPI route with a path parameter x {owner, other owner, fresh guest, unauthenticated, unknown credential}; a new object route without a case fails the test. Every non-public route requires a credential; lists and voice actions never reveal another owner's objects. |
 | Prompt injection | Content is data in every prompt; no tools; replies are schema-checked; citations validated before publish; credential-shaped text in a rationale is redacted. | `tests/test_security_prompt_injection.py` runs `evaluation/adversarial/prompt-injection.json` (database-free). |
 | Media intake limits | Declared and streamed byte limits, raw (never decoded) bodies, hash verification, multipart limits, worker byte re-check. `MEDIA_INVALID` from a codec stage is **blocked by #20** and skipped with that reason. | `tests/test_security_media.py` |
@@ -1383,3 +1613,26 @@ decision-log task remains #5; provider/hosting evidence is proposed in
 Keep provider credentials and private media out of Git; future media uploads
 require explicit consent and a retention policy. No hosting entitlement or
 deployment has been verified by this bootstrap. [Android builds independently](../android/README.md#setup).
+
+## Media extraction progress
+
+Investigation reads expose nullable `analysis` separately from downstream
+`processing_status`, research coverage, and `report`. Its states are `pending`,
+`partial` (usable observations plus gaps), `no_usable` (no usable observations
+and nothing still pending), and `complete` (the supplied available input was
+processed). None means a claim was researched or a report was published.
+Speech remains in `speech`; device frame outcomes, sampling/provenance and
+observations remain in `analysis.text`. No caption acquisition is implemented.
+Checked-empty frames differ from failed or missing frames; samples never imply
+continuous OCR between frames. Modality gaps carry safe reasons and, when known,
+half-open intervals.
+
+`OVRLY_TEXT_GRACE_SECONDS` defaults to **60 seconds**, provisional configuration
+rather than measured phone latency. The deadline is stored atomically with
+terminal speech publication/failure, or validation when speech is absent/disabled.
+Polling and worker restarts do not renew it. Workers resolve due rows during
+queue polling without sleeping on a source; already-completed text does not wait.
+Late immutable text batches/completion improve the same eligible source without
+rerunning ASR. Deletion/cancellation fences still reject late delivery.
+Captures do not use this grace period: their device text is complete when each
+chunk arrives (see the incremental capture section).

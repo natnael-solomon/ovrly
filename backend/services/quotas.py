@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from services.api.auth import Principal
 from services.api.auth.dependency import lock_active_principal
 from services.api.errors import ApiError
-from services.jobs.models import jobs
+from services.jobs.models import FENCE_STAGES, jobs
 from services.models import capture_sessions, quota_usage
 from services.providers.budget import TokenBucket
 from services.settings import Settings
@@ -65,6 +65,7 @@ async def active_checks(connection: AsyncConnection, owner_id: uuid.UUID) -> set
     ).where(
         jobs.c.owner_id == owner_id,
         jobs.c.state.in_(["queued", "leased", "running"]),
+        jobs.c.stage.not_in(FENCE_STAGES),
     )
     opened = select(cast(capture_sessions.c.id, String)).where(
         capture_sessions.c.owner_id == owner_id,

@@ -42,7 +42,9 @@ def create_app(
         active_handlers = worker_handlers(
             database,
             config,
-            handlers if handlers is not None else default_handlers(app.state.upload_store),
+            handlers
+            if handlers is not None
+            else default_handlers(app.state.upload_store, settings=config),
             evidence=handlers is None,
         )
         if config.retention_enabled:

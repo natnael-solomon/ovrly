@@ -41,7 +41,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Runs the backend suite twice: this change, then main's coverage baseline.
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: backend
@@ -78,6 +79,8 @@ jobs:
           save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Install locked dependencies
         run: uv sync --frozen
+      - name: Install media tools
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg util-linux
       - name: Lint and formatting
         run: uv run --frozen ruff check . && uv run --frozen ruff format --check .
       - name: Strict types
@@ -148,6 +151,8 @@ jobs:
           save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Install locked dependencies
         run: uv sync --frozen
+      - name: Install media tools
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg util-linux
       - name: Upgrade database
         run: uv run --frozen alembic upgrade head
       - name: Job state machine properties and recovery cases

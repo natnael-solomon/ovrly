@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Media analysis",
+  "description": "Extraction of supplied input, not a research report or verdict. Complete means all available supplied modalities processed, not continuous OCR between sampled frames. No usable means no usable observations after processing/wait ends, not no claims.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "text_deadline", "text_expired", "analyzed_modalities", "pending_modalities", "unavailable_modalities", "gaps", "text", "captions"],
+  "properties": {
+    "status": { "$ref": "enums.schema.json#/$defs/analysis_status" },
+    "text_deadline": { "oneOf": [{"type": "null"}, {"$ref": "common.schema.json#/$defs/timestamp"}] },
+    "text_expired": { "type": "boolean" },
+    "analyzed_modalities": { "$ref": "#/$defs/modalities" },
+    "pending_modalities": { "$ref": "#/$defs/modalities" },
+    "unavailable_modalities": { "$ref": "#/$defs/modalities" },
+    "gaps": { "type": "array", "items": { "$ref": "#/$defs/gap" } },
+    "text": { "oneOf": [{"type": "null"}, {"$ref": "device-text.schema.json#/$defs/DeviceTextRead"}, {"$ref": "#/$defs/capture_text"}] },
+    "captions": { "type": "array", "maxItems": 0, "description": "No caption acquisition in this version; never filled from speech or OCR." }
+  },
+  "$defs": {
+    "modalities": { "type": "array", "maxItems": 2, "items": { "type": "string", "enum": ["speech", "text"] } },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modality", "reason", "interval"],
+      "properties": {
+        "modality": { "type": "string", "enum": ["speech", "text"] },
+        "reason": { "type": "string", "enum": ["NO_AUDIO_TRACK", "ASR_QUOTA_EXHAUSTED", "ASR_OUTCOME_UNKNOWN", "ASR_DISABLED", "ASR_UNAVAILABLE", "DEVICE_TEXT_MISSING", "DEVICE_TEXT_INCOMPLETE", "DEVICE_TEXT_FRAME_FAILED", "CAPTURE_CHUNK_MISSING", "CAPTURE_CHUNK_INVALID"] },
+        "interval": { "oneOf": [{"type": "null"}, {"$ref": "common.schema.json#/$defs/interval"}] }
+      }
+    },
+    "capture_text": {
+      "type": "object",
+      "description": "Live-capture on-device text per received chunk, on the capture timebase. A chunk's text is complete when the chunk arrives; there is no late-text grace period for captures.",
+      "additionalProperties": false,
+      "required": ["timebase", "chunks"],
+      "properties": {
+        "timebase": { "const": "capture" },
+        "chunks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["seq", "interval", "source_sha256", "sampling", "recognizer", "frames"],
+            "properties": {
+              "seq": { "type": "integer", "minimum": 0 },
+              "interval": { "$ref": "common.schema.json#/$defs/interval" },
+              "source_sha256": { "$ref": "common.schema.json#/$defs/sha256" },
+              "sampling": { "$ref": "device-text.schema.json#/$defs/TextSampling" },
+              "recognizer": { "$ref": "device-text.schema.json#/$defs/TextRecognizer" },
+              "frames": { "type": "array", "maxItems": 200, "items": { "$ref": "device-text.schema.json#/$defs/TextFrame" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -90,6 +90,8 @@ KEYWORDS = {
     "not",
     "minLength",
     "maxLength",
+    "minItems",
+    "maxItems",
     "pattern",
     "minimum",
     "maximum",
@@ -186,7 +188,7 @@ class Validator:
                 location,
                 "type must be a single supported type name",
             )
-        for key in ("minLength", "maxLength"):
+        for key in ("minLength", "maxLength", "minItems", "maxItems"):
             if key in schema:
                 require(
                     type(schema[key]) is int and schema[key] >= 0,
@@ -314,9 +316,12 @@ class Validator:
             for name, item in value.items():
                 if name in properties:
                     self._validate(item, properties[name], file, f"{location}.{name}", relax)
-        if isinstance(value, list) and "items" in schema:
-            for index, item in enumerate(value):
-                self._validate(item, schema["items"], file, f"{location}[{index}]", relax)
+        if isinstance(value, list):
+            require(len(value) >= schema.get("minItems", 0), location, "array too short")
+            require(len(value) <= schema.get("maxItems", len(value)), location, "array too long")
+            if "items" in schema:
+                for index, item in enumerate(value):
+                    self._validate(item, schema["items"], file, f"{location}[{index}]", relax)
         if isinstance(value, str):
             require(len(value) >= schema.get("minLength", 0), location, "string too short")
             require(len(value) <= schema.get("maxLength", len(value)), location, "string too long")

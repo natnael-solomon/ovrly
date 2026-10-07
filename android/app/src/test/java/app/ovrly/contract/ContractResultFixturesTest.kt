@@ -297,7 +297,8 @@ class ContractResultFixturesTest {
             "insufficient-evidence",
             "no-claims"
         )
-        val OPTIONAL_KEYS = setOf("covered_ms", "total_ms", "duration_ms")
+        val OPTIONAL_KEYS =
+            setOf("covered_ms", "total_ms", "duration_ms", "media", "speech", "analysis")
         const val SYNTHETIC_UUID_PREFIX = "00000000-0000-4000-8000-"
     }
 }

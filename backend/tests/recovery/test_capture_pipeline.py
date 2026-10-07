@@ -147,6 +147,21 @@ async def test_concurrent_observation_publication_enqueues_extraction_once(pipel
     assert [row.stage for row in await stage_rows(app, session)].count("claim_extraction") == 1
 
 
+async def test_uploaded_media_registry_preserves_capture_fanout_and_registers_chunk_stages(
+    pipeline,
+):
+    app, _, _, session = pipeline
+    handlers = default_handlers(app.state.upload_store, settings=app.state.settings)
+    worker = Worker(app.state.database, 2, handlers=handlers)
+    claim = await worker.queue.claim("mixed-pipeline", list(handlers), 30)
+    assert claim is not None and claim.key.stage == "media_validation"
+    await worker._execute(claim)
+    rows = {row.stage: row for row in await stage_rows(app, session)}
+    assert rows["media_validation"].state == "published"
+    assert rows["asr"].state == rows["device_text"].state == "queued"
+    assert {"asr", "device_text", "upload_asr"} <= set(handlers)
+
+
 async def test_enqueue_failure_rolls_back_publication_and_worker_retries(pipeline, monkeypatch):
     app, _, _, session = pipeline
     worker = Worker(app.state.database, 2, handlers=default_handlers(app.state.upload_store))

@@ -3,12 +3,13 @@
 import hashlib
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import Row, and_, insert, select
+from sqlalchemy import Row, and_, case, insert, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -17,6 +18,7 @@ from services.api.errors import ApiError, safe_error
 from services.api.intake import InvestigationDispatcher
 from services.api.routes.common import engine, settings
 from services.api.schemas import (
+    Coverage,
     InvestigationCreateRequest,
     InvestigationListResponse,
     InvestigationReadModel,
@@ -25,10 +27,11 @@ from services.api.schemas import (
     ProcessingStatus,
     ReportVersion,
     SafeError,
+    SpeechResult,
     UploadSource,
 )
 from services.captures import CAPTURE_STAGES
-from services.jobs.models import jobs
+from services.jobs.models import job_results, jobs
 from services.jobs.states import JobState
 from services.models import (
     capture_chunks,
@@ -37,13 +40,16 @@ from services.models import (
     reanalysis_requests,
     uploads,
 )
+from services.pipeline.analysis import uploaded_analysis
+from services.pipeline.capture_media import capture_analysis
 from services.pipeline.intake import (
     COVERAGE_PLACEHOLDER,
     INITIAL_STATE,
     INTAKE_STAGE,
-    INTAKE_VERSION,
     intake_stage_key,
 )
+from services.pipeline.media_validation import MEDIA_STAGE, media_stage_key
+from services.pipeline.speech import ASR_STAGE, speech_stage_key
 from services.quotas import charge, lock_owner
 from services.reports import latest_reports, summarize_job
 
@@ -63,6 +69,23 @@ _JOB_STATE_TO_INVESTIGATION = {
     "deleted": "cancelled",
 }
 PROCESSING_FAILED = "PROCESSING_FAILED"
+_MEDIA_FAILURES = {
+    "InvalidMedia": "INVALID_MEDIA",
+    "NonRetriableInput": "INVALID_MEDIA",
+    "MediaTooLarge": "MEDIA_SIZE_LIMIT_EXCEEDED",
+    "MediaTooLong": "DURATION_LIMIT_EXCEEDED",
+    "MediaTimedOut": "MEDIA_PROCESSING_TIMEOUT",
+    "MediaToolUnavailable": "MEDIA_PROCESSING_UNAVAILABLE",
+}
+
+
+@dataclass(frozen=True)
+class PipelineJob:
+    state: str
+    stage: str
+    failure: str | None
+    result: dict[str, Any] | None
+    media_result: dict[str, Any] | None = None
 
 
 def _source(row: Row[Any]) -> dict[str, Any]:
@@ -78,45 +101,107 @@ def _source(row: Row[Any]) -> dict[str, Any]:
     return source
 
 
-def investigation_response(row: Row[Any], job_state: str | None = None) -> InvestigationResponse:
-    """Build the client view; ``job_state`` (when a job exists) overrides the stored state.
+def investigation_response(row: Row[Any], job: PipelineJob | None = None) -> InvestigationResponse:
+    """Build the client view from the current stage's fenced state and result.
 
     A published job means the stage finished and the stored state stands.
     """
     state = row.state
     error_code = row.error_code
-    if job_state is not None and job_state != "published":
-        state = _JOB_STATE_TO_INVESTIGATION[job_state]
+    coverage = COVERAGE_PLACEHOLDER
+    stage = row.stage
+    speech = None
+    if job is not None:
+        stage = job.stage
+        if job.media_result is not None:
+            coverage = Coverage.model_validate(job.media_result["coverage"]).model_dump(
+                mode="json", exclude_unset=True
+            )
+            speech = job.media_result.get("speech")
+        if stage == ASR_STAGE:
+            speech = (
+                job.result["speech"]
+                if job.state == "published" and job.result is not None
+                else {"status": "running" if job.state == "running" else "pending"}
+            )
+            if job.state == "failed":
+                speech = {
+                    "status": "unavailable",
+                    "reason": (
+                        "quota_exhausted"
+                        if job.failure == "ASRQuotaExhausted"
+                        else "unknown_outcome"
+                        if job.failure == "ASRUnknownOutcome"
+                        else "provider_unavailable"
+                    ),
+                }
+            elif job.state in {"cancelled", "deleted"}:
+                speech = {"status": "unavailable", "reason": "cancelled"}
+    if job is not None and job.state != "published":
+        state = _JOB_STATE_TO_INVESTIGATION[job.state]
         if state == "failed" and error_code is None:
-            error_code = PROCESSING_FAILED
+            error_code = (
+                _MEDIA_FAILURES.get(job.failure or "", PROCESSING_FAILED)
+                if job.stage == MEDIA_STAGE
+                else (
+                    "ASR_QUOTA_EXHAUSTED"
+                    if job.failure == "ASRQuotaExhausted"
+                    else "ASR_UNAVAILABLE"
+                )
+                if job.stage == ASR_STAGE
+                else PROCESSING_FAILED
+            )
     return InvestigationResponse(
         id=row.id,
         state=state,
-        stage=row.stage,
-        coverage=COVERAGE_PLACEHOLDER,
+        stage="asr" if stage == ASR_STAGE else stage,
+        coverage=coverage,
         version=row.version,
         error=safe_error(error_code),
         source=_source(row),
         created_at=row.created_at,
         updated_at=row.updated_at,
+        speech=speech,
     )
 
 
 async def job_states(
     connection: AsyncConnection, investigation_ids: list[uuid.UUID]
-) -> dict[uuid.UUID, str]:
-    """State of each investigation's intake job, keyed by investigation id."""
+) -> dict[uuid.UUID, PipelineJob]:
+    """Current pipeline stage, including only its fenced published result."""
     if not investigation_ids:
         return {}
-    keys = {intake_stage_key(identifier).input_hash: identifier for identifier in investigation_ids}
-    rows = await connection.execute(
-        select(jobs.c.input_hash, jobs.c.state).where(
-            jobs.c.version == INTAKE_VERSION,
-            jobs.c.stage == INTAKE_STAGE,
-            jobs.c.input_hash.in_(list(keys)),
+    keys = {
+        (key.version, key.stage, key.input_hash): identifier
+        for identifier in investigation_ids
+        for key in (
+            intake_stage_key(identifier),
+            media_stage_key(identifier),
+            speech_stage_key(identifier),
         )
+    }
+    rows = await connection.execute(
+        select(
+            jobs.c.version,
+            jobs.c.input_hash,
+            jobs.c.state,
+            jobs.c.stage,
+            jobs.c.failure,
+            job_results.c.result,
+        )
+        .outerjoin(job_results, job_results.c.job_id == jobs.c.id)
+        .where(tuple_(jobs.c.version, jobs.c.stage, jobs.c.input_hash).in_(list(keys)))
+        .order_by(case({INTAKE_STAGE: 0, MEDIA_STAGE: 1, ASR_STAGE: 2}, value=jobs.c.stage))
     )
-    return {keys[row.input_hash]: row.state for row in rows}
+    states: dict[uuid.UUID, PipelineJob] = {}
+    for row in rows:
+        identifier = keys[(row.version, row.stage, row.input_hash)]
+        previous = states.get(identifier)
+        media = previous.media_result if previous is not None else None
+        if row.stage == MEDIA_STAGE and row.state == "published":
+            media = row.result
+        states[identifier] = PipelineJob(row.state, row.stage, row.failure, row.result, media)
+    return states
 
 
 async def latest_jobs(
@@ -129,16 +214,22 @@ async def latest_jobs(
     """
     if not investigation_ids:
         return {}
-    keys = {intake_stage_key(identifier).input_hash: identifier for identifier in investigation_ids}
+    keys = {
+        (key.version, key.stage, key.input_hash): identifier
+        for identifier in investigation_ids
+        for key in (
+            intake_stage_key(identifier),
+            media_stage_key(identifier),
+            speech_stage_key(identifier),
+        )
+    }
     candidates: list[tuple[uuid.UUID, Row[Any]]] = []
     intake = await connection.execute(
         select(jobs).where(
-            jobs.c.version == INTAKE_VERSION,
-            jobs.c.stage == INTAKE_STAGE,
-            jobs.c.input_hash.in_(list(keys)),
+            tuple_(jobs.c.version, jobs.c.stage, jobs.c.input_hash).in_(list(keys)),
         )
     )
-    candidates.extend((keys[row.input_hash], row) for row in intake)
+    candidates.extend((keys[(row.version, row.stage, row.input_hash)], row) for row in intake)
     for link, owner in ((reanalysis_requests.c.job_id, reanalysis_requests.c.investigation_id),):
         linked = await connection.execute(
             select(jobs, owner.label("investigation_id"))
@@ -175,7 +266,7 @@ async def latest_jobs(
 
 def read_model(
     row: Row[Any],
-    job_state: str | None,
+    job_state: PipelineJob | None,
     job: JobSummary | None,
     report: ReportVersion | None,
 ) -> InvestigationReadModel:
@@ -225,10 +316,31 @@ async def read_models(
     states = await job_states(connection, identifiers)
     current = await latest_jobs(connection, identifiers)
     reports = await latest_reports(connection, identifiers)
-    return [
-        read_model(row, states.get(row.id), current.get(row.id), reports.get(row.id))
-        for row in rows
-    ]
+    models = []
+    for row in rows:
+        stage = states.get(row.id)
+        model = read_model(row, stage, current.get(row.id), reports.get(row.id))
+        if (
+            row.source_kind == "upload"
+            and model.state != "cancelled"
+            and stage is not None
+            and stage.media_result is not None
+            and model.speech is not None
+        ):
+            model.analysis = await uploaded_analysis(
+                connection, row, stage.media_result, model.speech.model_dump()
+            )
+            if model.analysis is not None and model.report is None:
+                model.state = "running"
+                model.processing_status = "checking"
+                model.error = None
+        elif row.source_kind == "capture" and model.state != "cancelled":
+            captured = await capture_analysis(connection, row.id)
+            if captured is not None:
+                model.speech = SpeechResult.model_validate(captured[0])
+                model.analysis = captured[1]
+        models.append(model)
+    return models
 
 
 def request_hash(body: InvestigationCreateRequest) -> str:

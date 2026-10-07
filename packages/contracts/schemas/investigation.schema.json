@@ -27,6 +27,14 @@
       "description": "Stage the investigation is at or stopped at. intake until the job engine picks it up."
     },
     "coverage": { "$ref": "#/$defs/coverage" },
+    "speech": {
+      "description": "Optional timed speech, separate from preparation coverage, supplied captions and device text. Null before speech eligibility is known. Completed speech is not completed analysis.",
+      "oneOf": [{ "type": "null" }, { "$ref": "speech.schema.json" }]
+    },
+    "analysis": {
+      "description": "Optional extraction state and separate device observations; does not create reports or change processing_status semantics.",
+      "oneOf": [{ "type": "null" }, { "$ref": "analysis.schema.json" }]
+    },
     "version": {
       "type": "integer",
       "description": "Current report version number, starting at 1 at intake. Equals report.version when a report is present."
@@ -92,6 +100,24 @@
         "total_ms": {
           "$ref": "common.schema.json#/$defs/nullable_integer",
           "description": "Eligible media duration in milliseconds, once known."
+        },
+        "media": {
+          "description": "Published preparation facts, not completed analysis. Absent or null before validation.",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/media_coverage" }]
+        }
+      }
+    },
+    "media_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["has_audio", "has_video", "speech_status", "text_status", "speech_unavailable_reason"],
+      "properties": {
+        "has_audio": { "type": "boolean" },
+        "has_video": { "type": "boolean" },
+        "speech_status": { "$ref": "enums.schema.json#/$defs/media_speech_status" },
+        "text_status": { "$ref": "enums.schema.json#/$defs/media_text_status" },
+        "speech_unavailable_reason": {
+          "oneOf": [{ "type": "null" }, { "$ref": "enums.schema.json#/$defs/speech_unavailable_reason" }]
         }
       }
     },

@@ -26,7 +26,10 @@ class BackendWorkflowTest(unittest.TestCase):
             self.assertRegex(uses, r"^[\w/-]+@[0-9a-f]{40}$")
         self.assertIn("persist-credentials: false", SOURCE)
         self.assertIn("save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", SOURCE)
-        self.assertIn("timeout-minutes: 15", SOURCE)
+        validate = SOURCE.split("  validate:\n", 1)[1].split("  recovery:\n", 1)[0]
+        recovery = SOURCE.split("  recovery:\n", 1)[1].split("  result:\n", 1)[0]
+        self.assertIn("timeout-minutes: 25", validate)
+        self.assertIn("timeout-minutes: 15", recovery)
         self.assertIn("retention-days: 7", SOURCE)
 
     def test_postgres_is_skipped_for_docs_without_skipping_required_result(self):

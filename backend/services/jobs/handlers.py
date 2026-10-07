@@ -1,10 +1,13 @@
 """Stage handler protocol and the per-job context handed to handlers."""
 
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import datetime
 from typing import Any
 
+from services.asr.groq import ASRAdapter
 from services.jobs.faults import Checkpoint, FaultInjector, NoFaults
-from services.jobs.queue import ClaimedJob, JobQueue, Lease
+from services.jobs.queue import ClaimedJob, JobQueue, Lease, StageKey
+from services.settings import Settings
 from services.storage import UploadStore
 
 
@@ -27,6 +30,11 @@ class JobContext:
         self.lease_seconds = lease_seconds
         self.faults: FaultInjector = faults if faults is not None else NoFaults()
         self.on_heartbeat = on_heartbeat
+        self.successors: list[tuple[StageKey, dict[str, Any]]] = []
+
+    def enqueue_after_publish(self, key: StageKey, payload: dict[str, Any]) -> None:
+        """Stage a handoff for the same fenced transaction as publication."""
+        self.successors.append((key, payload))
 
     async def heartbeat(self) -> None:
         """Extend the lease; raise if it was lost or cancellation was requested."""
@@ -53,13 +61,40 @@ class JobContext:
 JobHandler = Callable[[ClaimedJob, JobContext], Awaitable[dict[str, Any]]]
 
 
-def default_handlers(store: UploadStore | None = None) -> Mapping[str, JobHandler]:
-    """Register intake and, with shared storage, incremental capture byte validation."""
+def default_handlers(
+    store: UploadStore | None = None,
+    *,
+    settings: Settings | None = None,
+    asr_adapter: ASRAdapter | None = None,
+    quota_clock: Callable[[], datetime] | None = None,
+) -> Mapping[str, JobHandler]:
+    """Intake, capture byte validation, and configured uploaded-media preparation."""
     # Imported here because the stage modules import JobContext from this module.
     from services.captures import CAPTURE_STAGE, CaptureProcessor
+    from services.pipeline.capture_media import build_capture_speech, build_capture_text
     from services.pipeline.intake import INTAKE_STAGE, intake_stage
+    from services.pipeline.media_validation import MEDIA_STAGE, build_media_validation
+    from services.pipeline.speech import ASR_STAGE, build_speech
 
     handlers: dict[str, JobHandler] = {INTAKE_STAGE: intake_stage}
     if store is not None:
         handlers[CAPTURE_STAGE] = CaptureProcessor(store).run
+    if settings is not None:
+        upload_media = build_media_validation(settings)
+        capture_media = handlers.get(CAPTURE_STAGE)
+
+        async def media(job: ClaimedJob, context: JobContext) -> dict[str, Any]:
+            if capture_media is not None and (
+                "capture_id" in job.payload or "session_id" in job.payload
+            ):
+                return await capture_media(job, context)
+            return await upload_media(job, context)
+
+        handlers[MEDIA_STAGE] = media
+        handlers[ASR_STAGE] = build_speech(settings, adapter=asr_adapter, quota_clock=quota_clock)
+        if store is not None:
+            handlers["asr"] = build_capture_speech(
+                settings, store, adapter=asr_adapter, quota_clock=quota_clock
+            )
+            handlers["device_text"] = build_capture_text(store)
     return handlers

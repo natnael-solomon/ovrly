@@ -1,5 +1,6 @@
 """Capture manifest arithmetic and the first incremental queue stage."""
 
+import asyncio
 import hashlib
 from collections.abc import Sequence
 from datetime import datetime
@@ -22,6 +23,7 @@ from services.jobs.models import jobs
 from services.jobs.queue import ClaimedJob, StageKey
 from services.jobs.retries import NonRetriableInput
 from services.models import capture_chunks, capture_sessions
+from services.pipeline.capture_media import PACKAGE_TYPE, package_summary, read_package
 from services.storage import UploadStore
 
 CAPTURE_STAGE = "media_validation"
@@ -146,7 +148,7 @@ class CaptureProcessor:
         async with context.queue.database.engine.begin() as connection:
             row = (
                 await connection.execute(
-                    select(capture_chunks)
+                    select(capture_chunks, capture_sessions.c.chunk_duration_ms)
                     .select_from(
                         capture_chunks.join(capture_sessions).join(
                             jobs, jobs.c.id == capture_chunks.c.job_id
@@ -167,4 +169,11 @@ class CaptureProcessor:
             if await self.store.digest(row.storage_key) != (row.size_bytes, row.sha256):
                 raise NonRetriableInput("Capture bytes are missing or corrupt")
         await context.heartbeat()
-        return {"seq": row.seq, "media_processing": "not_started"}
+        package = None
+        if row.content_type == PACKAGE_TYPE:
+            path = await self.store.local_path(row.storage_key)
+            package = package_summary(
+                await asyncio.to_thread(read_package, path, row, row.chunk_duration_ms)
+            )
+            await context.heartbeat()
+        return {"seq": row.seq, "media_processing": "not_started", "package": package}
