@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Header, Path, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -34,6 +34,7 @@ from services.reports import (
     report_from_row,
     save_owned_report,
     saved_report,
+    unsave_owned_report,
 )
 
 router = APIRouter(tags=["reports"])
@@ -154,6 +155,21 @@ async def save_report(
         raise not_found()
     async with engine(request).begin() as connection:
         return await save_owned_report(connection, principal, parsed)
+
+
+@router.delete("/reports/{report_id}/save", status_code=204)
+async def unsave_report(
+    request: Request,
+    report_id: Annotated[str, Path(min_length=1, max_length=128)],
+    principal: CurrentPrincipal,
+) -> Response:
+    await require_empty_body(request)
+    parsed = parse_canonical_uuid(report_id)
+    if parsed is None:
+        raise not_found()
+    async with engine(request).begin() as connection:
+        await unsave_owned_report(connection, principal, parsed)
+    return Response(status_code=204)
 
 
 @router.get("/reports/saved", response_model=SavedReportListResponse)

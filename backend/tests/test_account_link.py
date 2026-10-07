@@ -243,6 +243,15 @@ async def test_second_device_continues_as_the_existing_account(client, app, veri
     assert await owned_ids(app, uploads, guest_id) == [guest_upload["id"]]
     assert await owned_ids(app, investigations, account_id) == [account_investigation]
     assert await owned_ids(app, uploads, account_id) == []
+    # The account can remove the moved save; afterwards the guest's version is not its own.
+    removed = await client.delete(f"/v1/reports/{guest_report.id}/save", headers=continued)
+    assert removed.status_code == 204, removed.text
+    assert_error(
+        await client.delete(f"/v1/reports/{guest_report.id}/save", headers=continued),
+        404,
+        "NOT_FOUND",
+    )
+    assert await saved_owners(app, [guest_report.id]) == {}
     async with app.state.database.engine.connect() as connection:
         keys = (
             await connection.execute(

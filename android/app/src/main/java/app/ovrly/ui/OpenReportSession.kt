@@ -37,6 +37,17 @@ internal class OpenReportSession(
         restart()
     }
 
+    /**
+     * Shows a saved copy (#36) whose check is not on this device. It has no server id to load,
+     * so [refresh] leaves it alone until it is closed or another report opens.
+     */
+    fun showCopy(report: OpenReport) {
+        openId = null
+        shownVersion = null
+        generation++
+        mutable.value = report
+    }
+
     fun show(version: Int) {
         shownVersion = version
         generation++
@@ -52,8 +63,8 @@ internal class OpenReportSession(
      */
     suspend fun refresh(investigation: Investigation?, candidates: List<InboxItem>, busy: Boolean) {
         val started = generation
-        val id = openId
-        val loaded = if (id != null && investigation?.id == id) {
+        val id = openId ?: return
+        val loaded = if (investigation?.id == id) {
             load(investigation, shownVersion, candidates)
         } else {
             null
