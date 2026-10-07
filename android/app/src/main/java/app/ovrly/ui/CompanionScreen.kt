@@ -132,6 +132,10 @@ fun CompanionScreen(
 
                                 CapturePhase.IDLE -> "No active capture"
                             },
+                            modifier = Modifier.spokenAs(
+                                recordingDescription(capture.seconds.toLong())
+                                    .takeIf { capture.phase == CapturePhase.RECORDING }
+                            ),
                             style = MaterialTheme.typography.titleMedium
                         )
                     }

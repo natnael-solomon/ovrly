@@ -45,7 +45,13 @@ internal class ChecksViewModel(application: Application) : AndroidViewModel(appl
     private val services = ApiServices.get(application)
     private val checks = services?.let { ChecksService(it) }
     private val loader = services?.let { api ->
-        checks?.let { ReportLoader(it, ReportLoader.staleFrom(api.jobs)) }
+        checks?.let {
+            ReportLoader(
+                it,
+                retrieved = ReportLoader.retrievedFrom(api.jobs),
+                stale = ReportLoader.staleFrom(api.jobs)
+            )
+        }
     }
     private val mutableState = MutableStateFlow(ChecksUiState(available = services != null))
     private val session = OpenReportSession { investigation, version, candidates ->
@@ -176,7 +182,13 @@ internal class ChecksViewModel(application: Application) : AndroidViewModel(appl
             loader?.invalidate()
         } else {
             val view = savedCopyView(save) ?: return
-            session.showCopy(OpenReport(view, save = saveState(view, storedSaves, copy = true)))
+            val copy = OpenReport(
+                view,
+                save = saveState(view, storedSaves, copy = true),
+                // The export dates a saved copy by when this device stored it (#39).
+                retrievedAt = save.entry.storedAt
+            )
+            session.showCopy(copy)
         }
         viewModelScope.launch { reload() }
     }
