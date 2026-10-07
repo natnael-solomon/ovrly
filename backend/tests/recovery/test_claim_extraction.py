@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from recovery.harness import ScriptedFaults
+from recovery.harness import SHORT_LEASE_SECONDS, ScriptedFaults
 from services.api.main import create_app
 from services.jobs.faults import Checkpoint, SimulatedCrash
 from services.jobs.handlers import default_handlers
@@ -863,7 +863,7 @@ async def test_restricted_or_invalid_extraction_never_escapes_to_groq(harness, f
 
 
 @asynccontextmanager
-async def pipeline(h, responses, *, faults=None, source=None, capture=False):
+async def pipeline(h, responses, *, faults=None, source=None, capture=False, **overrides):
     requests = []
 
     def provider(request):
@@ -877,7 +877,7 @@ async def pipeline(h, responses, *, faults=None, source=None, capture=False):
         transport=httpx.MockTransport(provider), base_url="https://router.example"
     ) as http:
         adapter = ScholarxivAdapter(http, allowed_models=["fixture-free-model"], max_tokens=2048)
-        app = h.app(None, stages=default_handlers(llm=adapter), faults=faults)
+        app = h.app(None, stages=default_handlers(llm=adapter), faults=faults, **overrides)
         async with app.router.lifespan_context(app), h.client(app) as client:
             investigation_id = await create_investigation(client, capture=capture)
             async with h.control.engine.begin() as connection:
@@ -1137,12 +1137,13 @@ async def test_expired_publication_is_replayed_from_artifact_under_a_new_lease(h
         if name == Checkpoint.BEFORE_PUBLISH and job.key.stage == "claim_extraction":
             pauses += 1
             if pauses == 1:
-                await asyncio.sleep(0.8)
+                await asyncio.sleep(SHORT_LEASE_SECONDS + 0.3)
 
     async with pipeline(
         harness,
         [completion(extraction())],
         faults=ScriptedFaults(on_checkpoint=pause_before_publish),
+        job_lease_seconds=SHORT_LEASE_SECONDS,
     ) as (client, investigation_id, queued, requests, _):
         await harness.wait_for_state(queued.job_id, "published")
         record = await harness.queue.get(queued.job_id)
@@ -1169,7 +1170,10 @@ async def test_inference_keeps_lease_alive_and_observes_cancellation(harness, ca
         transport=httpx.MockTransport(respond), base_url="https://router.example"
     ) as http:
         adapter = ScholarxivAdapter(http, allowed_models=["fixture-free-model"], max_tokens=2048)
-        app = harness.app(None, stages=default_handlers(llm=adapter))
+        # The 1.2 s inference outlasts this lease, so only heartbeats keep the job alive.
+        app = harness.app(
+            None, stages=default_handlers(llm=adapter), job_lease_seconds=SHORT_LEASE_SECONDS
+        )
         async with app.router.lifespan_context(app), harness.client(app) as client:
             investigation_id = await create_investigation(client)
             async with harness.control.engine.begin() as connection:
