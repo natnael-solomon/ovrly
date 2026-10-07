@@ -198,6 +198,51 @@ def _decoded_video_duration(stdout: bytes) -> float | None:
     return max(times) / 1000000
 
 
+def _packet_video_duration(stdout: bytes) -> float | None:
+    try:
+        packets = json.loads(stdout)["packets"]
+    except (ValueError, KeyError, TypeError, RecursionError):
+        raise InvalidMedia("Invalid video packet metadata") from None
+    duration = 0.0
+    for packet in packets:
+        if not isinstance(packet, dict):
+            raise InvalidMedia("Invalid video packet metadata")
+        try:
+            pts = float(packet["pts_time"])
+            packet_duration = float(packet.get("duration_time") or 0)
+        except (ValueError, KeyError, TypeError, OverflowError):
+            continue
+        if math.isfinite(pts) and math.isfinite(packet_duration):
+            duration = max(duration, pts + max(packet_duration, 0))
+    return duration or None
+
+
+async def _probe_initial_video_duration(
+    settings: Settings, limits: CommandLimits, snapshot: Path
+) -> float | None:
+    packets = await _media_command(
+        [
+            settings.ffprobe_path,
+            "-v",
+            "error",
+            *_INPUT_OPTIONS,
+            "-read_intervals",
+            "%+2",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "packet=pts_time,duration_time",
+            "-of",
+            "json",
+            str(snapshot),
+        ],
+        limits,
+    )
+    if packets.returncode != 0:
+        raise InvalidMedia("Video packets could not be probed")
+    return _packet_video_duration(packets.stdout)
+
+
 async def _prepare(
     job: ClaimedJob,
     context: JobContext,
@@ -296,6 +341,8 @@ async def _prepare(
             video_duration = _decoded_video_duration(decoded.stdout)
             if video_duration is None and video_stream_durations:
                 video_duration = max(video_stream_durations)
+            if video_duration is None:
+                video_duration = await _probe_initial_video_duration(settings, limits, snapshot)
             if video_duration is None:
                 raise InvalidMedia("Missing decoded video duration") from None
             if video_duration > settings.max_shared_duration_seconds:
