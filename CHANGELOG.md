@@ -12,8 +12,9 @@
   an observed empty result is `no_speech`, not a failure. Each model reserves its
   own quota, and a model whose outcome is unknown is never sent the same audio
   again. `speech.reason` gains `offline`, `invalid_response`, `missing_audio`,
-  `chunk_exceeds_file_cap`, `model_unavailable` and `no_speech` (additive, contract
-  stays `0.2.0-draft`); the Android enum mirrors them. Owner speech retry now applies
+  `chunk_exceeds_file_cap`, `model_unavailable` and `no_speech`; the contract moves
+  to `0.3.0-draft` because the breaking-change gate counts new response enum
+  values, and the Android enum mirrors them. Owner speech retry now applies
   only after both models were refused for quota with no uncertain attempt. New
   `OVRLY_GROQ_FALLBACK_MODEL` setting; both model settings default to the RFC-D27
   models. Live hosted speech stays disabled by default.

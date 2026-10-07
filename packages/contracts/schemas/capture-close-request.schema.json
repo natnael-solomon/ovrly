@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft. Additive BE-06 endpoint contract; requires Android/backend review.",
+  "$comment": "Ovrly contracts 0.3.0-draft. Additive BE-06 endpoint contract; requires Android/backend review.",
   "title": "CaptureCloseRequest",
   "description": "Close capture. New chunks are rejected, identical stored retries remain available. True preserves queued research; false requests cooperative cancellation without removing published results. Identical close requests replay; a different effective duration or choice returns CAPTURE_CLOSE_CONFLICT. Close remains available after the upload window expires.",
   "type": "object",

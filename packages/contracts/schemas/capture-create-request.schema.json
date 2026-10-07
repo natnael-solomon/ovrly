@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft. Additive BE-06 endpoint contract; requires Android/backend review.",
+  "$comment": "Ovrly contracts 0.3.0-draft. Additive BE-06 endpoint contract; requires Android/backend review.",
   "title": "CaptureCreateRequest",
   "description": "POST /v1/captures with an owner-scoped Idempotency-Key creates one capture investigation. Replays return the original open, empty session. Same key with a different chunk duration conflicts.",
   "type": "object",

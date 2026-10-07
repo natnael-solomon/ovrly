@@ -9,7 +9,7 @@ Late text may enrich eligible input without redoing speech. Empty OCR, missing
 delivery and frame failures remain distinct; sampled text never proves continuous
 coverage. No analysis state implies claim reconciliation, research or a report.
 
-**Version `0.2.0-draft` (pre-1.0).** Shared JSON Schema definitions and synthetic
+**Version `0.3.0-draft` (pre-1.0).** Shared JSON Schema definitions and synthetic
 fixtures that the Android client and the backend build from. This package was
 started by BE-13 ([#67](https://github.com/natnael-solomon/ovrly/issues/67)) with
 the voice-actions slice. BE-03 ([#15](https://github.com/natnael-solomon/ovrly/issues/15))
@@ -224,8 +224,9 @@ last attempt's: `quota_exhausted` (gap `ASR_QUOTA_EXHAUSTED`), `unknown_outcome`
 (gap `ASR_OUTCOME_UNKNOWN`) for interrupted calls that cannot be reconciled, or
 `provider_unavailable`, `offline`, `invalid_response`, `model_unavailable`,
 `missing_audio` and `chunk_exceeds_file_cap` (gap `ASR_UNAVAILABLE`). The new
-reasons are additive enum values, so `VERSION` stays `0.2.0-draft`; Android maps
-any newer value to `UNKNOWN`. Neither a quota reset nor polling retries old speech. Successful
+reasons are new response enum values, which the `oasdiff` gate classifies as
+breaking, so BE-07b bumps `VERSION` to `0.3.0-draft`. Android maps any newer
+value to `UNKNOWN`. Neither a quota reset nor polling retries old speech. Successful
 speech leaves investigation state queued for later analysis; media coverage
 remains the original preparation facts. Partial analysis is described at the
 top of this file and owner retry in the schema index; Android speech parsing is
@@ -790,13 +791,16 @@ future values to `UNKNOWN` without discarding the rest of the poll response.
 - The contract version lives in `VERSION`, in `openapi.json` `info.version` and
   in each schema's `$comment`. BE-06 bumps it to `0.2.0-draft`: the new capture
   source expands the investigation response union, which `oasdiff` classifies
-  as breaking for clients that only understand URL/upload sources. Android's
+  as breaking for clients that only understand URL/upload sources. BE-07b (#117)
+  bumps it to `0.3.0-draft`: `oasdiff` classifies the new `speech_reason`
+  response values as breaking (`response-property-enum-value-added`). Android's
   `ContractJson.CONTRACT_VERSION` and `VoiceActionCodec.CONTRACT_VERSION`
   must equal `VERSION`. Voice payloads and existing session/chunk shapes are unchanged.
 - A breaking change (removing or renaming a field, narrowing a type or an
   enum, adding a required field, changing an error code name) requires a
   version bump in the same PR. Adding an optional field or a new enum value is
-  additive, but clients must already tolerate unknown enum values.
+  additive, but clients must already tolerate unknown enum values. `oasdiff` still reports a new
+  value in a response enum as breaking, so such a change bumps `VERSION` too.
 - `compat.py` with pinned `oasdiff` fails a breaking change without a bump in
   **Contract checks**; reviewers still read the diff, because a tool cannot
   judge whether a renamed enum value was intended.

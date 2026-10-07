@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Mirrors backend SpeechRetryResponse.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Mirrors backend SpeechRetryResponse.",
   "title": "Speech retry response",
   "description": "The outcome recorded once per Idempotency-Key. No queue, provider or quota-account identifiers are exposed; read the investigation for speech and analysis progress.",
   "type": "object",

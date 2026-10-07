@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Ovrly API",
-    "version": "0.2.0-draft",
+    "version": "0.3.0-draft",
     "summary": "Contract between the Android client and the backend.",
-    "description": "Ovrly contracts 0.2.0-draft (pre-1.0). Shared-media investigation reads derive state from the intake job (queued/leased -> queued, running -> running, failed -> failed with PROCESSING_FAILED, cancelled/deleted -> cancelled). Capture progress uses GET /v1/captures/{capture_id}; media analysis and claim extraction are not implemented yet. Every schema is a reference into schemas/*.schema.json so the OpenAPI document, the JSON Schema fixtures and the Android models cannot drift from each other. Every error response uses the shared error shape; stage-specific error codes are listed per operation and must be SCREAMING_SNAKE_CASE. Paths listed here are those the backend serves today (BE-05, #19, including account linking from BC-D07, the owner-scoped job actions from BE-04 part 3, #75, and incremental capture intake from BE-06, #24) plus the report versions, explicit saves and POST /v1/voice/actions of BE-10 (#33; the voice contract is BE-13, #67). Reanalysis and the export payload are BE-10 too.",
+    "description": "Ovrly contracts 0.3.0-draft (pre-1.0). Shared-media investigation reads derive state from the intake job (queued/leased -> queued, running -> running, failed -> failed with PROCESSING_FAILED, cancelled/deleted -> cancelled). Capture progress uses GET /v1/captures/{capture_id}; media analysis and claim extraction are not implemented yet. Every schema is a reference into schemas/*.schema.json so the OpenAPI document, the JSON Schema fixtures and the Android models cannot drift from each other. Every error response uses the shared error shape; stage-specific error codes are listed per operation and must be SCREAMING_SNAKE_CASE. Paths listed here are those the backend serves today (BE-05, #19, including account linking from BC-D07, the owner-scoped job actions from BE-04 part 3, #75, and incremental capture intake from BE-06, #24) plus the report versions, explicit saves and POST /v1/voice/actions of BE-10 (#33; the voice contract is BE-13, #67). Reanalysis and the export payload are BE-10 too.",
     "license": {
       "name": "PolyForm Noncommercial 1.0.0",
       "identifier": "PolyForm-Noncommercial-1.0.0"

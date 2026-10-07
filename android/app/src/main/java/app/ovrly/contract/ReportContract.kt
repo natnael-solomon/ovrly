@@ -14,7 +14,7 @@ import kotlinx.serialization.UseSerializers
 
 /*
  * Typed read models for `report-version.schema.json`, `claim.schema.json`,
- * `evidence.schema.json` and `assessment.schema.json` (contract 0.2.0-draft). Constructors
+ * `evidence.schema.json` and `assessment.schema.json` (contract 0.3.0-draft). Constructors
  * enforce the schema's lengths, patterns and the cross-references the schema descriptions
  * state, so an instance that exists is one the contract allows; a claim says nothing about
  * truth and a report has no verdict. Parse with [InvestigationCodec].

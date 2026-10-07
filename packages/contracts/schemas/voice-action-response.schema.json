@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Error code names are final only after review with the BE-10 (#33) owner.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Error code names are final only after review with the BE-10 (#33) owner.",
   "title": "VoiceActionResponse",
   "description": "Response body for POST /v1/voice/actions. Either the action was accepted and executed, or it was denied with a typed error. The message is always present and safe to speak or show in the overlay.",
   "type": "object",

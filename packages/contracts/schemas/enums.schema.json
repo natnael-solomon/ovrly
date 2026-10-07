@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Ovrly contracts 0.2.0-draft (pre-1.0). Every closed vocabulary of the contract, one $def each, so the Android models (#62) map each one to an enum with an UNKNOWN fallback. Removing or renaming a value is a breaking change; adding one is additive but read-side parsers must already tolerate it. The source of each list is named in its description.",
+  "$comment": "Ovrly contracts 0.3.0-draft (pre-1.0). Every closed vocabulary of the contract, one $def each, so the Android models (#62) map each one to an enum with an UNKNOWN fallback. Removing or renaming a value is a breaking change; adding one is additive but read-side parsers must already tolerate it. The source of each list is named in its description.",
   "title": "Enums",
   "description": "Definitions only; this file is not a payload schema. Read-model fields (investigation, job, report version, claim, evidence, assessment, capture session) tolerate values outside these lists by mapping them to UNKNOWN, never to a success or finding state. Request fields are validated strictly by the server.",
   "$defs": {
