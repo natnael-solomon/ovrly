@@ -480,7 +480,7 @@ async def test_terminal_provider_outcomes_are_safe_and_charge_conservatively(
 
 
 async def test_video_without_audio_skips_groq_even_when_enabled(harness, tmp_path):
-    video = tmp_path / "silent.mkv"
+    video = tmp_path / "silent.avi"
     generated = await run_command(
         [
             "ffmpeg",
@@ -493,7 +493,7 @@ async def test_video_without_audio_skips_groq_even_when_enabled(harness, tmp_pat
             "-t",
             "1",
             "-c:v",
-            "ffv1",
+            "mpeg4",
             str(video),
         ],
         CommandLimits(10, 5, 65536, 1048576),

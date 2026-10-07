@@ -415,7 +415,7 @@ async def test_media_failures_are_safe_and_visible(harness, tmp_path, content, o
 
 
 async def test_silent_video_preserves_pending_text_and_absent_speech(harness, tmp_path):
-    video = tmp_path / "silent.mkv"
+    video = tmp_path / "silent.avi"
     generated = await run_command(
         [
             "ffmpeg",
@@ -428,7 +428,7 @@ async def test_silent_video_preserves_pending_text_and_absent_speech(harness, tm
             "-t",
             "1",
             "-c:v",
-            "ffv1",
+            "mpeg4",
             str(video),
         ],
         CommandLimits(10, 5, 65536, 1048576),
