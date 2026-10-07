@@ -529,6 +529,12 @@ internal enum class SpeechReason(val wireName: String) {
     UNKNOWN_OUTCOME("unknown_outcome"),
     PROVIDER_UNAVAILABLE("provider_unavailable"),
     CANCELLED("cancelled"),
+    OFFLINE("offline"),
+    INVALID_RESPONSE("invalid_response"),
+    MISSING_AUDIO("missing_audio"),
+    CHUNK_EXCEEDS_FILE_CAP("chunk_exceeds_file_cap"),
+    MODEL_UNAVAILABLE("model_unavailable"),
+    NO_SPEECH("no_speech"),
     UNKNOWN("");
 
     companion object {

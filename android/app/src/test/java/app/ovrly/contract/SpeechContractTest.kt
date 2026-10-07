@@ -43,6 +43,18 @@ class SpeechContractTest {
     }
 
     @Test
+    fun everyUnavailableReasonAndNoSpeechAreTypedAndFutureReasonsAreUnknown() {
+        for (reason in SpeechReason.entries.filter { it != SpeechReason.UNKNOWN }) {
+            val value = speech.replace("\"reason\":null", "\"reason\":\"${reason.wireName}\"")
+            assertEquals(reason, parse(value).speech?.reason)
+        }
+        assertEquals(
+            SpeechReason.UNKNOWN,
+            parse(speech.replace("\"reason\":null", "\"reason\":\"future\"")).speech?.reason
+        )
+    }
+
+    @Test
     fun invalidSpeechIsRejectedRatherThanDroppedAsAnAdditiveField() {
         for (invalid in listOf(
             speech.replace("\"processing_version\":1", "\"processing_version\":1.5"),

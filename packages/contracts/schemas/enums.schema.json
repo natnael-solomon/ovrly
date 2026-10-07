@@ -50,12 +50,12 @@
     },
     "speech_reason": {
       "type": "string",
-      "description": "Why speech is unavailable. An unknown outcome is never automatically resubmitted. Source: backend SpeechReason.",
-      "enum": ["disabled", "no_audio_track", "quota_exhausted", "unknown_outcome", "provider_unavailable", "cancelled"]
+      "description": "Why speech is unavailable (ASR_UNAVAILABLE reasons follow evaluation/asr_policy.py: the last of the primary and fallback model attempts), or no_speech on a completed result with no recognized speech. An unknown outcome is never resubmitted to the same model. Source: backend SpeechReason.",
+      "enum": ["disabled", "no_audio_track", "quota_exhausted", "unknown_outcome", "provider_unavailable", "cancelled", "offline", "invalid_response", "missing_audio", "chunk_exceeds_file_cap", "model_unavailable", "no_speech"]
     },
     "asr_provider": {
       "type": "string",
-      "description": "Hosted transcription provider. Source: backend ASRProvider; no fallback.",
+      "description": "Hosted transcription provider. Source: backend ASRProvider; the RFC-D27 fallback is a second model of the same provider, never another provider.",
       "enum": ["groq"]
     },
     "job_state": {

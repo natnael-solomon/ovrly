@@ -10,7 +10,7 @@
     "protocol_version": { "const": 1 },
     "investigation_id": { "$ref": "common.schema.json#/$defs/uuid" },
     "outcome": {
-      "description": "accepted: missing speech is queued after a fresh quota reservation. quota_exhausted: quota is still exhausted; partial results stay unchanged and no provider call is made. already_complete: speech already succeeded. in_progress: speech is already queued or running. not_eligible: nothing quota-blocked can be retried (no audio, another failure, an uncertain provider outcome, changed provider settings, a missing or changed source or prepared audio, or cancelled or deleted work).",
+      "description": "accepted: missing speech is queued after a fresh quota reservation for the primary or fallback model. quota_exhausted: quota is still exhausted for both models; partial results stay unchanged and no provider call is made. already_complete: speech already succeeded. in_progress: speech is already queued or running. not_eligible: nothing quota-blocked can be retried (no audio, another failure, an uncertain provider outcome on either model, changed provider settings, a missing or changed source or prepared audio, or cancelled or deleted work).",
       "type": "string",
       "enum": ["accepted", "quota_exhausted", "not_eligible", "already_complete", "in_progress"]
     }
