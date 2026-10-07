@@ -490,7 +490,8 @@ All product routes live under `/v1`, return JSON and use the shared contract
 error shape from
 [`packages/contracts/schemas/error.schema.json`](../packages/contracts/schemas/error.schema.json):
 `{code, message, retryable, action, request_id}` with `SCREAMING_SNAKE_CASE`
-codes. Validation failures (422 `VALIDATION_FAILED`), unknown routes
+codes. Validation failures (422 `VALIDATION_FAILED`, naming the invalid paths but
+never an unknown key the client sent), unknown routes
 (`NOT_FOUND`), database outages (503 `DATABASE_UNAVAILABLE`) and unexpected
 failures (500 `INTERNAL_ERROR`) use the same shape; messages never include
 internals, inputs or secrets. Every response carries `X-Request-Id`; a
@@ -692,7 +693,8 @@ is server-side only and never logged.
    - ranks candidates with BM25 over title and abstract (`services/evidence/bm25.py`;
      no embeddings, vector store or reranker model) and keeps the top passages;
    - reads the abstract by default and, for the top few, open-access full text from
-     arXiv HTML or Europe PMC, keeping the best-matching paragraph; the inspection level
+     arXiv HTML or Europe PMC through the SSRF guard (see
+     [Security tests](#security-tests-repo-06-28)), keeping the best-matching paragraph; the inspection level
      (`metadata_only`, `abstract_only`, `full_text`) says what was actually read;
    - asks Crossref (`filter=updates:{doi}`) whether a journal DOI was retracted,
      withdrawn or corrected; arXiv-only papers and failed lookups stay `unknown`.
@@ -850,6 +852,31 @@ Tests in `tests/test_quotas.py` cover atomic admission, replay, daily reset, sha
 byte reservations, provider pause, multi-process capacity, waiting for a busy
 request slot, the admission lock against a concurrent capture-stage publish
 and failure cleanup using synthetic data and local PostgreSQL.
+
+## Security tests (REPO-06, #28)
+
+The RFC section 15 threat-model controls are negative tests in CI:
+
+| Control | Implementation | Tests |
+| --- | --- | --- |
+| SSRF on outbound fetches | `services/providers/egress.py`. Production evidence clients use `GuardedTransport` (no environment proxies): each connection resolves the host once, refuses it if **any** answer is private, loopback, link-local (including `169.254.169.254`), shared (`100.64.0.0/10`), reserved, multicast, IPv6 unique-local/site-local or an IPv6 form embedding such an IPv4 address (mapped, compatible, NAT64, 6to4, Teredo), and dials exactly the checked address while TLS still verifies the host name, so DNS rebinding cannot reach an internal host. `fetch` validates every URL (only `http`/`https`, no credentials, default ports, no `localhost`/`.internal`/`.local`/single-label names or internal literals including legacy numeric IPv4 spellings), follows at most 3 redirects with each hop re-checked and no HTTPS to HTTP downgrade, and bodies are capped (`Content-Length` and bytes read, 4 MiB). A refusal is `UnsafeUrl` (a `ProviderError`) with a fixed `reason`; neither URL nor address is logged. Open-access full text (arXiv, Europe PMC) goes through `fetch`; any future fetch of a provider- or user-supplied URL (for example #20 URL intake) must too. | `tests/test_security_ssrf.py` (database-free) |
+| Object authorization | Owner-scoped loaders; other owners get the same 404 as a missing object. | `tests/test_security_authz.py`: every OpenAPI route with a path parameter x {owner, other owner, fresh guest, unauthenticated, unknown credential}; a new object route without a case fails the test. Every non-public route requires a credential; lists and voice actions never reveal another owner's objects. |
+| Prompt injection | Content is data in every prompt; no tools; replies are schema-checked; citations validated before publish; credential-shaped text in a rationale is redacted. | `tests/test_security_prompt_injection.py` runs `evaluation/adversarial/prompt-injection.json` (database-free). |
+| Media intake limits | Declared and streamed byte limits, raw (never decoded) bodies, hash verification, multipart limits, worker byte re-check. `MEDIA_INVALID` from a codec stage is **blocked by #20** and skipped with that reason. | `tests/test_security_media.py` |
+| Quota abuse | Opt-in #22 quotas, policy unchanged. | `tests/test_security_quotas.py`: N+1 concurrent checks, oversize and racing uploads, idempotency replay storms for investigations, reanalyses and captures with exactly one record and one charge. |
+| Safe errors | `services/api/errors.py`; validation messages name paths, never unknown client keys. | `tests/test_security_errors.py` drives crashes, database and timeout failures, framework errors and hostile validation input; its `assert_safe_error` (no traceback, internal host, prompt or credential) is applied to every error the other security tests provoke. |
+
+```sh
+uv run --frozen pytest -q tests/test_security_ssrf.py tests/test_security_prompt_injection.py \
+  tests/test_security_errors.py
+OVRLY_TEST_DATABASE_URL='postgresql+psycopg://ovrly:local-development-only@127.0.0.1:55432/ovrly' \
+  uv run --frozen pytest -q tests/test_security_authz.py tests/test_security_media.py \
+  tests/test_security_quotas.py
+```
+
+The first command needs no database. Pointing `OVRLY_SCHOLARXIV_BASE_URL` at a
+loopback or private mock now fails closed in production clients; tests inject a mock
+transport instead.
 
 ## Local checks
 

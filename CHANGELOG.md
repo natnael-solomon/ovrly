@@ -14,6 +14,18 @@
   are needed (owner action). Per decision 0003, a report saved on one device cannot yet be
   restored on another device.
 
+- REPO-06 security tests (#28): outbound evidence fetches now go through an SSRF
+  guard that resolves each host once, dials only the checked public address (private,
+  loopback, link-local and metadata, shared, IPv6 unique-local and IPv4-embedding
+  addresses are refused, which defeats DNS rebinding), re-checks every redirect hop
+  (at most three, no HTTPS to HTTP downgrade), allows only http(s) on default ports and
+  caps response size. New negative tests cover that guard, an authorization matrix
+  generated from the OpenAPI paths, prompt-injection fixtures under
+  `evaluation/adversarial/`, a media intake fuzz smoke, quota abuse and error-response
+  hygiene. Validation errors no longer echo unknown client field names, and
+  credential-shaped text is redacted from assessment notes. `MEDIA_INVALID` from a codec
+  stage remains blocked by #20.
+
 - Deployment gates for the EthioDeploy backend (#21): `/healthz` now also fails on a
   schema behind the shipped migration head, an unwritable upload directory or a stuck
   embedded worker (no poll or lease extension for two minutes), and reports queue depth,

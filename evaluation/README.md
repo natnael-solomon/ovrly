@@ -27,7 +27,9 @@ the local snapshot completes
 [RES-01](https://github.com/natnael-solomon/ovrly/issues/8).
 `examples/` contains invented text, not clips, consent, independent human
 judgments, or measured results. Neither examples nor draft validation yields
-accuracy or latency measurements.
+accuracy or latency measurements. [`adversarial/`](adversarial/README.md) holds
+invented prompt-injection fixtures for the backend security tests (#28); it is
+not evaluation data and is outside the validator's scope.
 
 The real set requires 10-20 English clips. Live-style clips are limited to 180,000 ms; shared-style clips to 600,000 ms. Dev supports iteration; test is a frozen holdout. Prompt-tuning examples must be separate from both, including renamed copies. There is no training set here.
 

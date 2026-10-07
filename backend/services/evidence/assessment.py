@@ -9,6 +9,7 @@ source settles anything. Every version is citation-checked before it may be publ
 """
 
 import hashlib
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Literal
@@ -39,6 +40,11 @@ LABELS: dict[RouterLabel, Relation] = {
 }
 NOTE_LIMIT = 600
 SUMMARY_LIMIT = 600
+# Credential-shaped text a manipulated model might echo into a published note (#28). The
+# model never receives a credential; this keeps a lookalike out of the report anyway.
+_CREDENTIAL = re.compile(
+    r"(?i)\b(?:sxv|ovk|gsk|sk)_[A-Za-z0-9_\-]{6,}|\bbearer\s+\S{8,}|\bAIza[0-9A-Za-z_\-]{20,}"
+)
 
 
 class CitationInvalid(Exception):
@@ -106,7 +112,7 @@ class ClaimOutcome:
 
 
 def _note(rationale: str) -> str:
-    text = " ".join(rationale.split())
+    text = _CREDENTIAL.sub("[redacted]", " ".join(rationale.split()))
     return text if len(text) <= NOTE_LIMIT else text[: NOTE_LIMIT - 3].rstrip() + "..."
 
 
