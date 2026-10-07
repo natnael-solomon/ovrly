@@ -2,16 +2,29 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
+
+from services.claims import (
+    Extraction as Extraction,
+)
+from services.claims import (
+    Occurrence as Occurrence,
+)
+from services.claims import (
+    Offset,
+)
+from services.claims import (
+    SourceRef as SourceRef,
+)
+from services.claims import (
+    StrictModel as StrictModel,
+)
+from services.claims import (
+    Text as Text,
+)
 
 SCHEMA_VERSION = "be01-experimental-v2"
-Text = Annotated[str, Field(min_length=1, pattern=r"\S")]
 Identifier = Annotated[str, Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")]
-Offset = Annotated[int, Field(ge=0)]
-
-
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class Envelope(StrictModel):
@@ -88,70 +101,6 @@ class Dataset(StrictModel):
                     )
                 observations[item.id] = item
         return self
-
-
-class SourceRef(StrictModel):
-    observation_id: Text
-    start_char: Offset
-    end_char: Offset
-
-    @model_validator(mode="after")
-    def ordered(self) -> "SourceRef":
-        if self.end_char <= self.start_char:
-            raise ValueError("Empty or inverted text span")
-        return self
-
-
-class Occurrence(StrictModel):
-    proposition: Text
-    taxonomy: Literal[
-        "empirical", "causal", "documentary", "predictive", "normative", "mixed", "unclear"
-    ]
-    source_refs: Annotated[list[SourceRef], Field(min_length=1)]
-    context_refs: list[SourceRef]
-    assertion_mode: Literal[
-        "asserted", "reported", "questioned", "hypothetical", "counterfactual", "unclear"
-    ]
-    speaker_commitment: Literal["endorsed", "rejected", "uncommitted", "unclear"]
-    attributed_to: Text | None
-    eligibility_reason: Literal[
-        "factual-claim",
-        "factual-premise",
-        "opinion",
-        "quoted-not-endorsed",
-        "insufficient-context",
-        "not-a-claim",
-    ]
-    uncertainty_flags: list[
-        Literal[
-            "unresolved-reference",
-            "missing-context",
-            "ambiguous-attribution",
-            "ambiguous-commitment",
-            "ambiguous-meaning",
-            "source-text-conflict",
-        ]
-    ]
-
-    @model_validator(mode="after")
-    def consistent(self) -> "Occurrence":
-        eligible = self.eligibility_reason in {"factual-claim", "factual-premise"}
-        if self.taxonomy == "normative" and eligible:
-            raise ValueError("A pure normative judgment is not empirically eligible")
-        if self.assertion_mode in {"questioned", "hypothetical"} and eligible:
-            raise ValueError("A question or invented scenario is not an asserted factual event")
-        if (
-            self.eligibility_reason == "quoted-not-endorsed"
-            and self.speaker_commitment == "endorsed"
-        ):
-            raise ValueError("An endorsed claim cannot be excluded as not endorsed")
-        if len(set(self.uncertainty_flags)) != len(self.uncertainty_flags):
-            raise ValueError("Duplicate uncertainty flags")
-        return self
-
-
-class Extraction(StrictModel):
-    occurrences: list[Occurrence]
 
 
 def grounding_errors(output: Extraction, window: Window) -> list[str]:

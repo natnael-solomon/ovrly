@@ -48,6 +48,10 @@ class RateLimited(RetryableError):
         self.retry_after_seconds = retry_after_seconds
 
 
+class ProviderCooldown(RateLimited):
+    """A validated provider minimum, not an exponential-backoff ceiling."""
+
+
 class NonRetriableInput(RetryableError):
     """The input can never succeed (unsupported media, rejected content): fail now."""
 
@@ -137,6 +141,8 @@ class RetryPolicy:
         if retry_class is RetryClass.UNKNOWN_OUTCOME and not request_id_recorded:
             return RetryDecision(retry_class, count, None)
         if isinstance(error, RateLimited) and error.retry_after_seconds is not None:
+            if isinstance(error, ProviderCooldown):
+                return RetryDecision(retry_class, count, error.retry_after_seconds)
             hinted = min(max(error.retry_after_seconds, 0), self.max_backoff_seconds)
             return RetryDecision(retry_class, count, hinted)
         return RetryDecision(retry_class, count, self.backoff(count))

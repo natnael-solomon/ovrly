@@ -8,11 +8,21 @@ from sqlalchemy import func, select, update
 from test_account_link import LINK, FakeVerifier, link_body
 from test_intake_api import CONTENT, completed_upload, declare_upload, guest
 
+from recovery.test_claim_extraction import window
+from recovery.test_incremental_budget import policy
 from services.api.main import create_app
 from services.jobs.handlers import JobContext
 from services.jobs.models import job_results, jobs
 from services.jobs.queue import JobQueue, PublishRejected, StageKey
-from services.models import credentials, idempotency_keys, investigations, principals, uploads
+from services.models import (
+    credentials,
+    extraction_runs,
+    idempotency_keys,
+    investigations,
+    principals,
+    uploads,
+)
+from services.pipeline.incremental import submit_observations
 from services.privacy import RETENTION_STAGE, Retention
 from services.settings import Settings
 from services.worker.runtime import Worker
@@ -92,6 +102,18 @@ async def test_retention_erases_whole_workspace_and_preserves_other_owner(privac
     headers, upload_id, investigation_id, owner_id = await seed(app, client)
     other_headers, _, other_investigation, other_owner = await seed(app, client)
     queue = JobQueue(app.state.database)
+    async with app.state.database.engine.begin() as connection:
+        for identifier, owner in ((investigation_id, owner_id), (other_investigation, other_owner)):
+            await submit_observations(
+                connection,
+                queue,
+                identifier,
+                owner,
+                policy=policy(batch_observations=2),
+                observations=window().observations,
+                closed=False,
+                hosted_processing_approved=True,
+            )
     stage = uuid.uuid4().hex
     async with app.state.database.engine.begin() as connection:
         queued = await queue.enqueue(
@@ -113,6 +135,7 @@ async def test_retention_erases_whole_workspace_and_preserves_other_owner(privac
             (credentials, credentials.c.principal_id == owner_id),
             (uploads, uploads.c.id == upload_id),
             (investigations, investigations.c.id == investigation_id),
+            (extraction_runs, extraction_runs.c.investigation_id == investigation_id),
             (idempotency_keys, idempotency_keys.c.owner_id == owner_id),
             (job_results, job_results.c.job_id == queued.job_id),
         ):
@@ -123,6 +146,11 @@ async def test_retention_erases_whole_workspace_and_preserves_other_owner(privac
         assert tombstone.input_hash == queued.job_id.hex
         assert await connection.scalar(
             select(principals.c.id).where(principals.c.id == other_owner)
+        )
+        assert await connection.scalar(
+            select(extraction_runs.c.investigation_id).where(
+                extraction_runs.c.investigation_id == other_investigation
+            )
         )
     assert len(list(app.state.settings.storage_dir.iterdir())) == 1
     assert (

@@ -116,6 +116,43 @@ from speech/captions. No server OCR, timeout or aggregation is added. Shared
 synthetic fixtures exercise the approved backend protocol; Android upload sending
 and physical-device end-to-end verification remain separate.
 
+BE-08 (#25) supplies the internal `enqueue_extraction` handoff and typed
+`LlmAdapter` boundary. One versioned timed observation window yields
+source-grounded provisional occurrences, with optional shared-contract
+interpretation metadata and no verdicts. Production activation is off until
+route eligibility and input authorization are verified. `jobs.stage_data`
+persists attempt allowance and validated artifacts; an unresolved provider
+attempt fails explicitly instead of repeating inference. `StageResult` adds
+an optional transactional publication callback to the existing dictionary
+handler contract, so extraction report and job-result publication share the
+queue fence and transaction. The observation-envelope timing, strict grounding,
+single repair and whole-input reconciliation boundaries are described
+in the [backend README](../backend/README.md#provisional-claim-extraction).
+Eligible provider failures now use durable, bounded Scholarxiv recovery and
+independently authorized, extraction-only Groq fallback. Restrictions and
+unknown outcomes fail closed. Shared pre-send accounting records every
+completion/decision/feedback request. The internal `submit_observations` producer
+adds bounded adaptive overlapping batches and a durable per-investigation ledger
+in `extraction_runs`. Pre-send reservations share the job-checkpoint transaction;
+concurrent windows cannot spend the reconciliation reserve. Cumulative provisional
+publication deduplicates exact source identities without collapsing later
+repetitions. Owner-scoped investigation/capture reads expose pending, processed,
+skipped and failed source intervals separately from findings. Capture Stop fences
+this fixture-backed path too. Reports expose optional diagnostic processing
+provenance. Numeric production budgets and real ingestion remain
+gated; the legacy single-window handoff does not automatically gain run budgeting.
+
+`services/pipeline/reconciliation.py` registers accepted upstream work and schedules
+one quality-only job after sealed observations and terminal upstream/extraction work.
+Captures additionally require actual close and settled chunk work. The shared
+pre-send ledger protects total capacity; lease-safe provider waits and invalid-output
+feedback are shared with extraction. No available context is silently truncated.
+Durable artifacts, capture Stop and report-snapshot fencing prevent resends and stale
+publication. Corrections retain linked appearances and immutable history, remove stale
+evidence/assessments, and hand changed claim IDs to later reassessment. Report
+interpretation finality and live reconciliation failure are additive contract metadata,
+not completed assessment or full modality coverage.
+
 `services/privacy.py` schedules opt-in retention work on the existing durable
 job engine in both worker entry points. It deletes an expired principal's
 workspace and stored upload bytes, cascades replay/credential rows, and uses
@@ -144,9 +181,10 @@ then commits each verified receipt and `media_validation` job together.
 Capture polling reports missing intervals and client-declared speech/text
 coverage, separately from processing. Both worker modes verify each chunk's
 stored bytes before close and atomically enqueue `asr` and `device_text`;
-publication of both queues one `claim_extraction` job for that chunk.
-The handlers for those stages remain #20/#25, so unimplemented stages stay
-queued. Stage keys preserve per-capture/sequence idempotency, publication shares
+publication of both queues one `claim_extraction` job for that chunk, which
+admits the chunk's committed speech and device text to the extraction ledger when
+extraction is enabled. Stage keys preserve
+per-capture/sequence idempotency, publication shares
 the queue's lease fence, and Stop cancels downstream work under the session lock.
 Capture polling derives per-claim states from the latest report, including
 explicitly labelled development fixtures; validation alone is not analysis.

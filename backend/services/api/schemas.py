@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
+from services.claims import Interpretation
 from services.jobs.retries import RetryClass
 from services.jobs.states import JobState
 
@@ -259,6 +260,13 @@ class Claim(BaseModel):
     original_text: str
     proposition: str
     correction: ClaimCorrection | None
+    interpretation: Interpretation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    corrects_occurrence_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    superseded_by_occurrence_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class EvidenceSource(BaseModel):
@@ -299,6 +307,34 @@ class Assessment(BaseModel):
     summary: str
 
 
+class ProcessingAttempt(BaseModel):
+    """Diagnostic provenance only; outcome strings never constitute an assessment."""
+
+    provider: str = Field(min_length=1, pattern=r"\S")
+    model: str | None
+    decision_id: str | None
+    task: str = Field(min_length=1, pattern=r"\S")
+    outcome: str = Field(min_length=1, pattern=r"\S")
+    prompt_tokens: int | None = Field(ge=0, le=2147483647)
+    completion_tokens: int | None = Field(ge=0, le=2147483647)
+    total_tokens: int | None = Field(ge=0, le=2147483647)
+    thinking_leaked: bool
+    fenced: bool
+    repair: bool
+    feedback: str | None
+
+
+class ReconciliationSummary(BaseModel):
+    status: Literal["complete"]
+    coverage_limited: bool
+    reassessment_claim_ids: list[str]
+
+
+class ReconciliationProgress(BaseModel):
+    status: Literal["waiting", "checking", "complete", "failed", "cancelled"]
+    error: SafeError | None
+
+
 class ReportVersion(BaseModel):
     """Immutable report version; corrections and expansions create a new one."""
 
@@ -315,6 +351,12 @@ class ReportVersion(BaseModel):
     # True only for a development stub built from the contract fixtures (OVRLY_STUB_REPORTS);
     # such a version is never a check of the media and clients label it as a fixture.
     fixture: bool = False
+    processing_attempts: list[ProcessingAttempt] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    reconciliation: ReconciliationSummary | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class JobSummary(BaseModel):
@@ -337,6 +379,33 @@ class InvestigationReadModel(InvestigationResponse):
     processing_status: ProcessingStatus
     job: JobSummary | None
     report: ReportVersion | None
+    extraction_progress: "ExtractionProgress | None" = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    reconciliation_progress: ReconciliationProgress | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+
+class ObservationProgress(Interval):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    observation_id: str
+    status: Literal["pending", "processed", "skipped", "failed"]
+    reason: str | None
+
+
+class ExtractionProgress(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    closed: bool
+    requests_used: int = Field(ge=0, le=2147483647)
+    tokens_reserved: int = Field(ge=0, le=2147483647)
+    max_requests: int = Field(ge=1, le=2147483647)
+    max_tokens: int = Field(ge=1, le=2147483647)
+    reconciliation_requests: int = Field(ge=1, le=2147483647)
+    reconciliation_tokens: int = Field(ge=1, le=2147483647)
+    observations: list[ObservationProgress]
 
 
 class InvestigationListResponse(BaseModel):

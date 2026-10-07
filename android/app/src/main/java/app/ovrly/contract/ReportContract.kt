@@ -65,11 +65,20 @@ internal data class Claim(
     @SerialName("original_text")
     val originalText: String,
     val proposition: String,
-    val correction: ClaimCorrection?
+    val correction: ClaimCorrection?,
+    val interpretation: ClaimInterpretation? = null,
+    @SerialName("corrects_occurrence_id")
+    val correctsOccurrenceId: String? = null,
+    @SerialName("superseded_by_occurrence_id")
+    val supersededByOccurrenceId: String? = null
 ) {
     init {
         ContractSyntax.opaqueId("claim.id", id)
         ContractSyntax.opaqueId("claim.occurrence_id", occurrenceId)
+        correctsOccurrenceId?.let { ContractSyntax.opaqueId("claim.corrects_occurrence_id", it) }
+        supersededByOccurrenceId?.let {
+            ContractSyntax.opaqueId("claim.superseded_by_occurrence_id", it)
+        }
         ContractSyntax.text("claim.original_text", originalText, max = MAX_TEXT_LENGTH)
         ContractSyntax.text("claim.proposition", proposition, max = MAX_TEXT_LENGTH)
     }
@@ -211,7 +220,10 @@ internal data class ReportVersion(
     val evidence: List<Evidence>,
     val assessments: List<Assessment>,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-    val fixture: Boolean = false
+    val fixture: Boolean = false,
+    @SerialName("processing_attempts")
+    val processingAttempts: List<ProcessingAttempt>? = null,
+    val reconciliation: ReconciliationSummary? = null
 ) {
     /** True when every claim of this version has an assessment; vacuously true with no claims. */
     val assessesEveryClaim: Boolean

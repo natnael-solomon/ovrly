@@ -54,6 +54,14 @@
     "report": {
       "description": "The latest published report version, or null when nothing has been published. Present for partial and complete; always null for waiting, checking and failed.",
       "oneOf": [{ "type": "null" }, { "$ref": "report-version.schema.json" }]
+    },
+    "reconciliation_progress": {
+      "description": "Separate interpretation progress. A failed reconciliation retains its provisional report and exposes its safe error here, not as a verdict or top-level investigation failure.",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/reconciliation_progress" }]
+    },
+    "extraction_progress": {
+      "description": "Optional observation-level extraction coverage and conservative request/token reservations, not assessment coverage or verified provider quotas.",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/extraction_progress" }]
     }
   },
   "oneOf": [
@@ -86,6 +94,45 @@
     }
   ],
   "$defs": {
+    "reconciliation_progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "error"],
+      "properties": {
+        "status": { "$ref": "enums.schema.json#/$defs/reconciliation_status" },
+        "error": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/safe_error" }] }
+      }
+    },
+    "extraction_progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["closed", "requests_used", "tokens_reserved", "max_requests", "max_tokens", "reconciliation_requests", "reconciliation_tokens", "observations"],
+      "properties": {
+        "closed": { "type": "boolean" },
+        "requests_used": { "$ref": "#/$defs/reservation_count" },
+        "tokens_reserved": { "$ref": "#/$defs/reservation_count" },
+        "max_requests": { "$ref": "#/$defs/positive_budget" },
+        "max_tokens": { "$ref": "#/$defs/positive_budget" },
+        "reconciliation_requests": { "$ref": "#/$defs/positive_budget" },
+        "reconciliation_tokens": { "$ref": "#/$defs/positive_budget" },
+        "observations": { "type": "array", "items": { "$ref": "#/$defs/observation_progress" } }
+      }
+    },
+    "reservation_count": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+    "positive_budget": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+    "observation_progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observation_id", "start_ms", "end_ms", "timebase", "status", "reason"],
+      "properties": {
+        "observation_id": { "type": "string" },
+        "start_ms": { "type": "integer", "minimum": 0 },
+        "end_ms": { "type": "integer", "minimum": 1 },
+        "timebase": { "$ref": "enums.schema.json#/$defs/timebase" },
+        "status": { "$ref": "enums.schema.json#/$defs/extraction_coverage_status" },
+        "reason": { "oneOf": [{ "type": "null" }, { "type": "string" }] }
+      }
+    },
     "coverage": {
       "type": "object",
       "description": "How much of the eligible media has been checked. Never a verdict. The intake placeholder is {\"status\": \"not_started\"}.",

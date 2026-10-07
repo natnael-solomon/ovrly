@@ -35,6 +35,31 @@ class ContractEnumsTest {
     }
 
     private val enums: List<Registered<*>> = listOf(
+        Registered("reconciliation_status", ReconciliationStatus.entries, { it.wireName }) {
+            ReconciliationStatus.fromWire(it)
+        },
+        Registered(
+            "extraction_coverage_status",
+            ExtractionCoverageStatus.entries,
+            { it.wireName }
+        ) {
+            ExtractionCoverageStatus.fromWire(it)
+        },
+        Registered("claim_taxonomy", ClaimTaxonomy.entries, { it.wireName }) {
+            ClaimTaxonomy.fromWire(it)
+        },
+        Registered("assertion_mode", AssertionMode.entries, { it.wireName }) {
+            AssertionMode.fromWire(it)
+        },
+        Registered("speaker_commitment", SpeakerCommitment.entries, { it.wireName }) {
+            SpeakerCommitment.fromWire(it)
+        },
+        Registered("eligibility_reason", EligibilityReason.entries, { it.wireName }) {
+            EligibilityReason.fromWire(it)
+        },
+        Registered("claim_uncertainty", ClaimUncertainty.entries, { it.wireName }) {
+            ClaimUncertainty.fromWire(it)
+        },
         Registered("analysis_status", AnalysisStatus.entries, { it.wireName }) {
             AnalysisStatus.fromWire(it)
         },
@@ -108,6 +133,18 @@ class ContractEnumsTest {
     )
 
     private val mirrors = listOf(
+        Mirror(
+            ReconciliationProgress.serializer().descriptor,
+            INVESTIGATION,
+            "reconciliation_progress"
+        ),
+        Mirror(
+            ReconciliationSummary.serializer().descriptor,
+            "report-version.schema.json",
+            "reconciliation"
+        ),
+        Mirror(ExtractionProgress.serializer().descriptor, INVESTIGATION, "extraction_progress"),
+        Mirror(ObservationProgress.serializer().descriptor, INVESTIGATION, "observation_progress"),
         Mirror(Investigation.serializer().descriptor, INVESTIGATION),
         Mirror(Coverage.serializer().descriptor, INVESTIGATION, "coverage"),
         Mirror(MediaCoverage.serializer().descriptor, INVESTIGATION, "media_coverage"),
@@ -132,8 +169,15 @@ class ContractEnumsTest {
         ),
         Mirror(Job.serializer().descriptor, "job.schema.json"),
         Mirror(ReportVersion.serializer().descriptor, "report-version.schema.json"),
+        Mirror(
+            ProcessingAttempt.serializer().descriptor,
+            "report-version.schema.json",
+            "processing_attempt"
+        ),
         Mirror(Claim.serializer().descriptor, "claim.schema.json"),
         Mirror(ClaimCorrection.serializer().descriptor, "claim.schema.json", "correction"),
+        Mirror(ClaimInterpretation.serializer().descriptor, "claim.schema.json", "interpretation"),
+        Mirror(ClaimSourceRef.serializer().descriptor, "claim.schema.json", "source_ref"),
         Mirror(Evidence.serializer().descriptor, "evidence.schema.json"),
         Mirror(EvidenceSource.serializer().descriptor, "evidence.schema.json", "source"),
         Mirror(Assessment.serializer().descriptor, "assessment.schema.json"),

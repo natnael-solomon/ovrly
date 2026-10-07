@@ -139,6 +139,18 @@ idempotency_keys = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+extraction_runs = Table(
+    "extraction_runs",
+    metadata,
+    Column(
+        "investigation_id",
+        UUID(as_uuid=True),
+        ForeignKey("investigations.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("data", JSONB, nullable=False),
+)
+
 capture_sessions = Table(
     "capture_sessions",
     metadata,

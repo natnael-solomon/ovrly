@@ -2,6 +2,110 @@ package app.ovrly.contract
 
 import kotlinx.serialization.Serializable
 
+@Serializable(with = ClaimTaxonomySerializer::class)
+internal enum class ClaimTaxonomy(val wireName: String) {
+    EMPIRICAL("empirical"),
+    CAUSAL("causal"),
+    DOCUMENTARY("documentary"),
+    PREDICTIVE("predictive"),
+    NORMATIVE("normative"),
+    MIXED("mixed"),
+    UNCLEAR("unclear"),
+    UNKNOWN("");
+
+    companion object {
+        fun fromWire(name: String): ClaimTaxonomy = known(entries, name) { it.wireName }
+    }
+}
+
+@Serializable(with = AssertionModeSerializer::class)
+internal enum class AssertionMode(val wireName: String) {
+    ASSERTED("asserted"),
+    REPORTED("reported"),
+    QUESTIONED("questioned"),
+    HYPOTHETICAL("hypothetical"),
+    COUNTERFACTUAL("counterfactual"),
+    UNCLEAR("unclear"),
+    UNKNOWN("");
+
+    companion object {
+        fun fromWire(name: String): AssertionMode = known(entries, name) { it.wireName }
+    }
+}
+
+@Serializable(with = SpeakerCommitmentSerializer::class)
+internal enum class SpeakerCommitment(val wireName: String) {
+    ENDORSED("endorsed"),
+    REJECTED("rejected"),
+    UNCOMMITTED("uncommitted"),
+    UNCLEAR("unclear"),
+    UNKNOWN("");
+
+    companion object {
+        fun fromWire(name: String): SpeakerCommitment = known(entries, name) { it.wireName }
+    }
+}
+
+@Serializable(with = EligibilityReasonSerializer::class)
+internal enum class EligibilityReason(val wireName: String) {
+    FACTUAL_CLAIM("factual-claim"),
+    FACTUAL_PREMISE("factual-premise"),
+    OPINION("opinion"),
+    QUOTED_NOT_ENDORSED("quoted-not-endorsed"),
+    INSUFFICIENT_CONTEXT("insufficient-context"),
+    NOT_A_CLAIM("not-a-claim"),
+    UNKNOWN("");
+
+    companion object {
+        fun fromWire(name: String): EligibilityReason = known(entries, name) { it.wireName }
+    }
+}
+
+@Serializable(with = ClaimUncertaintySerializer::class)
+internal enum class ClaimUncertainty(val wireName: String) {
+    UNRESOLVED_REFERENCE("unresolved-reference"),
+    MISSING_CONTEXT("missing-context"),
+    AMBIGUOUS_ATTRIBUTION("ambiguous-attribution"),
+    AMBIGUOUS_COMMITMENT("ambiguous-commitment"),
+    AMBIGUOUS_MEANING("ambiguous-meaning"),
+    SOURCE_TEXT_CONFLICT("source-text-conflict"),
+    UNKNOWN("");
+
+    companion object {
+        fun fromWire(name: String): ClaimUncertainty = known(entries, name) { it.wireName }
+    }
+}
+
+internal object ClaimTaxonomySerializer : WireEnumSerializer<ClaimTaxonomy>(
+    "app.ovrly.contract.ClaimTaxonomy",
+    { ClaimTaxonomy.fromWire(it) },
+    ClaimTaxonomy::wireName
+)
+
+internal object AssertionModeSerializer : WireEnumSerializer<AssertionMode>(
+    "app.ovrly.contract.AssertionMode",
+    { AssertionMode.fromWire(it) },
+    AssertionMode::wireName
+)
+
+internal object SpeakerCommitmentSerializer : WireEnumSerializer<SpeakerCommitment>(
+    "app.ovrly.contract.SpeakerCommitment",
+    { SpeakerCommitment.fromWire(it) },
+    SpeakerCommitment::wireName
+)
+
+internal object EligibilityReasonSerializer : WireEnumSerializer<EligibilityReason>(
+    "app.ovrly.contract.EligibilityReason",
+    { EligibilityReason.fromWire(it) },
+    EligibilityReason::wireName
+)
+
+internal object ClaimUncertaintySerializer : WireEnumSerializer<ClaimUncertainty>(
+    "app.ovrly.contract.ClaimUncertainty",
+    { ClaimUncertainty.fromWire(it) },
+    ClaimUncertainty::wireName
+)
+
 /*
  * One Kotlin enum per `$def` in `packages/contracts/schemas/enums.schema.json` (contract
  * 0.2.0-draft). Each lists the schema's values in schema order and ends with UNKNOWN, the

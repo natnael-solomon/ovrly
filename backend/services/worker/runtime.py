@@ -86,6 +86,10 @@ class Worker:
         delay = self.poll_seconds
         while not self._stop.is_set():
             self._touch()
+            if "reconciliation" in self.handlers:
+                from services.pipeline.reconciliation import schedule_reconciliation
+
+                await schedule_reconciliation(self.queue)
             if self.maintenance is not None:
                 await self.maintenance()
             job = await self.queue.claim(self.worker_id, stages, self.lease_seconds)

@@ -10,7 +10,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Header, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
-from sqlalchemy import Row, func, insert, select, update
+from sqlalchemy import Row, func, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.datastructures import FormData, UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
@@ -41,6 +41,8 @@ from services.captures import (
 from services.jobs.models import jobs
 from services.jobs.queue import JobQueue
 from services.models import capture_chunks, capture_sessions, investigations, principals
+from services.pipeline.incremental import extraction_progress
+from services.pipeline.reconciliation import reconciliation_progress
 from services.pipeline.stub_reports import sync_capture_stub
 from services.quotas import charge, lock_owner
 from services.reports import latest_reports
@@ -382,7 +384,17 @@ async def close_capture(
                         await connection.execute(
                             select(jobs.c.id)
                             .where(
-                                chunk_jobs(capture_id, [c.seq for c in received]),
+                                or_(
+                                    chunk_jobs(capture_id, [c.seq for c in received]),
+                                    (
+                                        (jobs.c.stage.in_(["claim_extraction", "reconciliation"]))
+                                        & (
+                                            jobs.c.payload["investigation_id"].astext
+                                            == str(capture_id)
+                                        )
+                                        & (jobs.c.payload["incremental"].astext == "true")
+                                    ),
+                                ),
                                 jobs.c.owner_id == principal.id,
                             )
                             .order_by(jobs.c.id)
@@ -472,4 +484,6 @@ async def capture_status(
             work=work,
             claims=claims,
             claim_extraction_status=extraction,
+            extraction_progress=await extraction_progress(connection, capture_id),
+            reconciliation_progress=await reconciliation_progress(connection, capture_id),
         )

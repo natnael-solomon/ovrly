@@ -17,6 +17,8 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import Field, ValidationError
 
+from services import claims as claim_schema
+from services.claims import parse_json as parse_json
 from services.experiments import schema as extraction_schema
 from services.experiments.schema import (
     SCHEMA_VERSION,
@@ -82,23 +84,6 @@ class Result(StrictModel):
     attempts: list[Attempt]
     repair_outcome: Literal["not_needed", "succeeded", "failed", "not_attempted"]
     valid: bool
-
-
-def reject_constant(value: str) -> object:
-    raise ValueError("Non-finite JSON number")
-
-
-def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("Duplicate JSON key")
-        result[key] = value
-    return result
-
-
-def parse_json(text: str) -> object:
-    return json.loads(text, parse_constant=reject_constant, object_pairs_hook=unique_object)
 
 
 def validate_output(content: str, finish_reason: str, window: Window) -> Validation:
@@ -530,6 +515,9 @@ def main() -> int:
             ).hexdigest(),
             "dataset_sha256": hashlib.sha256(raw_dataset).hexdigest(),
             "dataset": dataset.model_dump(exclude={"windows"}),
+            "shared_schema_module_sha256": hashlib.sha256(
+                Path(claim_schema.__file__).read_bytes()
+            ).hexdigest(),
             "schema": Extraction.model_json_schema(),
             "input_schema": Dataset.model_json_schema(),
             "max_tokens": args.max_tokens,

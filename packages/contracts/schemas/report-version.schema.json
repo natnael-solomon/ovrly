@@ -53,9 +53,65 @@
       "description": "At most one per claim in this version. Fewer assessments than claims means those claims are still being assessed (provisional) or the investigation stopped before assessing them.",
       "items": { "$ref": "assessment.schema.json" }
     },
+    "reconciliation": {
+      "description": "Completed interpretation of all available settled input, not completed assessment. Reassessment IDs identify changed, nonsuperseded claims whose old assessments/evidence were removed. Superseded appearances remain linked but unassessed. The report version and claim IDs form the stable downstream handoff.",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/reconciliation" }]
+    },
+    "processing_attempts": {
+      "description": "Optional diagnostic provenance. Provider/model names and outcome/feedback strings are descriptive, not findings or client state transitions. Unknown strings must not imply success.",
+      "oneOf": [
+        { "type": "null" },
+        { "type": "array", "items": { "$ref": "#/$defs/processing_attempt" } }
+      ]
+    },
     "fixture": {
       "type": "boolean",
       "description": "True only for a development stub version built from fixtures/results/complete.json while the server runs with OVRLY_STUB_REPORTS=1 (until the assessment pipeline, #27, exists). Such a version is not a check of the media; clients must label its claims as a fixture, never as live results. Optional for compatibility: an absent value means false. The server always sends it."
+    }
+  },
+  "$defs": {
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "coverage_limited", "reassessment_claim_ids"],
+      "properties": {
+        "status": { "$ref": "enums.schema.json#/$defs/reconciliation_status", "const": "complete" },
+        "coverage_limited": { "type": "boolean" },
+        "reassessment_claim_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/opaque_id" }
+        }
+      }
+    },
+    "token_count": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+      ]
+    },
+    "processing_attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider", "model", "decision_id", "task", "outcome",
+        "prompt_tokens", "completion_tokens", "total_tokens",
+        "thinking_leaked", "fenced", "repair", "feedback"
+      ],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "model": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+        "decision_id": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+        "task": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "outcome": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "prompt_tokens": { "$ref": "#/$defs/token_count" },
+        "completion_tokens": { "$ref": "#/$defs/token_count" },
+        "total_tokens": { "$ref": "#/$defs/token_count" },
+        "thinking_leaked": { "type": "boolean" },
+        "fenced": { "type": "boolean" },
+        "repair": { "type": "boolean" },
+        "feedback": { "oneOf": [{ "type": "string" }, { "type": "null" }] }
+      }
     }
   }
 }

@@ -24,6 +24,7 @@ sys.path.insert(0, str(PACKAGE))
 sys.path.insert(0, str(PACKAGE.parents[1] / "backend"))
 
 from services.api import schemas as backend  # noqa: E402
+from services.claims import Interpretation  # noqa: E402
 from services.jobs.retries import RetryClass  # noqa: E402
 from services.jobs.states import JobState  # noqa: E402
 
@@ -42,6 +43,112 @@ def validator() -> validate.Validator:
 def result(name: str) -> dict[str, Any]:
     fixture: dict[str, Any] = validate.read_json(RESULTS / f"{name}.json")
     return fixture
+
+
+def interpretation() -> dict[str, Any]:
+    return {
+        "taxonomy": "normative",
+        "source_refs": [{"observation_id": "speech-1", "start_char": 0, "end_char": 10}],
+        "context_refs": [],
+        "assertion_mode": "asserted",
+        "speaker_commitment": "endorsed",
+        "attributed_to": None,
+        "eligibility_reason": "opinion",
+        "uncertainty_flags": [],
+    }
+
+
+def extraction_progress() -> dict[str, Any]:
+    return {
+        "closed": False,
+        "requests_used": 1,
+        "tokens_reserved": 5954,
+        "max_requests": 10,
+        "max_tokens": 200000,
+        "reconciliation_requests": 1,
+        "reconciliation_tokens": 20000,
+        "observations": [
+            {
+                "observation_id": "synthetic-speech-1",
+                "start_ms": 0,
+                "end_ms": 1000,
+                "timebase": "media",
+                "status": "processed",
+                "reason": None,
+            }
+        ],
+    }
+
+
+def test_incremental_progress_round_trips_without_changing_legacy_reads(
+    validator: validate.Validator,
+) -> None:
+    body = payload("partial")
+    assert "extraction_progress" not in backend.InvestigationReadModel.model_validate(
+        body
+    ).model_dump(mode="json")
+    body["extraction_progress"] = extraction_progress()
+    validator.validate(body, INVESTIGATION)
+    assert backend.InvestigationReadModel.model_validate(body).model_dump(mode="json") == body
+    assert (
+        enums()["extraction_coverage_status"]
+        == (backend.ObservationProgress.model_json_schema()["properties"]["status"]["enum"])
+    )
+
+
+@pytest.mark.parametrize("invalid", [-1, 2147483648, 1.5, True, "1"])
+def test_incremental_progress_rejects_invalid_reservations(
+    validator: validate.Validator,
+    invalid: Any,
+) -> None:
+    body = payload("partial")
+    body["extraction_progress"] = extraction_progress()
+    body["extraction_progress"]["tokens_reserved"] = invalid
+    with pytest.raises(validate.Invalid):
+        validator.validate(body, INVESTIGATION)
+    with pytest.raises(ValidationError):
+        backend.InvestigationReadModel.model_validate(body)
+
+
+def test_claim_interpretation_is_additive_and_round_trips(validator: validate.Validator) -> None:
+    claim = copy.deepcopy(result("complete")["investigation"]["report"]["claims"][0])
+    claim["interpretation"] = interpretation()
+    validator.validate(claim, "claim.schema.json")
+    assert backend.Claim.model_validate(claim).model_dump(mode="json") == claim
+
+
+def test_reconciliation_is_additive_without_redefining_completion(
+    validator: validate.Validator,
+) -> None:
+    body = payload("partial")
+    body["reconciliation_progress"] = {"status": "complete", "error": None}
+    body["report"]["reconciliation"] = {
+        "status": "complete",
+        "coverage_limited": True,
+        "reassessment_claim_ids": [],
+    }
+    claim = body["report"]["claims"][0]
+    claim["corrects_occurrence_id"] = "occ_synthetic_earlier"
+    validator.validate(body, INVESTIGATION)
+    assert backend.InvestigationReadModel.model_validate(body).model_dump(mode="json") == body
+    assert body["report"]["provisional"] is True
+    assert (
+        enums()["reconciliation_status"]
+        == (backend.ReconciliationProgress.model_json_schema()["properties"]["status"]["enum"])
+    )
+
+
+def test_reconciliation_failure_does_not_hide_the_partial_report(
+    validator: validate.Validator,
+) -> None:
+    body = payload("partial")
+    body["reconciliation_progress"] = {
+        "status": "failed",
+        "error": {"code": "EXTRACTION_INVALID", "message": "Invalid output", "retryable": False},
+    }
+    validator.validate(body, INVESTIGATION)
+    assert backend.InvestigationReadModel.model_validate(body).model_dump(mode="json") == body
+    assert body["error"] is None and body["report"] is not None
 
 
 def payload(name: str) -> dict[str, Any]:
@@ -178,6 +285,18 @@ def test_schema_enums_match_the_pydantic_literals(name: str, alias: Any) -> None
     assert enums()[name] == list(get_args(alias))
 
 
+def test_interpretation_enums_match_the_server() -> None:
+    fields = Interpretation.model_json_schema()["properties"]
+    for name, field in (
+        ("claim_taxonomy", "taxonomy"),
+        ("assertion_mode", "assertion_mode"),
+        ("speaker_commitment", "speaker_commitment"),
+        ("eligibility_reason", "eligibility_reason"),
+    ):
+        assert enums()[name] == fields[field]["enum"]
+    assert enums()["claim_uncertainty"] == fields["uncertainty_flags"]["items"]["enum"]
+
+
 def test_processing_status_and_relation_vocabularies_are_disjoint() -> None:
     vocab = enums()
     findings = set(vocab["relation"]) | set(vocab["overall_assessment"])
@@ -292,6 +411,22 @@ def test_no_claims_report_cannot_carry_assessments(
 # The UNKNOWN fallback on read models -------------------------------------
 
 READ_ENUM_PATHS: dict[str, tuple[str, tuple[Any, ...]]] = {
+    "reconciliation_status": ("partial", ("reconciliation_progress", "status")),
+    "extraction_coverage_status": ("partial", ("extraction_progress", "observations", 0, "status")),
+    "claim_taxonomy": ("complete", ("report", "claims", 0, "interpretation", "taxonomy")),
+    "assertion_mode": ("complete", ("report", "claims", 0, "interpretation", "assertion_mode")),
+    "speaker_commitment": (
+        "complete",
+        ("report", "claims", 0, "interpretation", "speaker_commitment"),
+    ),
+    "eligibility_reason": (
+        "complete",
+        ("report", "claims", 0, "interpretation", "eligibility_reason"),
+    ),
+    "claim_uncertainty": (
+        "complete",
+        ("report", "claims", 0, "interpretation", "uncertainty_flags", 0),
+    ),
     "analysis_status": ("complete", ("analysis", "status")),
     "speech_status": ("complete", ("speech", "status")),
     "speech_reason": ("complete", ("speech", "reason")),
@@ -336,6 +471,13 @@ def test_unknown_enum_values_are_tolerated_on_the_investigation_read_model(
     the payload is still structurally readable so the parser maps it to UNKNOWN."""
     fixture, path = READ_ENUM_PATHS[name]
     body = payload(fixture)
+    if "reconciliation_progress" in path:
+        body["reconciliation_progress"] = {"status": "waiting", "error": None}
+    if "extraction_progress" in path:
+        body["extraction_progress"] = extraction_progress()
+    if "interpretation" in path:
+        body["report"]["claims"][0]["interpretation"] = interpretation()
+        body["report"]["claims"][0]["interpretation"]["uncertainty_flags"] = ["missing-context"]
     if path[:2] == ("coverage", "media"):
         body["coverage"]["media"] = media_coverage()
     if path[0] == "speech":
@@ -542,11 +684,29 @@ def test_items_keyword_validates_every_element(tmp_path: Path) -> None:
 def test_validator_fails_closed_on_other_array_keywords(tmp_path: Path) -> None:
     schema_dir = tmp_path / "schemas"
     schema_dir.mkdir()
-    for keyword in ("prefixItems", "uniqueItems", "contains"):
+    for keyword in ("prefixItems", "contains"):
         (schema_dir / "x.schema.json").write_text(
             json.dumps({"type": "array", keyword: 1}), encoding="utf-8"
         )
         with pytest.raises(validate.Invalid, match="unsupported keywords"):
+            validate.Validator(schema_dir)
+
+
+def test_array_size_and_uniqueness(tmp_path: Path) -> None:
+    schema_dir = tmp_path / "schemas"
+    schema_dir.mkdir()
+    path = schema_dir / "x.schema.json"
+    path.write_text(json.dumps({"type": "array", "minItems": 1, "uniqueItems": True}))
+    validator = validate.Validator(schema_dir)
+    validator.validate([True, 1], "x.schema.json")
+    with pytest.raises(validate.Invalid, match="array too short"):
+        validator.validate([], "x.schema.json")
+    for items in ([1, 1.0], [{"x": [1]}, {"x": [1.0]}], ["same", "same"]):
+        with pytest.raises(validate.Invalid, match="duplicate array item"):
+            validator.validate(items, "x.schema.json")
+    for keyword, invalid in (("minItems", -1), ("minItems", True), ("uniqueItems", 1)):
+        path.write_text(json.dumps({"type": "array", keyword: invalid}))
+        with pytest.raises(validate.Invalid, match=keyword):
             validate.Validator(schema_dir)
 
 

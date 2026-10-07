@@ -16,7 +16,21 @@
     "manifest": { "$ref": "#/$defs/manifest" },
     "work": { "type": "array", "items": { "$ref": "#/$defs/work" } },
     "claims": { "type": "array", "items": { "$ref": "#/$defs/claim_state" } },
-    "claim_extraction_status": { "$ref": "enums.schema.json#/$defs/coverage_status" }
+    "claim_extraction_status": { "$ref": "enums.schema.json#/$defs/coverage_status" },
+    "reconciliation_progress": {
+      "description": "Interpretation progress, separate from modality coverage and assessment completion.",
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "investigation.schema.json#/$defs/reconciliation_progress" }
+      ]
+    },
+    "extraction_progress": {
+      "description": "Optional fixture-backed incremental extraction coverage and cumulative reservations. Absent until an internal producer admits observations; not a declaration that live ASR/OCR is integrated.",
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "investigation.schema.json#/$defs/extraction_progress" }
+      ]
+    }
   },
   "$defs": {
     "capture_interval": {

@@ -37,6 +37,7 @@ jobs = Table(
     Column("lease_expires_at", TIMESTAMP(timezone=True)),
     Column("available_at", TIMESTAMP(timezone=True), nullable=False, server_default=func.now()),
     Column("payload", JSONB, nullable=False),
+    Column("stage_data", JSONB, nullable=False, server_default="{}"),
     Column("failure", Text),
     # Class of the last scheduled retry or of the terminal failure.
     Column("retry_class", Text),
