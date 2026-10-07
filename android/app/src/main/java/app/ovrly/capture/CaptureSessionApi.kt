@@ -143,8 +143,10 @@ internal object CaptureApis {
      */
     fun researchOffline(context: Context): String? = when {
         isTestServer -> "Research is not connected: chunks go to the in-memory test server."
+
         ApiServices.get(context) == null ->
             "Research is not connected: this build has no ovrly service configured."
+
         else -> null
     }
 

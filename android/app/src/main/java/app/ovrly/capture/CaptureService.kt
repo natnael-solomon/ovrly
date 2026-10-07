@@ -130,7 +130,10 @@ class CaptureService : Service() {
             check(sessionLifecycle.recording()) { "Capture was interrupted during setup." }
             running.set(true)
             CaptureStore.set(
-                CaptureState(phase = CapturePhase.RECORDING, message = recordingMessage(this, replaced))
+                CaptureState(
+                    phase = CapturePhase.RECORDING,
+                    message = recordingMessage(this, replaced)
+                )
             )
             capture.start(scope, startedMs)
             startTicker()
