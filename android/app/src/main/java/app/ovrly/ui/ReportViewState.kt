@@ -40,12 +40,16 @@ internal data class ReportView(
     val latestVersion: Int,
     val changeSummary: String?,
     val supersedes: String?,
+    /** When the shown version was published (`created_at`), or null without a version. */
+    val publishedAt: String? = null,
     val claims: List<ClaimView>,
     /** Shown instead of claims when there are none to show; never a verdict on the video. */
     val empty: String?,
     val captured: Boolean,
     /** Corrections start from the latest published version only. */
-    val canCorrect: Boolean
+    val canCorrect: Boolean,
+    /** Id of the shown version, which an explicit save keeps (#36). */
+    val reportId: String? = null
 )
 
 /** Flags about the shown version that come from the store or the version list. */
@@ -77,14 +81,16 @@ internal fun reportView(
         latestVersion = investigation.version,
         changeSummary = shown?.changeSummary,
         supersedes = shown?.supersedes,
+        publishedAt = shown?.createdAt,
         claims = shown?.let(::claimViews).orEmpty(),
         empty = emptyMessage(status, shown),
         captured = investigation.isCaptured,
-        canCorrect = latest != null && shown?.version == latest.version
+        canCorrect = latest != null && shown?.version == latest.version,
+        reportId = shown?.id
     )
 }
 
-private fun claimViews(report: ReportVersion): List<ClaimView> = report.claims.map { claim ->
+internal fun claimViews(report: ReportVersion): List<ClaimView> = report.claims.map { claim ->
     claimView(claim, report.assessmentFor(claim.id), report.evidenceFor(claim.id))
 }
 

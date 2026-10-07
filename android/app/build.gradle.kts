@@ -1,5 +1,7 @@
 import com.android.build.api.artifact.SingleArtifact
 import java.util.Properties
+import org.cyclonedx.gradle.CyclonedxDirectTask
+import org.cyclonedx.model.Component
 import org.gradle.api.tasks.util.PatternFilterable
 import org.gradle.testing.jacoco.plugins.JacocoPluginExtension
 import org.gradle.testing.jacoco.tasks.JacocoReport
@@ -10,7 +12,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
     id("org.jlleitschuh.gradle.ktlint")
+    id("org.cyclonedx.bom")
 }
+
+val appVersionName = "0.1.0"
 
 // Room exports each schema version here; commit it so later migrations can be checked.
 ksp {
@@ -91,7 +96,7 @@ android {
         minSdk = 29
         targetSdk = 37
         versionCode = releaseVersionCode()
-        versionName = "0.1.0"
+        versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("boolean", "VOXIDE_ENABLED", liveVoice.toString())
         buildConfigField("boolean", "VOXIDE_LIVE", liveVoice.toString())
@@ -158,6 +163,19 @@ android {
             rootProject.file("../packages/contracts/fixtures/results").path
         )
     }
+}
+
+// CycloneDX SBOM of the dependencies packaged into the release APK (REPO-07, #17).
+// No serial number, so rebuilding the same commit yields the same document.
+tasks.named<CyclonedxDirectTask>("cyclonedxDirectBom") {
+    includeConfigs = listOf("releaseRuntimeClasspath")
+    projectType = Component.Type.APPLICATION
+    componentGroup = "app.ovrly"
+    componentName = "ovrly-android"
+    componentVersion = appVersionName
+    includeBomSerialNumber = false
+    jsonOutput = layout.buildDirectory.file("reports/sbom/ovrly-android.cdx.json")
+    xmlOutput.convention(null as RegularFile?)
 }
 
 // Keep only VERSION, schemas/ and fixtures/ from the contracts package on the test classpath.

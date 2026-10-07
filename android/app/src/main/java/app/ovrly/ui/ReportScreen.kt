@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -29,10 +30,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -40,19 +43,30 @@ import androidx.compose.ui.unit.dp
 /**
  * Report of a real check (#34): work state, then evidence state (coverage, version), then
  * the claims. Claim detail holds the original wording, the normalized meaning, where and how
- * the claim appeared, what changed between versions, a correction and the evidence.
+ * the claim appeared, what changed between versions, a correction and the evidence. The
+ * header's share action hands [reportExport] of the shown version to [sharer] (#39).
  */
 @Composable
 internal fun CheckReportScreen(
     report: OpenReport,
     onCommand: (CheckCommand) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    sharer: ReportSharer = rememberReportSharer()
 ) {
     val view = report.view
     var correcting by rememberSaveable(view.investigationId) { mutableStateOf<String?>(null) }
     var expanding by rememberSaveable(view.investigationId) { mutableStateOf(false) }
+    val export = remember(report) { reportExport(report) }
     Box(modifier.fillMaxSize()) {
-        ReportList(report, onCommand, { correcting = it }, { expanding = true })
+        ReportList(
+            report,
+            ReportActions(
+                onCommand = onCommand,
+                onCorrect = { correcting = it },
+                onFullVideo = { expanding = true },
+                onShare = export?.let { shown -> { sharer.share(shown) } }
+            )
+        )
         view.claims.firstOrNull { it.id == correcting }?.let { claim ->
             CorrectionSheet(
                 claim = claim,
@@ -76,14 +90,29 @@ internal fun CheckReportScreen(
     }
 }
 
+/** Hands an export to the share sheet. */
+internal fun interface ReportSharer {
+    fun share(export: ReportExport)
+}
+
+/** Opens the Android share sheet with the export as plain text. */
 @Composable
-private fun ReportList(
-    report: OpenReport,
-    onCommand: (CheckCommand) -> Unit,
-    onCorrect: (String) -> Unit,
-    onFullVideo: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+internal fun rememberReportSharer(): ReportSharer {
+    val context = LocalContext.current
+    return remember(context) { ReportSharer { context.startActivity(it.chooser()) } }
+}
+
+/** What the report list can do; [onShare] is null when there is no version to export. */
+private class ReportActions(
+    val onCommand: (CheckCommand) -> Unit,
+    val onCorrect: (String) -> Unit,
+    val onFullVideo: () -> Unit,
+    val onShare: (() -> Unit)?
+)
+
+@Composable
+private fun ReportList(report: OpenReport, actions: ReportActions, modifier: Modifier = Modifier) {
+    val onCommand = actions.onCommand
     val view = report.view
     var expanded by rememberSaveable(view.investigationId) {
         mutableStateOf(view.claims.firstOrNull()?.id)
@@ -93,7 +122,7 @@ private fun ReportList(
         contentPadding = PaddingValues(SCREEN_PADDING),
         verticalArrangement = Arrangement.spacedBy(SCREEN_GAP)
     ) {
-        item { ReportHeader(view.title, { onCommand(CheckCommand.Close) }) }
+        item { ReportHeader(view.title, { onCommand(CheckCommand.Close) }, actions.onShare) }
         item { WorkCard(view.work) }
         report.notice?.let { notice ->
             item { Notice(notice, { onCommand(CheckCommand.DismissNotice) }) }
@@ -102,8 +131,9 @@ private fun ReportList(
         if (view.version != null) {
             item { VersionSection(report, { onCommand(CheckCommand.ShowVersion(it)) }) }
         }
+        report.save?.let { save -> item { SaveCard(save, report.busy, onCommand) } }
         if (view.captured && view.canCorrect && report.candidates.isNotEmpty()) {
-            item { FullVideoCard(report.busy, onFullVideo) }
+            item { FullVideoCard(report.busy, actions.onFullVideo) }
         }
         view.empty?.let { empty ->
             item { Text(empty, style = MaterialTheme.typography.bodyLarge) }
@@ -118,14 +148,19 @@ private fun ReportList(
                     canCorrect = view.canCorrect && !report.busy
                 ),
                 onToggle = { expanded = if (expanded == claim.id) null else claim.id },
-                onCorrect = { onCorrect(claim.id) }
+                onCorrect = { actions.onCorrect(claim.id) }
             )
         }
     }
 }
 
 @Composable
-private fun ReportHeader(title: String, onBack: () -> Unit, modifier: Modifier = Modifier) {
+private fun ReportHeader(
+    title: String,
+    onBack: () -> Unit,
+    onShare: (() -> Unit)?,
+    modifier: Modifier = Modifier
+) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(SMALL_GAP)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
@@ -137,9 +172,15 @@ private fun ReportHeader(title: String, onBack: () -> Unit, modifier: Modifier =
             }
             Text(
                 "REPORT",
+                Modifier.weight(1f),
                 style = MaterialTheme.typography.labelSmall,
                 color = LocalOvrlyPalette.current.muted
             )
+            if (onShare != null) {
+                IconButton(onClick = onShare) {
+                    Icon(Icons.Outlined.Share, "Share report", Modifier.size(ICON))
+                }
+            }
         }
         Text(title, Modifier.semantics { heading() }, style = OvrlyEditorialTypography.title)
     }

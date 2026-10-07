@@ -222,7 +222,9 @@ internal data class ClaimView(
     val summary: String?,
     val correction: String?,
     val supersededProposition: String?,
-    val evidence: List<EvidenceView>
+    val evidence: List<EvidenceView>,
+    /** [interval] in words for TalkBack. */
+    val spokenInterval: String = interval
 ) {
     val contradicting: Int get() = evidence.count { it.relation.tone == Tone.CHALLENGE }
 }
@@ -263,7 +265,8 @@ internal fun claimView(claim: Claim, assessment: Assessment?, evidence: List<Evi
         summary = assessment?.summary,
         correction = claim.correction?.attributedTo?.label,
         supersededProposition = claim.correction?.supersededProposition,
-        evidence = items
+        evidence = items,
+        spokenInterval = claim.interval.spokenLabel()
     )
 }
 

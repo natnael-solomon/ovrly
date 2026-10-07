@@ -1,13 +1,31 @@
 package app.ovrly.ui
 
+import android.content.Intent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties.StateDescription
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertWidthIsAtLeast
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -15,8 +33,13 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -28,10 +51,18 @@ class ReportScreenTest {
     @get:Rule val compose = createComposeRule()
 
     private val commands = mutableListOf<CheckCommand>()
+    private val exports = mutableListOf<ReportExport>()
 
-    private fun show(report: OpenReport, dark: Boolean = false) {
+    private fun show(report: OpenReport, dark: Boolean = false, fontScale: Float = 1f) {
         compose.setContent {
-            OvrlyTheme(dark) { CheckReportScreen(report, { commands += it }) }
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, fontScale)
+            ) {
+                OvrlyTheme(dark) {
+                    CheckReportScreen(report, { commands += it }, sharer = { exports += it })
+                }
+            }
         }
     }
 
@@ -194,5 +225,203 @@ class ReportScreenTest {
             2,
             compose.onAllNodesWithText("Not enough to decide").fetchSemanticsNodes().size
         )
+    }
+
+    @Test fun shareHandsTheShownVersionToTheShareSheet() {
+        show(OpenReport(reportView(complete), retrievedAt = ChecksFixtures.NOW), dark = true)
+
+        compose.onNodeWithContentDescription("Share report").assertMaterialTarget()
+        assertClickTargets()
+        compose.onNodeWithContentDescription("Share report").performClick()
+
+        compose.runOnIdle {
+            val export = exports.single()
+            assertEquals("ovrly report: Link from video.example (version 2)", export.subject)
+            assertTrue(export.text.contains("Retrieved by this device:"))
+            assertTrue(export.text.contains("https://sources.example/synthetic/0001"))
+            assertTrue(commands.isEmpty())
+        }
+    }
+
+    @Test fun aCheckWithoutAVersionOffersNothingToShare() {
+        show(OpenReport(reportView(ChecksFixtures.investigation("failed"))), dark = true)
+
+        compose.onNodeWithContentDescription("Share report").assertDoesNotExist()
+    }
+
+    @Test fun theShareSheetGetsPlainTextOnly() {
+        val export = reportExport(OpenReport(reportView(complete)))!!
+        val chooser = export.chooser()
+
+        @Suppress("DEPRECATION")
+        val send = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
+
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        assertEquals(Intent.ACTION_SEND, send.action)
+        assertEquals("text/plain", send.type)
+        assertEquals(export.subject, send.getStringExtra(Intent.EXTRA_SUBJECT))
+        assertEquals(export.text, send.getStringExtra(Intent.EXTRA_TEXT))
+        assertNull("no attachment", send.clipData)
+        assertTrue(send.extras!!.keySet().none { it == Intent.EXTRA_STREAM })
+    }
+
+    @Test fun talkBackReadsEachClaimFirstWithItsTimeInWords() {
+        val partial = ChecksFixtures.investigation("partial")
+        show(OpenReport(reportView(partial)), dark = true)
+        val claim = reportView(partial).claims.first()
+        val spoken = claimDescription(claim)
+        val card = hasContentDescription(spoken)
+
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(card)
+        compose.onNode(card)
+            .assert(hasText(claim.proposition))
+            .assert(SemanticsMatcher.expectValue(StateDescription, "Detail shown"))
+            .performClick()
+        compose.onNode(card)
+            .assert(SemanticsMatcher.expectValue(StateDescription, "Detail hidden"))
+        assertTrue(spoken.startsWith("Claim: ${claim.proposition}"))
+        assertTrue(spoken.contains("after capture started, not a time in the original video"))
+    }
+
+    @Test fun claimDetailReadsTheTimeAndEachSourceAsOneStop() {
+        show(OpenReport(reportView(complete)), dark = true)
+        val claim = reportView(complete).claims.first()
+
+        reveal("When").assert(hasContentDescription("When: ${claim.spokenInterval}"))
+        reveal("Synthetic source 1")
+            .assert(hasText("Supports the claim"))
+            .assert(hasText("Synthetic Publisher"))
+        compose.onAllNodesWithContentDescription("Open source: Synthetic source 1")
+            .onFirst().assertMaterialTarget()
+        assertClickTargets()
+    }
+
+    @Test fun everyReportControlHasA48DpTarget() {
+        val partial = ChecksFixtures.investigation("partial")
+        val candidate = ChecksFixtures.item(complete)
+        show(
+            OpenReport(
+                reportView(partial),
+                versions = listOf(
+                    VersionChoice(1, "Version 1", fixture = false),
+                    VersionChoice(2, "Version 2 (latest)", fixture = false)
+                ),
+                candidates = listOf(candidate),
+                notice = "Correction saved as a new version. The earlier version is kept."
+            ),
+            dark = true
+        )
+        assertClickTargets()
+        reveal("Shared the full video?")
+        assertClickTargets()
+        val before = compose.idsWithText("Check the full video")
+        compose.onNodeWithText("Check the full video").performScrollTo().performClick()
+        compose.awaitDisplayed("Is this the same video?")
+        // Rows drawn by ovrly must measure 48 dp themselves; Material buttons are drawn at
+        // 40 dp and expanded to 48 dp, which only works if the expansions do not overlap.
+        val video = compose.onNode(hasText(candidate.title) and hasClickAction())
+        val confirm = compose.onNode(
+            hasText("I confirm this is the full video of the clip I captured.") and
+                hasClickAction()
+        )
+        val check = compose.newNodeWithText("Check the full video", before)
+        val cancel = compose.onNode(hasText("Cancel") and hasClickAction())
+        video.assertOwnTarget()
+        confirm.assertOwnTarget()
+        check.assertMaterialTarget()
+        cancel.assertMaterialTarget()
+        assertNoOverlap(listOf(video, confirm, check, cancel).map { it.fetchSemanticsNode() })
+    }
+
+    @Test fun at200PercentTextNoReportOrEvidenceTextIsClipped() {
+        show(
+            OpenReport(reportView(ChecksFixtures.investigation("insufficient-evidence"))),
+            dark = true,
+            fontScale = 2f
+        )
+        assertNoClippedText()
+        reveal("Retracted: do not rely on this source").assertIsDisplayed()
+        assertNoClippedText()
+        reveal("Title and metadata only", substring = true).assertIsDisplayed()
+        assertNoClippedText()
+    }
+
+    /**
+     * No two touch areas on screen overlap once Material controls are expanded to 48 dp, so
+     * each control drawn smaller than 48 dp really has the room it is expanded into.
+     */
+    private fun assertClickTargets() {
+        val nodes = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes()
+        assertTrue(nodes.isNotEmpty())
+        assertNoOverlap(nodes)
+    }
+
+    private fun assertNoOverlap(nodes: List<SemanticsNode>) {
+        val areas = nodes.map { it.ownBounds() to it.expandedArea() }
+        areas.forEachIndexed { i, (own, area) ->
+            // Only overlaps the expansion itself creates; nested controls are a layout choice.
+            areas.drop(i + 1).forEach { (otherOwn, other) ->
+                if (!own.overlaps(otherOwn)) {
+                    assertFalse("touch areas $area and $other overlap", area.overlaps(other))
+                }
+            }
+        }
+    }
+
+    /** No composed text is cut off: every line fits in the height it was given. */
+    private fun assertNoClippedText() {
+        val nodes = compose.onAllNodes(
+            SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult),
+            useUnmergedTree = true
+        ).fetchSemanticsNodes()
+        assertTrue(nodes.isNotEmpty())
+        compose.runOnIdle {
+            nodes.forEach { node ->
+                val layouts = mutableListOf<TextLayoutResult>()
+                node.config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
+                val layout = layouts.single()
+                val text = layout.multiParagraph
+                assertFalse(
+                    "\"${layout.layoutInput.text}\" is clipped: ${layout.size} in " +
+                        "${layout.layoutInput.constraints}, text ${text.height}",
+                    text.didExceedMaxLines || layout.size.height < text.height
+                )
+            }
+        }
+    }
+
+    /** A control drawn by ovrly (a row, a card) measures at least 48 by 48 dp itself. */
+    private fun SemanticsNodeInteraction.assertOwnTarget(): SemanticsNodeInteraction =
+        assertHeightIsAtLeast(MIN_TARGET).assertWidthIsAtLeast(MIN_TARGET)
+
+    /**
+     * A Material button is drawn at least 40 by 40 dp and relies on the platform's 48 dp
+     * minimum touch target; pair it with [assertNoOverlap] so that expansion has room.
+     */
+    private fun SemanticsNodeInteraction.assertMaterialTarget(): SemanticsNodeInteraction =
+        assertHeightIsAtLeast(MATERIAL_DRAWN).assertWidthIsAtLeast(MATERIAL_DRAWN)
+
+    private fun SemanticsNode.ownBounds(): Rect =
+        Rect(positionInRoot, Size(size.width.toFloat(), size.height.toFloat()))
+
+    /** The node's bounds grown, around its center, to the platform's minimum touch target. */
+    private fun SemanticsNode.expandedArea(): Rect {
+        val minimum = layoutInfo.viewConfiguration.minimumTouchTargetSize
+        return with(layoutInfo.density) {
+            val width = maxOf(size.width.toFloat(), minimum.width.toPx())
+            val height = maxOf(size.height.toFloat(), minimum.height.toPx())
+            val center = positionInRoot + Offset(size.width / 2f, size.height / 2f)
+            Rect(
+                center.x - width / 2,
+                center.y - height / 2,
+                center.x + width / 2,
+                center.y + height / 2
+            )
+        }
+    }
+
+    private companion object {
+        val MIN_TARGET = 48.dp
+        val MATERIAL_DRAWN = 40.dp
     }
 }

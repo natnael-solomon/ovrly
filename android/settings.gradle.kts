@@ -19,6 +19,8 @@ include(":app")
 val toolingSecurityVersions = mapOf(
     "ch.qos.logback:logback-classic" to "1.5.34",
     "ch.qos.logback:logback-core" to "1.5.34",
+    "com.fasterxml.jackson.core:jackson-core" to "2.22.3",
+    "com.fasterxml.jackson.core:jackson-databind" to "2.22.3",
     "org.apache.commons:commons-lang3" to "3.18.0",
     "org.apache.httpcomponents:httpclient" to "4.5.14",
     "org.apache.httpcomponents:httpmime" to "4.5.14",

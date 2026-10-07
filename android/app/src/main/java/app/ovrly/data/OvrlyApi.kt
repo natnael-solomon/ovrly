@@ -28,7 +28,11 @@ import okio.source
  * need. If the server refuses the stored credential (expired workspace, BC-D06), it is
  * dropped and the call is repeated once with a new guest identity.
  */
-internal class OvrlyApi(private val client: ApiClient, private val credentials: CredentialStore) {
+internal class OvrlyApi(
+    private val client: ApiClient,
+    private val credentials: CredentialStore,
+    private val account: AccountStore = MemoryAccountStore()
+) {
     private val minting = Mutex()
 
     @Volatile
@@ -91,9 +95,10 @@ internal class OvrlyApi(private val client: ApiClient, private val credentials: 
 
     private inner class AuthenticatedCall(private val build: (String) -> ApiCall) {
         suspend operator fun <T> invoke(parse: (String) -> T): ApiResult<T> {
-            val first = sendWith(credential(), parse)
+            val token = credential()
+            val first = sendWith(token, parse)
             val rejected = first is ApiResult.Failure && first.failure.isCredentialRejected
-            if (rejected) forgetCredential()
+            if (rejected && token is ApiResult.Success) forgetCredential(token.value)
             return if (rejected) sendWith(credential(), parse) else first
         }
 
@@ -123,9 +128,60 @@ internal class OvrlyApi(private val client: ApiClient, private val credentials: 
         }
     }
 
-    private fun forgetCredential() {
+    /**
+     * Drops [rejected] if it is still the current credential. A request sent with an older one
+     * (for example the guest token a second-device link just revoked) must not clear the
+     * credential that replaced it; the caller then retries with the current one.
+     */
+    private suspend fun forgetCredential(rejected: String) = minting.withLock {
+        val current = cached ?: credentials.read()
+        if (current != rejected) return@withLock
         cached = null
         credentials.clear()
+        // A replacement guest is a new identity; it is not the linked account.
+        account.setLinked(false)
+    }
+
+    /** True when the stored credential belongs to a linked account (BC-D07). Reads a file. */
+    val linked: Boolean get() = account.linked()
+
+    /**
+     * Links this device's principal to the Google account of [idToken] (BC-D07). Sent once
+     * with the current credential: a refused credential is reported, never replaced by a new
+     * guest, because a fresh guest would link without this device's saved reports.
+     *
+     * On a second device the server revokes this guest and returns the account's credential.
+     * It is written to the store, which replaces the guest one in a single file rename, before
+     * the in-memory copy changes, so there is no moment where the revoked credential is the
+     * only one kept. Concurrent calls wait for the swap.
+     */
+    suspend fun linkAccount(idToken: String): ApiResult<LinkOutcome.Linked> {
+        val bearer = when (val token = credential()) {
+            is ApiResult.Failure -> return token
+            is ApiResult.Success -> token.value
+        }
+        val body = jsonBody(
+            AccountLinkCodec.encodeRequest(
+                AccountLinkRequest(AccountLinkRequest.GOOGLE, idToken)
+            )
+        )
+        val call = ApiCall("principals.link", "POST", "v1/principals/link", body, bearer)
+        return when (val result = client.send(call, AccountLinkCodec::parseResponse)) {
+            is ApiResult.Failure -> result
+
+            is ApiResult.Success -> minting.withLock {
+                val next = result.value.credential?.token
+                val stored = next == null || credentials.write(next)
+                if (next != null) cached = next
+                account.setLinked(true)
+                val outcome = LinkOutcome.Linked(
+                    switched = next != null,
+                    merged = result.value.mergedSavedReports,
+                    stored = stored
+                )
+                ApiResult.Success(outcome, result.requestId)
+            }
+        }
     }
 
     private class FileBody(

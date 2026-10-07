@@ -82,7 +82,7 @@ jobs:
         working-directory: android
         run: >-
           sh gradlew --no-daemon --console=plain --build-cache
-          -Povrly.versionCode=2 :app:assembleRelease
+          -Povrly.versionCode=2 :app:assembleRelease :app:cyclonedxDirectBom
 
       - name: Check version-code property bounds (configuration only)
         if: steps.changes.outputs.android == 'true'

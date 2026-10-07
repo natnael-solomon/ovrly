@@ -203,7 +203,7 @@ The active `main` ruleset requires PRs, linear history, one approving review, st
 
 Update documentation when behavior or setup changes. Put meaningful user-visible changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md); routine internal cleanup needs no entry.
 
-Only the project owner authorizes releases and public APK distribution. Merge does not publish an APK. At release time, assign the version/date, document limitations and publish only approved artifacts.
+Only the project owner authorizes releases and public APK distribution. Merge does not publish an APK. At release time, assign the version/date, document limitations and publish only approved artifacts. A pushed `v*` tag runs **Release**, which checks that version/date and copies the known limitations into the release notes; see [tagged demo releases](docs/release-signing.md#tagged-demo-releases).
 
 Follow [release signing](docs/release-signing.md) for the production key, restored-backup verification, protected approval and version ledger. Never put passwords, keystores or private keys in Git, chat, logs or session artifacts.
 
