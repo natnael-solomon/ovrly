@@ -1,6 +1,13 @@
-"""Run the same PostgreSQL/coverage checks locally and in GitHub Actions."""
+"""Run the same PostgreSQL/coverage checks locally and in GitHub Actions.
+
+Main pushes save their own coverage report as the baseline for their commit. A later
+run reuses that cached report only for the exact baseline commit, coverage version and
+coverage settings; otherwise it warns and remeasures main as before, so a missing
+cache never turns into a passing comparison.
+"""
 
 import argparse
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -9,10 +16,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from contextlib import contextmanager
 from pathlib import Path
 
-from backend_coverage import InvalidCoverage, assess, read_report
+from backend_coverage import InvalidCoverage, assess, read_report, validate_report
+
+BASELINE_FILES = ("coverage.json", "coverage.xml")
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -61,6 +71,48 @@ def baseline_checkout(repository, sha):
             run(["git", "worktree", "remove", "--force", str(checkout)], repository)
 
 
+def baseline_identity(sha, config):
+    """What a cached main report must have been measured with to replace remeasurement."""
+    settings = tomllib.loads(config.read_text(encoding="utf-8")).get("tool", {}).get("coverage", {})
+    return {
+        "sha": sha,
+        "coverage_version": importlib.metadata.version("coverage"),
+        "coverage_settings": hashlib.sha256(
+            json.dumps(settings, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def tracked_services(repository, sha):
+    listing = subprocess.check_output(
+        ["git", "ls-tree", "-r", "--name-only", sha, "--", "backend/services"],
+        cwd=repository, text=True)
+    return {name.removeprefix("backend/") for name in listing.splitlines() if name.endswith(".py")}
+
+
+def cached_baseline(directory, identity, repository):
+    """Return (report, reason): the cached main report, or None with why it was not usable."""
+    metadata, report = directory / "baseline.json", directory / "coverage.json"
+    if not metadata.is_file() or not report.is_file():
+        return None, f"no cached main baseline for {identity['sha']}"
+    try:
+        if json.loads(metadata.read_text(encoding="utf-8")) != identity:
+            return None, "the cached main baseline was measured with other settings"
+        expected = tracked_services(repository, identity["sha"])
+        return validate_report(json.loads(report.read_text(encoding="utf-8")), expected), None
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        return None, f"the cached main baseline is unusable ({type(error).__name__})"
+
+
+def save_baseline(reports, directory, repository, config):
+    """Stage this run's report as the baseline for HEAD (main pushes only)."""
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repository, text=True).strip()
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in BASELINE_FILES:
+        shutil.copyfile(reports / name, directory / name)
+    (directory / "baseline.json").write_text(
+        json.dumps(baseline_identity(head, config), indent=2) + "\n", encoding="utf-8")
+
+
 def measure(backend, output, python, config, env):
     output.mkdir(parents=True, exist_ok=True)
     for name in ("coverage.xml", "coverage.json", "junit.xml"):
@@ -90,8 +142,23 @@ def measure(backend, output, python, config, env):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args(argv)
+    parser.add_argument("--baseline-sha", action="store_true",
+                        help="print the main commit this run compares with, then exit")
+    parser.add_argument("--cached-baseline", type=Path,
+                        help="directory restored from the main baseline cache")
+    parser.add_argument("--save-baseline", type=Path,
+                        help="stage this run's passing report as the baseline for HEAD")
+    arguments = parser.parse_args(argv)
     backend = ROOT / "backend"
+    if arguments.baseline_sha:
+        event_path = os.environ.get("GITHUB_EVENT_PATH")
+        event = json.loads(Path(event_path).read_text()) if event_path else {}
+        try:
+            print(baseline_commit(ROOT, os.environ.get("GITHUB_EVENT_NAME", "local"), event) or "")
+        except (ValueError, subprocess.CalledProcessError) as error:
+            print(f"ERROR: No main baseline commit ({type(error).__name__})", file=sys.stderr)
+            return 1
+        return 0
     reports = backend / "reports"
     reports.mkdir(exist_ok=True)
     for name in ("summary.md", "comparison.json"):
@@ -106,7 +173,15 @@ def main(argv=None):
         config = backend / "pyproject.toml"
         current = measure(backend, reports, [sys.executable], config, os.environ)
         baseline = None
-        with baseline_checkout(ROOT, sha) as checkout:
+        source = None
+        if sha is not None and arguments.cached_baseline is not None:
+            baseline, reason = cached_baseline(
+                arguments.cached_baseline.resolve(), baseline_identity(sha, config), ROOT)
+            if baseline is not None:
+                source = "cache"
+            else:
+                print(f"::warning::{reason}; remeasuring main {sha} instead")
+        with baseline_checkout(ROOT, sha if baseline is None else None) as checkout:
             if checkout is not None:
                 base_backend = checkout / "backend"
                 if (base_backend / "pyproject.toml").exists():
@@ -120,13 +195,19 @@ def main(argv=None):
                                 if key not in {"VIRTUAL_ENV", "PYTHONPATH", "UV_PROJECT_ENVIRONMENT"}}
                     base_env["UV_LINK_MODE"] = "copy"
                     baseline = measure(base_backend, reports / "main", python, config, base_env)
+                    source = "remeasured"
                 elif (base_backend / "services").exists():
                     raise InvalidCoverage("Main contains backend services but no dependency manifest")
         summary, failures = assess(current, baseline, sha or "initial main push")
+        if source == "cache":
+            summary += "Baseline: cached report saved by the main push of that commit.\n"
+        elif source == "remeasured":
+            summary += "Baseline: remeasured from a disposable main checkout (no usable cache).\n"
         (reports / "summary.md").write_text(summary, encoding="utf-8")
         (reports / "comparison.json").write_text(json.dumps({
             "baseline_sha": sha,
             "baseline_available": baseline is not None,
+            "baseline_source": source,
             "failures": failures,
         }, indent=2) + "\n", encoding="utf-8")
         print(summary)
@@ -138,6 +219,8 @@ def main(argv=None):
             for failure in failures:
                 print(f"ERROR: {failure}", file=sys.stderr)
             return 1
+        if arguments.save_baseline is not None:
+            save_baseline(reports, arguments.save_baseline.resolve(), ROOT, config)
     except InvalidCoverage as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

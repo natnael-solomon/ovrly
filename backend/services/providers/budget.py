@@ -9,13 +9,17 @@ the evidence handlers keep their lease alive meanwhile. Only a wait longer than
 the bucket for a provider's ``Retry-After`` after a 429 by driving the balance negative, so
 every process pauses exactly that long and then resumes at the normal rate. With quotas on,
 ``request`` also waits (with backoff) for one of ``concurrency`` shared request slots.
+
+``per_hour`` is the capacity refilled evenly over ``period_seconds`` (an hour unless set),
+so a per-minute or per-day provider limit is the same bucket with another period.
+:class:`SharedBudget` charges several buckets at once, all or nothing.
 """
 
 import asyncio
 import math
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -47,9 +51,12 @@ class TokenBucket:
     concurrency: int = 0
     request_timeout_seconds: float = 20.0
     clock: Callable[[], float] = field(default=time.monotonic, compare=False)
+    period_seconds: float = 3600.0
 
     @staticmethod
-    async def balance(connection: AsyncConnection, name: str, per_hour: int) -> float:
+    async def balance(
+        connection: AsyncConnection, name: str, per_hour: int, period_seconds: float = 3600.0
+    ) -> float:
         """Local refill estimate, not the provider's remaining account entitlement."""
         row = (
             await connection.execute(
@@ -61,11 +68,11 @@ class TokenBucket:
         if row is None:
             return float(per_hour)
         elapsed = max(float((row.now - row.updated_at).total_seconds()), 0.0)
-        return min(float(per_hour), float(row.tokens) + elapsed * per_hour / 3600)
+        return min(float(per_hour), float(row.tokens) + elapsed * per_hour / period_seconds)
 
     @property
     def per_second(self) -> float:
-        return self.per_hour / 3600
+        return self.per_hour / self.period_seconds
 
     async def _locked(self, connection: AsyncConnection) -> tuple[float, datetime]:
         await connection.execute(
@@ -92,17 +99,62 @@ class TokenBucket:
         """Take the requested units, or return the seconds until they are available."""
         async with self.database.engine.begin() as connection:
             tokens, now = await self._locked(connection)
-            if tokens >= amount:
+            held = await self._held(connection, now)
+            if held == 0 and tokens >= amount:
                 tokens -= amount
                 wait = 0.0
             else:
-                wait = (amount - tokens) / self.per_second
+                wait = max(held, (amount - tokens) / self.per_second if tokens < amount else 0.0)
             await connection.execute(
                 update(provider_buckets)
                 .where(provider_buckets.c.name == self.name)
                 .values(tokens=tokens, updated_at=now)
             )
         return wait
+
+    async def _held(self, connection: AsyncConnection, now: datetime) -> float:
+        """Seconds left of a provider hold on this (already locked) bucket."""
+        until = await connection.scalar(
+            select(provider_buckets.c.held_until).where(provider_buckets.c.name == self.name)
+        )
+        return 0.0 if until is None else max(0.0, (until - now).total_seconds())
+
+    @staticmethod
+    async def held_seconds(connection: AsyncConnection, name: str) -> float:
+        """Seconds left of a provider hold set by :meth:`hold`; 0 when none."""
+        row = (
+            await connection.execute(
+                select(provider_buckets.c.held_until, func.clock_timestamp().label("now")).where(
+                    provider_buckets.c.name == name
+                )
+            )
+        ).first()
+        if row is None or row.held_until is None:
+            return 0.0
+        return max(0.0, float((row.held_until - row.now).total_seconds()))
+
+    async def hold(self, seconds: float | None) -> None:
+        """Pause every user for a provider ``Retry-After`` without discarding the balance.
+
+        Unlike :meth:`block`, the units refilled so far survive the pause, so a short
+        per-minute 429 cannot empty a day-long budget.
+        """
+        pause = DEFAULT_BLOCK_SECONDS if seconds is None else max(seconds, 0.0)
+        async with self.database.engine.begin() as connection:
+            tokens, now = await self._locked(connection)
+            until = now + timedelta(seconds=pause)
+            current = await connection.scalar(
+                select(provider_buckets.c.held_until).where(provider_buckets.c.name == self.name)
+            )
+            await connection.execute(
+                update(provider_buckets)
+                .where(provider_buckets.c.name == self.name)
+                .values(
+                    tokens=tokens,
+                    updated_at=now,
+                    held_until=until if current is None or current < until else current,
+                )
+            )
 
     async def acquire(self, amount: float = 1) -> None:
         await self._wait_tokens(amount, None)
@@ -225,3 +277,76 @@ class TokenBucket:
                 .where(provider_buckets.c.name == self.name)
                 .values(tokens=min(tokens, -hold * self.per_second), updated_at=now)
             )
+
+
+@dataclass(frozen=True)
+class SharedBudget:
+    """Several buckets charged together, for a provider with more than one limit.
+
+    Every bucket row is locked in name order in one transaction and either all costs are
+    taken or none is. A cost above a bucket's capacity is clamped to it, so one oversized
+    request waits for a full bucket instead of failing forever. Like
+    :meth:`TokenBucket.acquire`, a short shortfall waits with jitter and a wait longer than
+    ``max_wait_seconds`` raises :class:`RateLimited` without spending anything.
+    """
+
+    database: Database
+    buckets: tuple[TokenBucket, ...]
+    max_wait_seconds: float = 300.0
+    sleep: Callable[[float], Awaitable[Any]] = field(default=asyncio.sleep, compare=False)
+
+    def charges(self, costs: Sequence[float]) -> list[tuple[TokenBucket, float]]:
+        if len(costs) != len(self.buckets):
+            raise ValueError("One cost is required per bucket")
+        charged: list[tuple[TokenBucket, float]] = []
+        for bucket, cost in zip(self.buckets, costs, strict=True):
+            if not math.isfinite(cost) or cost < 0:
+                raise ValueError("Token cost must be finite and not negative")
+            if cost:
+                charged.append((bucket, min(float(cost), float(bucket.per_hour))))
+        return sorted(charged, key=lambda item: item[0].name)
+
+    async def _take(self, charged: list[tuple[TokenBucket, float]]) -> float:
+        async with self.database.engine.begin() as connection:
+            states = [(bucket, cost, *await bucket._locked(connection)) for bucket, cost in charged]
+            held = [await bucket._held(connection, now) for bucket, _, _, now in states]
+            wait = max(
+                [
+                    *held,
+                    *(
+                        (cost - tokens) / bucket.per_second
+                        for bucket, cost, tokens, _ in states
+                        if tokens < cost
+                    ),
+                ],
+                default=0.0,
+            )
+            for bucket, cost, tokens, now in states:
+                await connection.execute(
+                    update(provider_buckets)
+                    .where(provider_buckets.c.name == bucket.name)
+                    .values(tokens=tokens - cost if wait == 0 else tokens, updated_at=now)
+                )
+        return wait
+
+    async def acquire(self, costs: Sequence[float]) -> None:
+        charged = self.charges(costs)
+        if not charged:
+            return
+        while True:
+            wait = await self._take(charged)
+            if wait == 0:
+                return
+            if wait > self.max_wait_seconds:
+                raise RateLimited(wait)
+            await self.sleep(wait + _RANDOM.uniform(0, 0.25 * wait + 0.05))
+
+    async def refund(self, costs: Sequence[float]) -> None:
+        """Return units for a request that was refused before it was sent."""
+        for bucket, cost in self.charges(costs):
+            await bucket._refund(cost)
+
+    async def block(self, seconds: float | None) -> None:
+        """Hold every bucket of the provider for its ``Retry-After``, keeping balances."""
+        for bucket in self.buckets:
+            await bucket.hold(seconds)

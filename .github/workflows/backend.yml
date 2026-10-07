@@ -41,8 +41,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-24.04
-    # Runs the backend suite twice: this change, then main's coverage baseline.
-    timeout-minutes: 25
+    # Runs this change's suite once and compares coverage with the report the main push
+    # of the baseline commit cached. Without that cache it warns and runs main's suite
+    # too, so 40 minutes leaves headroom for two suites on a slow runner.
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: backend
@@ -91,8 +93,36 @@ jobs:
           && uv run --frozen python ../packages/contracts/roundtrip.py --check
       - name: Upgrade database and check migration drift
         run: uv run --frozen alembic upgrade head && uv run --frozen alembic check
+      - name: Select main coverage baseline
+        id: baseline
+        run: |
+          sha="$(uv run --frozen python ../.github/scripts/backend_checks.py --baseline-sha)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Restore main coverage baseline
+        # Exact commit only: an older main report is never substituted. A miss falls back
+        # to remeasuring main in the next step, with a warning.
+        if: steps.baseline.outputs.sha != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: backend/reports/main-cache
+          key: backend-coverage-main-${{ steps.baseline.outputs.sha }}
       - name: Test and compare coverage with main
-        run: uv run --frozen python ../.github/scripts/backend_checks.py
+        id: checks
+        env:
+          SAVE_BASELINE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          args=(--cached-baseline reports/main-cache)
+          if [[ "$SAVE_BASELINE" == true ]]; then
+            args+=(--save-baseline reports/main-baseline)
+          fi
+          uv run --frozen python ../.github/scripts/backend_checks.py "${args[@]}"
+      - name: Save main coverage baseline
+        # Only a passing main push publishes its report as the baseline for its commit.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: backend/reports/main-baseline
+          key: backend-coverage-main-${{ github.sha }}
       - name: Upload backend reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
