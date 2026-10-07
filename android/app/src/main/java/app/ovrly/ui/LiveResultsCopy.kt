@@ -42,6 +42,10 @@ internal fun livePhaseLabel(phase: LiveSessionPhase): String = when (phase) {
     LiveSessionPhase.UNKNOWN -> "Unknown session state"
 }
 
+/** The pill's text after Stop, in place of the timer. */
+internal fun afterStopLabel(phase: LiveSessionPhase): String =
+    if (phase == LiveSessionPhase.CONTINUING) "Research continues" else livePhaseLabel(phase)
+
 /** Phase line, plus the connection state when the source is retrying or gave up. */
 internal fun liveStatusLabel(results: LiveResults): String {
     val connection = when (results.connection) {

@@ -5,15 +5,18 @@
 ### Added
 
 - Live overlay forms (#31): the overlay now starts as a small "Examining m:ss" pill with the
-  ovrly mark, the claim count, an update dot and Stop, and grows into the large panel only
-  when tapped, or once automatically when a capture's first claims arrive. Any expanded panel
-  collapses back after 8 s without a touch or a new result (never under TalkBack or while the
-  Stop choice is open). The expanded panel uses the demo panel's frame and
-  style through a shared scaffold, opens where the pill is, follows Light and Dark, grows with
+  ovrly mark, the claim count, an update dot and Stop. Tapping it, or a capture's first
+  claims (once), opens the claims panel instantly below the pill, which stays put; tapping the
+  pill again closes it, and the panel repeats nothing from the pill. Untouched, the overlay
+  steps back one form at a time after 8 s (never under TalkBack or while the Stop choice is
+  open). The panel uses the demo panel's frame and
+  style through a shared scaffold, follows Light and Dark, grows with
   its content up to half the screen and keeps the right 72 dp free for short-video apps'
-  buttons; the pill and bubble fade to 70% after 4 s without a touch. After Stop with "Continue research" the overlay becomes a small
+  buttons; the pill and bubble fade to 70% after 4 s without a touch. Form changes are
+  instant, because animating the window's size jittered. After Stop with "Continue research" the overlay becomes a small
   draggable bubble with one claim-count badge that snaps to the edge and is dismissed by a
-  long-press drag onto a target (or a TalkBack action); "Keep only available results" shows "Saved to Inbox" for 3 s, then
+  long-press drag onto a target (or a TalkBack action); tapping it opens a pill with
+  "Research continues" and Dismiss, which opens the panel. "Keep only available results" shows "Saved to Inbox" for 3 s, then
   closes. A silent "Results ready" notification opens the capture's report when research that
   continued after Stop settles. "Keep recording" now reads "Keep examining".
 

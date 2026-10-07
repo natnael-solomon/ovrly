@@ -1,14 +1,7 @@
 package app.ovrly.ui
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,8 +28,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -50,6 +44,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.ovrly.R
@@ -77,6 +72,8 @@ internal data class LiveOverlayModel(
 internal data class LivePanelActions(
     val onExpand: () -> Unit = {},
     val onCollapse: () -> Unit = {},
+    /** After Stop: the bubble was tapped; it opens into the pill. */
+    val onOpenPill: () -> Unit = {},
     /** Hides the overlay after Stop; research and capture are untouched. */
     val onDismiss: () -> Unit = {},
     val onOpenClaim: (String) -> Unit = {},
@@ -85,8 +82,8 @@ internal data class LivePanelActions(
     val onRequestStop: () -> Unit = {},
     val onStopChoice: (Boolean) -> Unit = {},
     val onCancelStop: () -> Unit = {},
-    /** Height of the expanded panel's header plus its top padding: the window's drag area. */
-    val onHeaderHeight: (Int) -> Unit = {}
+    /** The pill's size while the panel is open below it: the pill is the window's drag area. */
+    val onPillSize: (IntSize) -> Unit = {}
 ) {
     companion object {
         val None = LivePanelActions()
@@ -94,10 +91,10 @@ internal data class LivePanelActions(
 }
 
 /**
- * The live overlay in its current [form]: the examining pill (with the Stop choice under it
- * when asked), the expanded panel, the idle bubble after Stop, or the short "Saved to Inbox"
- * pill. Forms change with a short fade and scale, or at once when [LivePanelFrame.animate] is
- * false (the phone's animations are off).
+ * The live overlay in its current [form]: the pill (with the Stop choice under it when
+ * asked), the pill with the claims panel below it, the idle bubble after Stop, or the short
+ * "Saved to Inbox" pill. Every change is instant: the panel appears under the pill, which
+ * stays where it is, and the window never animates its size (that showed as jitter).
  */
 @Composable
 internal fun LiveOverlay(
@@ -108,46 +105,25 @@ internal fun LiveOverlay(
     frame: LivePanelFrame = LivePanelFrame()
 ) {
     val examining = model.examining
-    AnimatedContent(
-        targetState = form,
-        modifier = modifier,
-        contentAlignment = Alignment.TopStart,
-        transitionSpec = {
-            // Expanding is instant: the panel replaces the pill in one frame. Other changes
-            // (collapse, Stop) fade the old form out quickly while the window keeps its size,
-            // then fade the new form in. The size never animates, because each size step
-            // relays out the overlay window, which showed as jitter on the phone.
-            if (frame.animate && targetState != LiveOverlayForm.EXPANDED) {
-                val corner = TransformOrigin(0f, 0f)
-                val enter = fadeIn(tween(FORM_MS, delayMillis = FORM_EXIT_MS))
-                val exit = fadeOut(tween(FORM_EXIT_MS)) +
-                    scaleOut(tween(FORM_EXIT_MS), FORM_END_SCALE, corner)
-                (enter togetherWith exit).using(
-                    SizeTransform(clip = false) { initial, target ->
-                        if (target.width * target.height >= initial.width * initial.height) {
-                            snap()
-                        } else {
-                            snap(delayMillis = FORM_EXIT_MS)
-                        }
-                    }
-                )
-            } else {
-                (fadeIn(snap()) togetherWith fadeOut(snap())).using(
-                    SizeTransform(clip = false) { _, _ -> snap() }
-                )
-            }
-        },
-        label = "liveOverlayForm"
-    ) { shown ->
-        val claims = model.results.claims.size
-        when (shown) {
+    val claims = model.results.claims.size
+    val expanded = form == LiveOverlayForm.EXPANDED
+    // While examining: the timer and Stop. After Stop: the session state and Dismiss.
+    val status = if (examining == null) afterStopLabel(model.results.phase) else null
+    val button = if (examining == null) actions.onDismiss else actions.onRequestStop
+    val pill = @Composable { pillModifier: Modifier ->
+        ExaminingPill(
+            PillState(examining?.seconds ?: 0, claims, model.panel.unseen, status, expanded),
+            onExpand = (if (expanded) actions.onCollapse else actions.onExpand)
+                .takeIf { model.results.connected },
+            onStop = button.takeIf { examining?.canStop != false },
+            modifier = pillModifier,
+            frame = frame
+        )
+    }
+    Box(modifier) {
+        when (form) {
             LiveOverlayForm.PILL -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ExaminingPill(
-                    PillState(examining?.seconds ?: 0, claims, model.panel.unseen),
-                    onExpand = actions.onExpand.takeIf { model.results.connected },
-                    onStop = actions.onRequestStop.takeIf { examining?.canStop != false },
-                    frame = frame
-                )
+                pill(Modifier)
                 if (model.panel.stopPrompt) {
                     StopChoicePrompt(
                         actions.onStopChoice,
@@ -157,11 +133,30 @@ internal fun LiveOverlay(
                 }
             }
 
-            LiveOverlayForm.EXPANDED -> LiveExpandedPanel(model, actions, frame = frame)
+            LiveOverlayForm.EXPANDED -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // The window spans the panel; the pill keeps its own x inside it.
+                pill(
+                    Modifier
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(constraints.copy(minWidth = 0))
+                            val room = (constraints.maxWidth - placeable.width).coerceAtLeast(0)
+                            val x = frame.pillOffset.roundToPx().coerceIn(0, room)
+                            layout(constraints.maxWidth, placeable.height) {
+                                placeable.place(x, 0)
+                            }
+                        }
+                        .onSizeChanged(actions.onPillSize)
+                )
+                LiveExpandedPanel(
+                    model,
+                    actions,
+                    frame = frame.copy(maxHeight = frame.maxHeight - PILL_ROW_DP.dp)
+                )
+            }
 
             LiveOverlayForm.BUBBLE -> IdleBubble(
                 PillState(0, claims, model.panel.unseen),
-                onExpand = actions.onExpand,
+                onExpand = actions.onOpenPill,
                 onDismiss = actions.onDismiss,
                 frame = frame
             )
@@ -186,24 +181,43 @@ internal fun OverlayMark(
 internal fun examiningLabel(seconds: Int): String =
     "Examining ${clockLabel(seconds.coerceAtLeast(0).toLong() * MS_PER_SECOND)}"
 
-internal fun pillDescription(seconds: Int, claims: Int, unseen: Boolean): String = buildString {
+internal fun pillDescription(
+    seconds: Int,
+    claims: Int,
+    unseen: Boolean,
+    status: String? = null
+): String = buildString {
     fun count(n: Int, unit: String) = "$n $unit${if (n == 1) "" else "s"}"
     val elapsed = seconds.coerceAtLeast(0)
-    append("Examining, ${count(elapsed / SECONDS_PER_MINUTE, "minute")} ")
-    append("${count(elapsed % SECONDS_PER_MINUTE, "second")}. ")
+    if (status != null) {
+        append("ovrly. $status. ")
+    } else {
+        append("Examining, ${count(elapsed / SECONDS_PER_MINUTE, "minute")} ")
+        append("${count(elapsed % SECONDS_PER_MINUTE, "second")}. ")
+    }
     append(claimLabel(claims))
     if (unseen) append(", updated")
     append('.')
 }
 
-/** What the examining pill reads: elapsed time, claim count and whether anything is unseen. */
+/**
+ * What the pill reads: elapsed time (or, after Stop, [status] instead), claim count and
+ * whether anything is unseen. [expanded] when the panel is open below it, so a tap collapses.
+ */
 @Immutable
-internal data class PillState(val seconds: Int, val claims: Int, val unseen: Boolean = false)
+internal data class PillState(
+    val seconds: Int,
+    val claims: Int,
+    val unseen: Boolean = false,
+    val status: String? = null,
+    val expanded: Boolean = false
+)
 
 /**
- * The default while examining: mark, timer, claim count and update dot, then Stop. Tapping
- * anywhere but Stop expands the panel ([onExpand] is null until live results are connected);
- * the host's window drag starts only after the touch moves past the touch slop.
+ * The pill: mark, timer (or the session state after Stop), claim count and update dot, then
+ * Stop (Dismiss after Stop). Tapping anywhere but the button opens or closes the panel below
+ * it ([onExpand] is null until live results are connected); the host's window drag starts
+ * only after the touch moves past the touch slop.
  */
 @Composable
 internal fun ExaminingPill(
@@ -227,7 +241,11 @@ internal fun ExaminingPill(
                         20.dp
                     ).background(LocalOvrlyPalette.current.ink.copy(alpha = DIVIDER_ALPHA))
                 )
-                PanelIconButton(Glyph.Stop, "Stop examining", onStop)
+                if (state.status == null) {
+                    PanelIconButton(Glyph.Stop, "Stop examining", onStop)
+                } else {
+                    PanelIconButton(Glyph.Close, "Dismiss overlay. Research continues", onStop)
+                }
                 Spacer(Modifier.width(2.dp))
             }
         }
@@ -247,20 +265,19 @@ private fun PillReadout(
     modifier: Modifier = Modifier
 ) {
     val p = LocalOvrlyPalette.current
-    val description = pillDescription(state.seconds, state.claims, state.unseen)
-    val tap = if (onExpand != null) {
-        Modifier.clickable(role = Role.Button, onClickLabel = EXPAND_LABEL, onClick = onExpand)
-    } else {
-        Modifier
+    val description = pillDescription(state.seconds, state.claims, state.unseen, state.status)
+    val label = if (state.expanded) COLLAPSE_LABEL else EXPAND_LABEL
+    val tap = onExpand?.let {
+        Modifier.clickable(role = Role.Button, onClickLabel = label, onClick = it)
     }
     Row(
         modifier
             .sizeIn(minHeight = 52.dp)
-            .then(tap)
+            .then(tap ?: Modifier)
             .clearAndSetSemantics {
                 contentDescription = description
                 if (onExpand != null) {
-                    onClick(EXPAND_LABEL) {
+                    onClick(label) {
                         onExpand()
                         true
                     }
@@ -272,27 +289,26 @@ private fun PillReadout(
         OverlayMark(Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         Text(
-            "Examining",
+            state.status ?: "Examining",
+            modifier = Modifier.weight(1f, fill = false),
             style = MaterialTheme.typography.labelMedium,
             color = p.muted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            examiningLabel(state.seconds).removePrefix("Examining "),
-            style = MaterialTheme.typography.titleSmall.copy(
-                fontWeight = FontWeight.SemiBold,
-                fontFeatureSettings = "tnum"
-            ),
-            softWrap = false
-        )
+        if (state.status == null) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                examiningLabel(state.seconds).removePrefix("Examining "),
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontFeatureSettings = "tnum"
+                ),
+                softWrap = false
+            )
+        }
         Spacer(Modifier.width(10.dp))
-        Spacer(
-            Modifier.width(
-                1.dp
-            ).height(20.dp).background(LocalOvrlyPalette.current.ink.copy(alpha = DIVIDER_ALPHA))
-        )
+        Spacer(Modifier.width(1.dp).height(20.dp).background(p.ink.copy(alpha = DIVIDER_ALPHA)))
         Spacer(Modifier.width(10.dp))
         Text(
             claimLabel(state.claims),
@@ -431,12 +447,13 @@ private fun UpdateDot(visible: Boolean, animate: Boolean, modifier: Modifier = M
 }
 
 private const val EXPAND_LABEL = "Expand live results"
+private const val COLLAPSE_LABEL = "Collapse live results"
+
+/** The pill's row above the open panel: its height plus the gap, taken off the panel's cap. */
+private const val PILL_ROW_DP = 60
 internal const val BUBBLE_DP = 64
 private const val BUBBLE_INSET_DP = 4
 
-private const val FORM_MS = 150
-private const val FORM_EXIT_MS = FORM_MS / 2
-private const val FORM_END_SCALE = 0.92f
 private const val PULSE_MS = 220
 private const val PULSE_SCALE = 1.6f
 private const val BADGE_PULSE_SCALE = 1.25f

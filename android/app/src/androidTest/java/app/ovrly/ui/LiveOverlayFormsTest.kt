@@ -82,6 +82,7 @@ class LiveOverlayFormsTest {
                     actions = LivePanelActions(
                         onExpand = { controller.setExpanded(true) },
                         onCollapse = { controller.setExpanded(false) },
+                        onOpenPill = { controller.setExpanded(false) },
                         onDismiss = { dismissed += 1 },
                         onOpenClaim = controller::openClaim,
                         onCloseClaim = { controller.openClaim(null) },
@@ -100,13 +101,18 @@ class LiveOverlayFormsTest {
         pillDescription(27, results.value.claims.size, unseen = false)
     )
 
-    @Test fun thePillExpandsOnTapAndCollapsesBack() {
+    private fun panel() = compose.onNodeWithText(PANEL_FOOTER)
+
+    @Test fun thePillStaysAndThePanelOpensAndClosesBelowIt() {
         show()
         pill().assertIsDisplayed().performClick()
-        compose.onNodeWithContentDescription("Collapse live results").assertIsDisplayed()
-        compose.onNodeWithText("Examining 0:27").assertIsDisplayed()
-        compose.onNodeWithText("Drag header to move").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Collapse live results").performClick()
+        panel().assertIsDisplayed()
+        pill().assertIsDisplayed()
+        val pillBottom = pill().getUnclippedBoundsInRoot().bottom
+        val panelTop = panel().getUnclippedBoundsInRoot().top
+        assertTrue("the panel is below the pill", panelTop > pillBottom)
+        pill().performClick()
+        panel().assertDoesNotExist()
         pill().assertIsDisplayed()
         assertTrue("collapsing is not Stop", choices.isEmpty())
     }
@@ -115,7 +121,7 @@ class LiveOverlayFormsTest {
         results.value = LiveResults.NotConnected
         show()
         pill().performClick()
-        compose.onNodeWithContentDescription("Collapse live results").assertDoesNotExist()
+        panel().assertDoesNotExist()
     }
 
     @Test fun theFirstClaimsExpandThePanelOnce() {
@@ -127,7 +133,7 @@ class LiveOverlayFormsTest {
             controller.onResults(steps[1])
             results.value = steps[1]
         }
-        compose.onNodeWithContentDescription("Collapse live results").assertIsDisplayed()
+        panel().assertIsDisplayed()
     }
 
     @Test fun theExpandedPanelGrowsWithItsContentUpToTheCap() {
@@ -141,8 +147,10 @@ class LiveOverlayFormsTest {
                 claims = List(MANY) { i -> claims[i % claims.size].copy(id = "claim-$i") }
             )
         }
+        // The pill's row (about 60 dp) is taken off the panel's cap, so pill and panel
+        // together stay within it.
         val many = compose.onNodeWithTag(TAG).getUnclippedBoundsInRoot().height
-        assertEquals(CAP.value, many.value, 1f)
+        assertEquals(CAP.value, many.value, PILL_ROW_TOLERANCE)
     }
 
     @Test fun stopFromThePillOffersKeepExaminingThenContinuingLeavesTheBubble() {
@@ -163,9 +171,14 @@ class LiveOverlayFormsTest {
             .single { it.label == "Dismiss overlay" }
         compose.runOnIdle { dismiss.action() }
         compose.runOnIdle { assertEquals(1, dismissed) }
+        // The bubble opens into the pill, with Dismiss where Stop was; the pill opens the panel.
         bubble.performClick()
         compose.onNodeWithContentDescription("Dismiss overlay. Research continues")
             .assertIsDisplayed()
+        compose.onNodeWithContentDescription("ovrly. Research continues", substring = true)
+            .assertIsDisplayed()
+            .performClick()
+        panel().assertIsDisplayed()
     }
 
     @Test fun keepingOnlyAvailableResultsShowsSavedToInbox() {
@@ -214,5 +227,7 @@ class LiveOverlayFormsTest {
         const val TAG = "liveOverlay"
         const val MANY = 24
         val CAP = 400.dp
+        const val PANEL_FOOTER = "Drag the pill to move"
+        const val PILL_ROW_TOLERANCE = 8f
     }
 }

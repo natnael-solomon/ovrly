@@ -48,22 +48,27 @@ internal data class LivePanelState(
     /** This capture's one automatic expand has happened or is no longer wanted. */
     val autoExpandSpent: Boolean = false,
     /**
-     * The expanded panel collapses on its own after [AUTO_COLLAPSE_MS] untouched. Off while
-     * collapsed and while the Stop choice is open.
+     * The panel, the pill after Stop, collapses one step on its own after [AUTO_COLLAPSE_MS]
+     * untouched. Off while the Stop choice is open.
      */
     val autoCollapsePending: Boolean = false,
     /** Counts touches and new results on the expanded panel; each restarts its collapse timer. */
     val activity: Int = 0,
     /** Something changed while collapsed: the update dot on the pill or bubble. */
-    val unseen: Boolean = false
+    val unseen: Boolean = false,
+    /** After Stop with research continuing: the bubble was tapped open into the pill. */
+    val pillOpen: Boolean = false
 )
 
 /** What the live overlay shows. */
 internal enum class LiveOverlayForm {
-    /** While examining: mark, timer, claim count, update dot and Stop. */
+    /**
+     * While examining: mark, timer, claim count, update dot and Stop. After Stop, opened from
+     * the bubble: mark, session state, claim count, update dot and Dismiss.
+     */
     PILL,
 
-    /** The large panel with the claims. */
+    /** The pill with the claims panel below it. */
     EXPANDED,
 
     /** After Stop with research continuing: a small round mark with the claim count. */
@@ -88,6 +93,7 @@ internal fun liveOverlayForm(
         panel.stopChoice == false -> LiveOverlayForm.SAVED
         panel.expanded && connected -> LiveOverlayForm.EXPANDED
         examining -> LiveOverlayForm.PILL
+        connected && panel.pillOpen -> LiveOverlayForm.PILL
         connected -> LiveOverlayForm.BUBBLE
         else -> null
     }
@@ -186,31 +192,46 @@ internal class LivePanelController(
 
     /**
      * The user opened or closed the panel; either way the automatic expand is no longer
-     * wanted. Closing returns to the pill or bubble and never touches capture. An open panel
-     * collapses again when left untouched.
+     * wanted. Closing returns to the pill and never touches capture. After Stop with research
+     * continuing, closing (or tapping the bubble, which calls this with false) opens the pill.
+     * The panel, and the pill after Stop, collapse one step again when left untouched.
      */
     fun setExpanded(expanded: Boolean) = mutable.update {
+        val afterStop = it.stopChoice == true
         memory.spend(it, session).copy(
             expanded = expanded,
+            pillOpen = afterStop || it.pillOpen,
             unseen = if (expanded) false else it.unseen,
             detailClaimId = if (expanded) it.detailClaimId else null,
             autoExpandSpent = true,
-            autoCollapsePending = expanded && !it.stopPrompt,
+            autoCollapsePending = (expanded || afterStop) && !it.stopPrompt,
             activity = it.activity + 1
         )
     }
 
-    /** Any touch on the expanded panel restarts its collapse timer. */
+    /** Any touch on the panel or the pill after Stop restarts its collapse timer. */
     fun touched() = mutable.update {
-        if (it.expanded) it.copy(activity = it.activity + 1) else it
+        if (it.expanded || it.pillOpen) it.copy(activity = it.activity + 1) else it
     }
 
-    /** The expanded panel's timer ran out without a touch or a new result. */
+    /**
+     * The timer ran out without a touch or a new result: the panel closes to the pill, and
+     * after Stop the pill then closes to the bubble one timer later.
+     */
     fun autoCollapse() = mutable.update {
-        if (it.autoCollapsePending && it.expanded && !it.stopPrompt) {
-            it.copy(expanded = false, detailClaimId = null, autoCollapsePending = false)
-        } else {
-            it
+        when {
+            !it.autoCollapsePending || it.stopPrompt -> it
+
+            it.expanded -> it.copy(
+                expanded = false,
+                detailClaimId = null,
+                autoCollapsePending = it.pillOpen,
+                activity = it.activity + 1
+            )
+
+            it.pillOpen -> it.copy(pillOpen = false, autoCollapsePending = false)
+
+            else -> it.copy(autoCollapsePending = false)
         }
     }
 
@@ -219,7 +240,7 @@ internal class LivePanelController(
         when {
             !open -> it.copy(
                 stopPrompt = false,
-                autoCollapsePending = it.expanded,
+                autoCollapsePending = it.expanded || it.pillOpen,
                 activity = it.activity + 1
             )
 
@@ -237,6 +258,7 @@ internal class LivePanelController(
             stopPrompt = false,
             stopChoice = continueResearch,
             expanded = false,
+            pillOpen = false,
             detailClaimId = null,
             autoCollapsePending = false
         )
@@ -259,6 +281,7 @@ internal class LivePanelController(
                 started -> it.copy(
                     stopChoice = null,
                     expanded = false,
+                    pillOpen = false,
                     autoExpandSpent = session != null && memory.spentFor == session,
                     autoCollapsePending = false,
                     unseen = false

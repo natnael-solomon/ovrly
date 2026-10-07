@@ -1,8 +1,5 @@
 package app.ovrly.ui
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,16 +21,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -60,15 +50,18 @@ internal data class LivePanelFrame(
     val width: Dp = 340.dp,
     val maxHeight: Dp = 360.dp,
     val higherOpacity: Boolean = false,
-    /** False when the phone's animations are off: forms switch at once, nothing pulses. */
-    val animate: Boolean = true
+    /** False when the phone's animations are off: nothing pulses. */
+    val animate: Boolean = true,
+    /** Where the pill sits inside the open panel's window, so it stays where it was. */
+    val pillOffset: Dp = 0.dp
 )
 
 /**
- * The expanded live results, in the demo panel's frame and style ([OverlayPanelScaffold]): it
- * grows with its content up to [LivePanelFrame.maxHeight] and scrolls inside. The header
- * carries the mark, "Examining m:ss" (or the session state after Stop), the fixture label,
- * Stop while examining or Dismiss after it, and Collapse. The Stop choice opens in the body.
+ * The claims panel shown under the pill, in the demo panel's frame and style
+ * ([OverlayPanelScaffold]): it grows with its content up to [LivePanelFrame.maxHeight] and
+ * scrolls inside. The pill above it carries the mark, timer, claim count and Stop (Dismiss
+ * after Stop), so the panel's top row is only the session state and the fixture label. The
+ * Stop choice opens in the body.
  */
 @Composable
 internal fun LiveExpandedPanel(
@@ -77,29 +70,15 @@ internal fun LiveExpandedPanel(
     modifier: Modifier = Modifier,
     frame: LivePanelFrame = LivePanelFrame()
 ) {
-    // The panel unrolls downward from the pill's height. Only a clip in the draw phase
-    // changes, so the window, which already has the panel's size, never relays out (each
-    // relayout showed as jitter on the phone).
-    val reveal = remember { Animatable(if (frame.animate) 0f else 1f) }
-    LaunchedEffect(Unit) { reveal.animateTo(1f, tween(UNROLL_MS, easing = FastOutSlowInEasing)) }
     OverlayPanelScaffold(
-        header = { LiveHeader(model, actions, model.examining) },
-        footer = { OverlayPanelFooter("Drag header to move") },
-        modifier = modifier.drawWithContent {
-            val start = UNROLL_START_DP.dp.toPx().coerceAtMost(size.height)
-            val bottom = start + (size.height - start) * reveal.value
-            val corner = CornerRadius(PANEL_CORNER_DP.dp.toPx())
-            val visible = Path().apply {
-                addRoundRect(RoundRect(0f, 0f, size.width, bottom, corner))
-            }
-            clipPath(visible) { this@drawWithContent.drawContent() }
-        },
+        header = { LiveHeader(model) },
+        footer = { OverlayPanelFooter("Drag the pill to move") },
+        modifier = modifier,
         spec = OverlayPanelSpec(
             frame.width,
             frame.maxHeight,
             fixedHeight = false,
-            higherOpacity = frame.higherOpacity,
-            onHeaderHeight = actions.onHeaderHeight
+            higherOpacity = frame.higherOpacity
         )
     ) {
         if (model.panel.stopPrompt) {
@@ -113,21 +92,11 @@ internal fun LiveExpandedPanel(
 /** The running capture, for the header and the pill. */
 internal data class ExaminingState(val seconds: Int, val canStop: Boolean = true)
 
+/** The panel's top row: the session state and, for fixtures, their label. */
 @Composable
-private fun RowScope.LiveHeader(
-    model: LiveOverlayModel,
-    actions: LivePanelActions,
-    examining: ExaminingState?
-) {
+private fun RowScope.LiveHeader(model: LiveOverlayModel) {
     val p = LocalOvrlyPalette.current
-    OverlayMark(Modifier.size(22.dp))
-    Spacer(Modifier.width(10.dp))
     Column(Modifier.weight(1f)) {
-        Text(
-            examining?.let { examiningLabel(it.seconds) } ?: "Live results",
-            modifier = Modifier.semantics { heading() },
-            style = MaterialTheme.typography.titleSmall
-        )
         Text(
             liveStatusLabel(model.results),
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
@@ -147,12 +116,6 @@ private fun RowScope.LiveHeader(
             )
         }
     }
-    if (examining != null) {
-        if (examining.canStop) PanelIconButton(Glyph.Stop, "Stop examining", actions.onRequestStop)
-    } else {
-        PanelIconButton(Glyph.Close, "Dismiss overlay. Research continues", actions.onDismiss)
-    }
-    PanelIconButton(Glyph.Collapse, "Collapse live results", actions.onCollapse)
 }
 
 /** Coverage, the newest update notice, then the claims in spoken order or one claim's detail. */
@@ -386,8 +349,3 @@ internal fun PanelIconButton(
         OverlayGlyph(glyph, Modifier.size(18.dp))
     }
 }
-
-/** The expanded panel's unroll: length, start height (about the pill's) and glass corner. */
-private const val UNROLL_MS = 150
-private const val UNROLL_START_DP = 56
-private const val PANEL_CORNER_DP = 28

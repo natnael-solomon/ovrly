@@ -365,25 +365,21 @@ forms from the panel state, the live results and whether a capture is running:
 
 | Form | When | What it shows |
 | --- | --- | --- |
-| Pill | While examining (a capture runs) | The ovrly mark, "Examining m:ss", the claim count, an update dot and Stop. Tapping anywhere but Stop expands it once live results are connected; a drag that moves past the touch slop moves the window instead. Stop opens the choice in a card under the pill: "Continue research in queue", "Keep only available results" or "Keep examining". |
-| Expanded | After a tap, or once automatically | The demo panel's frame and style through the shared `OverlayPanelScaffold`: the demo's width minus a 72 dp gutter on the right (kept free for the like, comment and share buttons of short-video apps), opening where the pill is (its top stays at the pill's top and it moves up only as far as needed to stay on screen), growing with its content up to the demo's half-screen height and scrolling inside. The header (the only drag area) has the mark, "Examining m:ss" or the session state after Stop, the fixture label, Stop while examining or Dismiss after it, and Collapse. The body has the captured-segment line, the newest "Assessment updated" notice, then the claims or one claim's detail; the Stop choice opens here when Stop is tapped in the panel. The footer reads "Drag header to move". |
-| Bubble | After Stop with "Continue research in queue" | A round mark with a single badge, the claim count, which pulses when a result changes. It drags anywhere and snaps to the nearer side edge; tapping it expands the panel. A long press then a drag onto the round target near the bottom dismisses the overlay; TalkBack offers a "Dismiss overlay" action, and the expanded panel has Dismiss in its header. Dismissing only hides the overlay; research and the results in the app continue. |
+| Pill | While examining (a capture runs); after Stop, when the bubble is tapped | The ovrly mark, "Examining m:ss", the claim count, an update dot and Stop. After Stop the timer is replaced by "Research continues" (or the session state) and Stop by Dismiss. Tapping anywhere but the button opens the panel below it once live results are connected, and tapping it again closes the panel; a drag that moves past the touch slop moves the window instead. Stop opens the choice in a card under the pill: "Continue research in queue", "Keep only available results" or "Keep examining". |
+| Expanded | After a tap on the pill, or once automatically | The pill stays where it is, and the claims panel appears instantly 8 dp below it as a separate glass card in the demo panel's frame and style (the shared `OverlayPanelScaffold`): the demo's width minus a 72 dp gutter on the right (kept free for the like, comment and share buttons of short-video apps), growing with its content up to the demo's half-screen height less the pill's row, and scrolling inside. The window moves up only as far as needed to stay on screen. The pill is the drag area. The panel repeats nothing from the pill: its top row is the session state and the fixture label, then the captured-segment line, the newest "Assessment updated" notice, then the claims or one claim's detail; the Stop choice opens here when Stop is tapped on the pill. The footer reads "Drag the pill to move". |
+| Bubble | After Stop with "Continue research in queue" | A round mark with a single badge, the claim count, which pulses when a result changes. It drags anywhere and snaps to the nearer side edge; tapping it opens the pill (with Dismiss), and tapping that pill opens the panel. A long press then a drag onto the round target near the bottom dismisses the overlay; TalkBack offers a "Dismiss overlay" action. Dismissing only hides the overlay; research and the results in the app continue. |
 | Saved | After Stop with "Keep only available results" | "Saved to Inbox · N claims" for 3 s, then the overlay closes. |
 
 The first claims of a capture expand the panel once, unless the user already expanded or
-collapsed it or the Stop choice is open. Any expanded panel, opened automatically or by a tap,
-collapses back to the pill (or bubble) after 8 s without a touch or a new result; never while
-the Stop choice is open or TalkBack is on. Later claims and updates only change the count and
-light the dot, which pulses twice. The expanded panel never fades; the pill and bubble fade to
-70% after 4 s without a touch or a new result, and return on the next touch or result; there
-is no fade under TalkBack.
-Expanding unrolls the panel downward from the pill's height in about 150 ms: the window takes
-the panel's size at once and only a clip in the draw phase moves. Other form changes
-(collapse, Stop) take about 150 ms: the old form fades and shrinks into the pill's corner
-while the window keeps its size, then the new form fades in. The window never resizes
-mid-animation (each resize relays out the overlay window, which jittered). Every change is
-instant when the phone's animations are off. Collapse puts the pill back at the
-panel's top. When research that continued
+collapsed it or the Stop choice is open. Untouched, the overlay steps back one form at a time:
+an open panel closes to the pill after 8 s without a touch or a new result, and after Stop
+that pill closes to the bubble 8 s later; never while the Stop choice is open or TalkBack is
+on. Later claims and updates only change the count and light the dot, which pulses twice.
+The panel never fades; the pill and bubble fade to 70% after 4 s without a touch or a new
+result, and return on the next touch or result; there is no fade under TalkBack.
+Every change between forms is instant, with no animation: the window never resizes
+mid-animation (each animated resize relayed out the overlay window, which jittered on the
+phone). Closing the panel leaves the pill where it was. When research that continued
 after Stop has settled, `CaptureLive` posts a silent, low-priority "Results ready · N claims"
 notification that opens the capture's report (`MainActivity.ACTION_OPEN_CHECK`), whether or
 not the overlay is still shown. The claim list keeps working at 200% text: everything below

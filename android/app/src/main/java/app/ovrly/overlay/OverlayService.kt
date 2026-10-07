@@ -127,6 +127,10 @@ class OverlayService :
     private var compactPosition = 24 to 180
     private var pendingCompactPosition: Pair<Int, Int>? = null
 
+    /** The pill's screen x while the panel is open below it; the window then spans the panel. */
+    private val pillX = MutableStateFlow(compactPosition.first)
+    private var pillWidth = 0
+
     /**
      * Where the expanded panel's top edge wants to be: the pill's top when it expanded, or
      * where the user dragged the panel. The panel opens there and moves up only as far as
@@ -350,6 +354,7 @@ class OverlayService :
                         val density = resources.displayMetrics.density
                         val geometry =
                             livePanelGeometry(usableSize.width, usableSize.height, density)
+                        val pillAt by pillX.collectAsState()
                         LiveWindow(
                             shown,
                             LiveOverlayModel(
@@ -366,7 +371,9 @@ class OverlayService :
                             LivePanelFrame(
                                 (geometry.width / density).dp,
                                 (geometry.height / density).dp,
-                                opaque
+                                opaque,
+                                pillOffset =
+                                    ((pillAt - geometry.margin).coerceAtLeast(0) / density).dp
                             )
                         )
                     }
@@ -512,6 +519,7 @@ class OverlayService :
         when {
             next == LiveOverlayForm.EXPANDED -> {
                 if (previous != null) compactPosition = params.x to params.y
+                pillX.value = compactPosition.first
                 panelTop = compactPosition.second
                 configureWindow()
             }
@@ -555,11 +563,22 @@ class OverlayService :
 
         override fun longPressDrag(): Boolean = form == LiveOverlayForm.BUBBLE
 
-        override fun currentPosition() = params.x to params.y
+        override fun currentPosition() =
+            if (form == LiveOverlayForm.EXPANDED) pillX.value to params.y else params.x to params.y
 
         override fun onMove(x: Int, y: Int) {
-            moveTo(x, y)
-            if (form == LiveOverlayForm.EXPANDED) panelTop = params.y
+            if (form == LiveOverlayForm.EXPANDED) {
+                // The window spans the panel and moves only vertically; the pill moves inside.
+                val left = params.x
+                val right = left + (params.width - pillWidth).coerceAtLeast(0)
+                val pill = x.coerceIn(left, right)
+                pillX.value = pill
+                compactPosition = pill to compactPosition.second
+                moveTo(params.x, y)
+                panelTop = params.y
+            } else {
+                moveTo(x, y)
+            }
             dismissTarget?.highlight(bubbleOverTarget())
         }
 
@@ -611,6 +630,7 @@ class OverlayService :
     private fun liveActions() = LivePanelActions(
         onExpand = { livePanel.setExpanded(true) },
         onCollapse = { livePanel.setExpanded(false) },
+        onOpenPill = { livePanel.setExpanded(false) },
         onDismiss = { stopSelf() },
         onOpenClaim = livePanel::openClaim,
         onCloseClaim = { livePanel.openClaim(null) },
@@ -618,7 +638,10 @@ class OverlayService :
         onRequestStop = { livePanel.setStopPrompt(true) },
         onStopChoice = livePanel::chooseStop,
         onCancelStop = { livePanel.setStopPrompt(false) },
-        onHeaderHeight = { panelHeaderHeight = it }
+        onPillSize = {
+            panelHeaderHeight = it.height
+            pillWidth = it.width
+        }
     )
 
     /** Debug builds only: replaces the live source with the labelled fixture timeline. */

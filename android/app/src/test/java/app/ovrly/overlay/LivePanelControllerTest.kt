@@ -172,6 +172,28 @@ class LivePanelControllerTest {
         )
     }
 
+    @Test fun afterStopTheBubbleOpensThePillThenThePanelAndIdleStepsBackOneAtATime() {
+        val continuing = polls()[2].copy(phase = LiveSessionPhase.CONTINUING)
+        fun form() = liveOverlayForm(controller.state.value, continuing, examining = false)
+        controller.setStopPrompt(true)
+        controller.chooseStop(true)
+        assertEquals(LiveOverlayForm.BUBBLE, form())
+        // Tapping the bubble opens the pill; tapping the pill opens the panel below it.
+        controller.setExpanded(false)
+        assertEquals(LiveOverlayForm.PILL, form())
+        assertTrue(controller.state.value.autoCollapsePending)
+        controller.setExpanded(true)
+        assertEquals(LiveOverlayForm.EXPANDED, form())
+        // Untouched: the panel closes to the pill, and one timer later the pill to the bubble.
+        controller.autoCollapse()
+        assertEquals(LiveOverlayForm.PILL, form())
+        assertTrue("the pill's own timer starts", controller.state.value.autoCollapsePending)
+        controller.autoCollapse()
+        assertEquals(LiveOverlayForm.BUBBLE, form())
+        assertFalse(controller.state.value.autoCollapsePending)
+        assertEquals(listOf(true), choices)
+    }
+
     @Test fun formsFollowCaptureAndConnection() {
         val idle = LivePanelState()
         val open = LivePanelState(expanded = true)
