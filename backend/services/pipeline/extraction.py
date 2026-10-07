@@ -303,13 +303,17 @@ class ExtractionStage:
                         connection, investigation_id
                     ):
                         raise CancellationRequested()
-                    await context.queue.save_stage_data(job.lease, data, connection=connection)
                     if job.payload.get("incremental"):
                         from services.pipeline.incremental import record_request
 
                         await record_request(
                             connection, investigation_id, input_bytes, output_tokens
                         )
+                    # in_flight becomes durable only with an admitted request, just before
+                    # the send, so a refused reservation can never leave an unknown outcome.
+                    if operation != "feedback":
+                        data["in_flight"] = True
+                    await context.queue.save_stage_data(job.lease, data, connection=connection)
             except ExtractionBudgetExceeded:
                 data["requests"].pop()
                 data.update(in_flight=False, budget_exhausted=True)
@@ -346,8 +350,6 @@ class ExtractionStage:
                 raise ProviderCooldown(remaining)
             if data.get("needs_route"):
                 if "fallbacks" not in data:
-                    data["in_flight"] = True
-                    await context.queue.save_stage_data(job.lease, data)
                     try:
                         data["fallbacks"] = await self._wait(
                             self.llm.fallbacks(window.model_dump(mode="json"), account=account),
@@ -372,8 +374,7 @@ class ExtractionStage:
                 raise ExtractionUnavailable("Previously selected provider is not authorized")
             while sum(item.get("valid") is False for item in attempts) < 2:
                 await context.heartbeat()
-                data = {**data, "attempts": attempts, "in_flight": True}
-                await context.queue.save_stage_data(job.lease, data)
+                data = {**data, "attempts": attempts}
                 repair = any(item.get("valid") is False for item in attempts)
                 reasons = [item["reason"] for item in attempts if item.get("reason")]
                 attempt: dict[str, Any] = {"repair": repair, "provider": active.provider}

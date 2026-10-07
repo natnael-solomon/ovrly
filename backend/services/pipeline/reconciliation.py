@@ -304,8 +304,12 @@ class ReconciliationStage:
                 async with context.queue.database.engine.begin() as connection:
                     if not await lock_extraction_capture(connection, identifier):
                         raise CancellationRequested()
-                    await context.queue.save_stage_data(job.lease, data, connection=connection)
                     await record_request(connection, identifier, size, output, reconciliation=True)
+                    # in_flight becomes durable only with an admitted request, just before
+                    # the send, so a refused reservation can never leave an unknown outcome.
+                    if operation != "feedback":
+                        data["in_flight"] = True
+                    await context.queue.save_stage_data(job.lease, data, connection=connection)
             except ExtractionBudgetExceeded:
                 data["requests"].pop()
                 data.update(in_flight=False, budget_exhausted=True)
@@ -327,8 +331,6 @@ class ReconciliationStage:
             if remaining > 0:
                 raise ProviderCooldown(remaining)
             if data.get("needs_route"):
-                data["in_flight"] = True
-                await context.queue.save_stage_data(job.lease, data)
                 try:
                     models = await wait_for_provider(
                         self.llm.fallbacks(source, account=account), context
@@ -359,8 +361,6 @@ class ReconciliationStage:
                     "task": STAGE,
                     "repair": repair,
                 }
-                data["in_flight"] = True
-                await context.queue.save_stage_data(job.lease, data)
                 try:
                     completion = await wait_for_provider(
                         self.llm.complete(
