@@ -223,11 +223,13 @@ HTTP; known failures, cancellation and uncertain outcomes retain the reservation
 until its windows expire. No refund is assumed from an error or an empty transcript.
 
 The adapter posts English, temperature-zero `verbose_json` to the fixed Groq
-transcription endpoint. Redirects and environment proxy routing are disabled.
+transcription endpoint through the SSRF guard's `GuardedTransport`; redirects and
+environment proxy routing are disabled, and a refused destination is unavailability.
 Audio bytes/hash/cap are checked before reservation and HTTP. Responses have a
 byte limit and compressed responses are refused. Each finite, nonempty segment
-interval must lie within the audio duration; seconds are rounded to nearest
-milliseconds and collapsed or out-of-range intervals are rejected, not clamped.
+interval must start at or after zero and end within one second past the audio
+duration; seconds are rounded to nearest milliseconds, collapsed or inverted
+intervals are rejected, and a quantised overrun is clamped to the audio end.
 Prepared uploads start at media time zero, preserving delayed audio as leading
 silence; the adapter also supports explicit offset conversion, but
 captured-chunk transport remains later work.
@@ -1314,7 +1316,7 @@ independent opt-in. All API and worker processes must have the same configuratio
 | Setting | Proposed default / meaning |
 | --- | --- |
 | `OVRLY_QUOTAS_ENABLED` | `0`; opt in only after reviewing the proposed policy |
-| `OVRLY_QUOTA_ACTIVE_CHECKS` | 2 per principal; distinct checks with active queued/leased/running jobs, plus unexpired open captures |
+| `OVRLY_QUOTA_ACTIVE_CHECKS` | 2 per principal; distinct checks with active queued/leased/running jobs (never-claimed `upload_device_text` fences excluded), plus unexpired open captures |
 | `OVRLY_QUOTA_DAILY_CHECKS` | 6 new investigations, captures or reanalyses per principal per UTC day |
 | `OVRLY_QUOTA_DAILY_UPLOAD_BYTES` | 268435456 (256 MiB); shared daily reservation budget for uploads and capture chunks |
 | `OVRLY_QUOTA_CLAIMS_PER_RUN` | 5; further caps `OVRLY_EVIDENCE_MAX_CLAIMS` for retrieval, including deeper searches; remaining claims stay unassessed |
@@ -1387,7 +1389,7 @@ The RFC section 15 threat-model controls are negative tests in CI:
 
 | Control | Implementation | Tests |
 | --- | --- | --- |
-| SSRF on outbound fetches | `services/providers/egress.py`. Production evidence clients use `GuardedTransport` (no environment proxies): each connection resolves the host once, refuses it if **any** answer is private, loopback, link-local (including `169.254.169.254`), shared (`100.64.0.0/10`), reserved, multicast, IPv6 unique-local/site-local or an IPv6 form embedding such an IPv4 address (mapped, compatible, NAT64, 6to4, Teredo), and dials exactly the checked address while TLS still verifies the host name, so DNS rebinding cannot reach an internal host. `fetch` validates every URL (only `http`/`https`, no credentials, default ports, no `localhost`/`.internal`/`.local`/single-label names or internal literals including legacy numeric IPv4 spellings), follows at most 3 redirects with each hop re-checked and no HTTPS to HTTP downgrade, and bodies are capped (`Content-Length` and bytes read, 4 MiB). A refusal is `UnsafeUrl` (a `ProviderError`) with a fixed `reason`; neither URL nor address is logged. Open-access full text (arXiv, Europe PMC) goes through `fetch`; any future fetch of a provider- or user-supplied URL (for example #20 URL intake) must too. | `tests/test_security_ssrf.py` (database-free) |
+| SSRF on outbound fetches | `services/providers/egress.py`. Production evidence clients and the Groq speech adapter use `GuardedTransport` (no environment proxies): each connection resolves the host once, refuses it if **any** answer is private, loopback, link-local (including `169.254.169.254`), shared (`100.64.0.0/10`), reserved, multicast, IPv6 unique-local/site-local or an IPv6 form embedding such an IPv4 address (mapped, compatible, NAT64, 6to4, Teredo), and dials exactly the checked address while TLS still verifies the host name, so DNS rebinding cannot reach an internal host. `fetch` validates every URL (only `http`/`https`, no credentials, default ports, no `localhost`/`.internal`/`.local`/single-label names or internal literals including legacy numeric IPv4 spellings), follows at most 3 redirects with each hop re-checked and no HTTPS to HTTP downgrade, and bodies are capped (`Content-Length` and bytes read, 4 MiB). A refusal is `UnsafeUrl` (a `ProviderError`) with a fixed `reason`; neither URL nor address is logged. Open-access full text (arXiv, Europe PMC) goes through `fetch`; any future fetch of a provider- or user-supplied URL (for example #20 URL intake) must too. | `tests/test_security_ssrf.py` (database-free) |
 | Object authorization | Owner-scoped loaders; other owners get the same 404 as a missing object. | `tests/test_security_authz.py`: every OpenAPI route with a path parameter x {owner, other owner, fresh guest, unauthenticated, unknown credential}; a new object route without a case fails the test. Every non-public route requires a credential; lists and voice actions never reveal another owner's objects. |
 | Prompt injection | Content is data in every prompt; no tools; replies are schema-checked; citations validated before publish; credential-shaped text in a rationale is redacted. | `tests/test_security_prompt_injection.py` runs `evaluation/adversarial/prompt-injection.json` (database-free). |
 | Media intake limits | Declared and streamed byte limits, raw (never decoded) bodies, hash verification, multipart limits, worker byte re-check. `MEDIA_INVALID` from a codec stage is **blocked by #20** and skipped with that reason. | `tests/test_security_media.py` |

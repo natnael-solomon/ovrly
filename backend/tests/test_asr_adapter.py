@@ -1,5 +1,6 @@
 """Invented HTTP responses only; no private recordings or live provider calls."""
 
+import httpcore
 import httpx
 import pytest
 
@@ -11,6 +12,7 @@ from services.asr.groq import (
     GroqAdapter,
 )
 from services.jobs.retries import RateLimited, Transient
+from services.providers.egress import GuardedTransport
 
 
 async def test_groq_transcription_preserves_timed_speech_on_original_timebase():
@@ -37,6 +39,46 @@ async def test_groq_transcription_preserves_timed_speech_on_original_timebase():
     assert result == [{"start_ms": 4125, "end_ms": 4875, "text": "The invented bell rings."}]
 
 
+async def test_quantised_overrun_past_audio_end_is_clamped_not_rejected():
+    body = {
+        "text": "Invented closing words.",
+        "segments": [
+            {"start": 0.2, "end": 0.98, "text": "Invented closing"},
+            {"start": 0.98, "end": 1.02, "text": "words."},
+            {"start": 1.0, "end": 2.0, "text": "Trailing."},
+        ],
+    }
+    adapter = GroqAdapter(
+        api_key="synthetic",
+        model="synthetic",
+        max_audio_bytes=100,
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body)),
+    )
+    assert await adapter.transcribe(b"audio", duration_ms=1000, offset_ms=4000) == [
+        {"start_ms": 4200, "end_ms": 4980, "text": "Invented closing"},
+        {"start_ms": 4980, "end_ms": 5000, "text": "words."},
+        {"start_ms": 4999, "end_ms": 5000, "text": "Trailing."},
+    ]
+
+
+async def test_default_transport_goes_through_the_ssrf_guard(monkeypatch):
+    async def internal(host, port):
+        assert host == "api.groq.com"
+        return ["169.254.169.254"]
+
+    class Inner(httpcore.AsyncNetworkBackend):
+        async def connect_tcp(self, *args, **kwargs):
+            pytest.fail("A refused destination must never be dialled")
+
+    monkeypatch.setattr(
+        "services.asr.groq.GuardedTransport", lambda: GuardedTransport(internal, Inner())
+    )
+    adapter = GroqAdapter(api_key="synthetic", model="synthetic", max_audio_bytes=100)
+    with pytest.raises(ASRUnavailable) as failure:
+        await adapter.transcribe(b"audio", duration_ms=1000)
+    assert type(failure.value) is ASRUnavailable
+
+
 @pytest.mark.parametrize(
     "body",
     [
@@ -44,7 +86,8 @@ async def test_groq_transcription_preserves_timed_speech_on_original_timebase():
         {"text": "Unplaced speech", "segments": []},
         {"text": "", "segments": "wrong"},
         {"text": "x", "segments": [{"start": -1, "end": 0.8, "text": "x"}]},
-        {"text": "x", "segments": [{"start": 0, "end": 1.001, "text": "x"}]},
+        {"text": "x", "segments": [{"start": 0, "end": 2.001, "text": "x"}]},
+        {"text": "x", "segments": [{"start": 2.5, "end": 3, "text": "x"}]},
         {"text": "x", "segments": [{"start": True, "end": 1, "text": "x"}]},
         {"text": "x", "segments": [{"start": "0", "end": 1, "text": "x"}]},
         {"text": "x", "segments": [{"start": 0.9, "end": 0.5, "text": "x"}]},

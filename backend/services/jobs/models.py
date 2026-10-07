@@ -17,6 +17,11 @@ from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 
 from services.database import metadata
 
+# Owner-scoped cancellation/deletion fences: queued for their stage key but never claimed
+# by a handler, so they are not running work (for example for active-check quotas).
+DEVICE_TEXT_FENCE_STAGE = "upload_device_text"
+FENCE_STAGES = (DEVICE_TEXT_FENCE_STAGE,)
+
 jobs = Table(
     "jobs",
     metadata,

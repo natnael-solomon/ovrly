@@ -17,7 +17,7 @@ from services.api.auth import Principal
 from services.api.errors import ApiError
 from services.api.main import create_app
 from services.database import Database
-from services.jobs.models import jobs
+from services.jobs.models import DEVICE_TEXT_FENCE_STAGE, jobs
 from services.jobs.queue import JobQueue, StageKey
 from services.jobs.retries import RateLimited
 from services.models import (
@@ -283,6 +283,23 @@ async def test_capture_reservations_charge_once_and_group_fanout(app, client):
         assert len(await active_checks(connection, owner_id)) == 2
     assert_error(await check(client, headers, "over"), 429, "QUOTA_EXCEEDED")
     assert (await close(client, headers, session, choice=False)).status_code == 200
+
+
+async def test_device_text_fences_of_finished_checks_do_not_hold_active_slots(app, client):
+    headers, owner_id, _ = await owner(client, app)
+    await clear_active(app, owner_id)
+    async with app.state.database.engine.begin() as connection:
+        # The never-claimed fence device-text admission leaves queued for each investigation.
+        for _ in range(2):
+            await JobQueue(app.state.database).enqueue(
+                connection,
+                StageKey(1, DEVICE_TEXT_FENCE_STAGE, uuid.uuid4().hex),
+                {"investigation_id": str(uuid.uuid4())},
+                owner_id=owner_id,
+            )
+        assert await active_checks(connection, owner_id) == set()
+    assert (await check(client, headers, "second")).status_code == 202
+    assert (await check(client, headers, "third")).status_code == 202
 
 
 async def test_upload_reservations_and_chunks_share_byte_budget(app, client):
