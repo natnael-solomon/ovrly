@@ -87,7 +87,7 @@ The guest (or linked account) credential is encrypted with an Android Keystore k
 `saved_reports` (AN-10, #36) holds the device's copy of the owner's explicit saves, as
 read from `GET /v1/reports/saved`; it is replaced on every list read, a removal deletes
 the row after the server confirms, and uninstalling or clearing app data deletes it.
-The ID token of a future Google sign-in is sent once to the backend and never stored.
+The Google ID token from sign-in (Credential Manager) is sent once to the backend and never stored. After a second-device link, the rows and cached report versions of checks the revoked guest started on this device are deleted, because the account cannot read them.
 Alembic's version table is schema metadata, not user data. Git and CI artifacts
 must contain synthetic fixtures and test reports only: no database dumps,
 tokens, user media or private references. The one exception is the owner-opted,

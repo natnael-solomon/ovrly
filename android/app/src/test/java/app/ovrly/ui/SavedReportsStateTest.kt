@@ -144,7 +144,7 @@ class SavedReportsStateTest {
         )
         val switched = linkNotice(LinkOutcome.Linked(switched = true, merged = 1, stored = false))!!
         assertTrue(switched.contains("1 saved report from this device moved"))
-        assertTrue(switched.contains("check history is not merged"))
+        assertTrue(switched.contains("before signing in are not merged"))
         assertTrue(switched.contains("could not be stored on this device"))
         assertTrue(
             linkNotice(LinkOutcome.Linked(switched = true, merged = 3, stored = true))!!

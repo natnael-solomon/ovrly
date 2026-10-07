@@ -4,6 +4,14 @@
 
 ### Added
 
+- Google sign-in on Android (AN-10, #36). With the backend's Web client ID set in
+  `api.local.properties` (`googleWebClientId`), the account section's Sign in with Google uses
+  Android Credential Manager to link the guest to a Google account (BC-D07). Signing in on a
+  second device with an account linked elsewhere shows that account's saved reports there,
+  and the checks the previous guest started on that device are removed from it. Setup is in
+  the Android README. Second-device recovery stays disclosed as incomplete (decision 0003)
+  until it is verified on two physical devices.
+
 - RFC-D27 hosted speech fallback (BE-07b, #117): upload and capture-chunk speech
   call Groq `whisper-large-v3-turbo` first and, after a quota, rate-limit, outage,
   offline, missing-model, invalid-response or unknown-outcome failure, try

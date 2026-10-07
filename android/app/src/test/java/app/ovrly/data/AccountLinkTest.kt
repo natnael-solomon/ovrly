@@ -1,5 +1,6 @@
 package app.ovrly.data
 
+import android.content.Context
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -24,7 +25,7 @@ class AccountLinkTest {
         var asked = 0
         override val available: Boolean = true
 
-        override suspend fun idToken(): IdTokenResult {
+        override suspend fun idToken(activity: Context?): IdTokenResult {
             asked++
             return result
         }
@@ -106,6 +107,48 @@ class AccountLinkTest {
         runBlocking { SavedReports(api, MemorySavedReportDao()).sync() }
         server.take()
         assertEquals("Bearer account-token", server.take().getHeader("Authorization"))
+    }
+
+    @Test
+    fun aSecondDeviceRecoversTheAccountsSavedReportsAndForgetsTheGuestsChecks() =
+        withServer { server ->
+            server.credentials.write("guest-token")
+            server.json(200, linked(credential = "account-token", merged = 0))
+            server.json(
+                200,
+                SavedFixtures.list(SavedFixtures.savedObject("2026-10-06T08:00:00Z"))
+            )
+            var forgotten = 0
+            val api = OvrlyApi(server.client, server.credentials, MemoryAccountStore())
+            val linker = AccountLinker(api, FakeTokens(IdTokenResult.Token(idToken))) {
+                forgotten++
+            }
+            val dao = MemorySavedReportDao()
+            val saved = SavedReports(api, dao)
+            val outcome = runBlocking { linker.link() } as LinkOutcome.Linked
+            assertNull(runBlocking { saved.sync() })
+
+            assertTrue(outcome.switched)
+            assertEquals(1, forgotten)
+            server.take()
+            val list = server.take()
+            assertEquals("/v1/reports/saved", list.path)
+            assertEquals("Bearer account-token", list.getHeader("Authorization"))
+            // The report saved on the first device is listed here and readable offline.
+            val stored = runBlocking { saved.stored() }.single()
+            assertEquals(SavedFixtures.report.id, stored.entry.reportId)
+            assertEquals(SavedFixtures.report, stored.report)
+        }
+
+    @Test
+    fun anInPlaceUpgradeKeepsThisDevicesChecks() = withServer { server ->
+        server.credentials.write("guest-token")
+        server.json(200, linked())
+        var forgotten = 0
+        val api = OvrlyApi(server.client, server.credentials, MemoryAccountStore())
+        val linker = AccountLinker(api, FakeTokens(IdTokenResult.Token(idToken))) { forgotten++ }
+        assertTrue(runBlocking { linker.link() } is LinkOutcome.Linked)
+        assertEquals(0, forgotten)
     }
 
     @Test
