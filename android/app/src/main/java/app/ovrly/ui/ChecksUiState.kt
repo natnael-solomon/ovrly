@@ -47,6 +47,8 @@ internal data class OpenReport(
     val candidates: List<InboxItem> = emptyList(),
     val busy: Boolean = false,
     val notice: String? = null,
+    /** When this device last read the shown version from ovrly (epoch millis), if known. */
+    val retrievedAt: Long? = null,
     /** Whether the shown version is saved (#36); null when there is nothing to save. */
     val save: SaveState? = null
 )

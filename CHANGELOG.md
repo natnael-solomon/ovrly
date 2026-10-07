@@ -4,6 +4,15 @@
 
 ### Added
 
+- Report export and accessibility (AN-11, #39): the Report screen's "Share report" action
+  sends the shown version to the Android share sheet as plain text with the claim summary,
+  source links, limitations, provisional label, version, publication date and the date
+  this device retrieved it. It is built on the device and never includes media, the
+  transcript or a claim's original wording. Claim cards read the claim first with times in
+  words for TalkBack, detail and evidence cards are single TalkBack stops, every Report
+  control has a 48 dp target, report and evidence cards grow with 200% text, and the
+  Settings recording timer has a spoken description.
+
 - Explicit saved reports and the optional account on Android (AN-10, #36). The Report
   screen saves or removes the shown version only when you tap Save report or Remove from
   saved, Your space lists Saved reports below the Library (readable offline, opening the

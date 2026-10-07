@@ -40,6 +40,8 @@ internal data class ReportView(
     val latestVersion: Int,
     val changeSummary: String?,
     val supersedes: String?,
+    /** When the shown version was published (`created_at`), or null without a version. */
+    val publishedAt: String? = null,
     val claims: List<ClaimView>,
     /** Shown instead of claims when there are none to show; never a verdict on the video. */
     val empty: String?,
@@ -79,6 +81,7 @@ internal fun reportView(
         latestVersion = investigation.version,
         changeSummary = shown?.changeSummary,
         supersedes = shown?.supersedes,
+        publishedAt = shown?.createdAt,
         claims = shown?.let(::claimViews).orEmpty(),
         empty = emptyMessage(status, shown),
         captured = investigation.isCaptured,
