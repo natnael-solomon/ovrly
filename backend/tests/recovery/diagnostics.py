@@ -27,6 +27,16 @@ JOB_COLUMNS = (
     "updated_at",
 )
 MAX_STACK_FRAMES = 30
+# Hosted speech attempts per model; no audio, transcripts or account identifiers.
+LEDGER_COLUMNS = (
+    "job_id",
+    "model",
+    "outcome",
+    "retry_index",
+    "retry_after",
+    "audio_seconds",
+    "created_at",
+)
 
 
 def task_stacks(loop: asyncio.AbstractEventLoop) -> str:
@@ -59,11 +69,23 @@ def job_rows(database_url: str) -> str:
             rows = connection.execute(
                 sql.SQL("SELECT {} FROM jobs ORDER BY created_at, id").format(columns)
             ).fetchall()
+            ledger_columns = sql.SQL(", ").join(sql.SQL(column) for column in LEDGER_COLUMNS)
+            ledger = connection.execute(
+                sql.SQL("SELECT {} FROM asr_requests ORDER BY created_at, id").format(
+                    ledger_columns
+                )
+            ).fetchall()
     except psycopg.Error as error:
         return f"Job rows unavailable: {type(error).__name__}\n"
     output = io.StringIO()
     output.write(f"Database time {now[0] if now else 'unknown'}; {len(rows)} job rows:\n")
-    names = [column.split(" AS ")[-1] for column in JOB_COLUMNS]
+    _write_rows(output, JOB_COLUMNS, rows)
+    output.write(f"{len(ledger)} speech ledger rows:\n")
+    _write_rows(output, LEDGER_COLUMNS, ledger)
+    return output.getvalue()
+
+
+def _write_rows(output: io.StringIO, columns: tuple[str, ...], rows: list[tuple]) -> None:
+    names = [column.split(" AS ")[-1] for column in columns]
     for row in rows:
         output.write("  " + ", ".join(f"{n}={v}" for n, v in zip(names, row, strict=True)) + "\n")
-    return output.getvalue()
