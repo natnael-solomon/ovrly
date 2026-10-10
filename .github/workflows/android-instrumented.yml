@@ -102,7 +102,8 @@ jobs:
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
           cache-provider: enhanced
-          cache-read-only: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+          # Only the main Android checks job writes the Gradle cache; this job reads it.
+          cache-read-only: true
 
       - name: Build app and test APKs (and unit tests on the coverage job)
         id: build
@@ -260,7 +261,7 @@ jobs:
             exit 1
           fi
           if [[ "$REQUIRED" == false && "$VALIDATION" == skipped ]]; then
-            echo "Documentation-only change: instrumented tests skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "No Android paths changed: instrumented tests skipped." >> "$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUIRED" == true && "$VALIDATION" == success ]]; then
             echo "Instrumented tests and coverage passed on API 29 and 34." >> "$GITHUB_STEP_SUMMARY"
           else

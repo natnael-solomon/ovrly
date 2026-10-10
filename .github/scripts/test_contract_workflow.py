@@ -45,7 +45,8 @@ class ContractWorkflowTest(unittest.TestCase):
             self.assertRegex(uses, r"^[\w/-]+@[0-9a-f]{40}$")
         self.assertIn("persist-credentials: false", SOURCE)
         self.assertIn("save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", SOURCE)
-        self.assertIn("cache-read-only: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}", SOURCE)
+        self.assertIn("cache-read-only: true", SOURCE)
+        self.assertNotIn("cache-read-only: ${{", SOURCE)
         self.assertIn("retention-days: 7", SOURCE)
 
     def test_tools_are_pinned_and_oasdiff_is_checksum_verified(self):

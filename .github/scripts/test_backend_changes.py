@@ -48,15 +48,35 @@ class BackendChangesTest(unittest.TestCase):
         self.assertFalse(self.required())
         self.assertFalse(self.required(event_name="push"))
 
-    def test_all_nondocumentation_including_evaluation_requires_backend(self):
-        for name in ["backend/services/app.py", "backend/uv.lock", "android/app.kt",
-                     "evaluation/validate.py", ".github/workflows/backend.yml",
-                     ".github/scripts/ci_changes.py", ".gitignore", "unknown"]:
+    def test_backend_shared_and_unknown_paths_require_backend(self):
+        for name in ["backend/services/app.py", "backend/uv.lock", "packages/contracts/openapi.json",
+                     "evaluation/adversarial/prompt-injection.json", ".github/workflows/backend.yml",
+                     ".github/scripts/backend_checks.py", ".github/scripts/test_backend_workflow.py",
+                     ".github/scripts/ci_changes.py", ".github/workflows/quality.yml",
+                     ".github/workflows/contracts.yml", ".github/scripts/release_publish.py",
+                     ".gitignore", "android-other/tool.py", "unknown"]:
             with self.subTest(name=name):
                 self.write(name)
                 self.commit()
                 self.assertTrue(self.required())
                 self.base = self.git("rev-parse", "HEAD")
+
+    def test_android_only_and_documentation_skip(self):
+        for name in ["android/app/src/main/Main.kt", "android/gradle/libs.versions.toml",
+                     ".github/workflows/android.yml", ".github/workflows/android-instrumented.yml",
+                     ".github/scripts/android_changes.py", ".github/scripts/test_android_changes.py"]:
+            with self.subTest(name=name):
+                self.write(name)
+                self.write("docs/note.md", name + "\n")
+                self.commit()
+                self.assertFalse(self.required())
+                self.base = self.git("rev-parse", "HEAD")
+
+    def test_android_with_shared_contract_requires_backend(self):
+        self.write("android/app/Main.kt")
+        self.write("packages/contracts/schema.json")
+        self.commit()
+        self.assertTrue(self.required())
 
     def test_empty_initial_and_manual_run_checks(self):
         self.assertTrue(self.required())

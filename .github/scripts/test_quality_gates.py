@@ -89,6 +89,24 @@ class QualityConfigurationTest(unittest.TestCase):
         self.assertIn("save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
                       source)
 
+    def test_only_android_checks_writes_the_gradle_cache(self):
+        # Every extra writer adds a large Actions cache entry and pushes the repository
+        # over its quota, evicting the entries the main jobs need.
+        main_only = "${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}"
+        writers = []
+        for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            for job_id, job in load_yaml(path)["jobs"].items():
+                for step in job.get("steps", []):
+                    if not step.get("uses", "").startswith("gradle/actions/setup-gradle@"):
+                        continue
+                    options = step.get("with", {})
+                    if options.get("cache-disabled") == "true" or options.get("cache-read-only") == "true":
+                        continue
+                    with self.subTest(workflow=path.name, job=job_id):
+                        self.assertEqual(main_only, options.get("cache-read-only"))
+                    writers.append((path.name, job_id))
+        self.assertEqual([("android.yml", "android")], writers)
+
     def test_queue_exception_cannot_hide_other_concurrency_shapes(self):
         config = load_yaml(ROOT / ".github/actionlint.yaml")
         self.assertEqual([".github/workflows/telegram-apk.yml"], list(config["paths"]))

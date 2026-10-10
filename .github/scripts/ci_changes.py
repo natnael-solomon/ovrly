@@ -1,4 +1,4 @@
-"""Shared conservative Git diff and documentation classification for CI."""
+"""Shared conservative Git diff and path classification for CI."""
 
 import re
 import subprocess
@@ -11,6 +11,41 @@ def is_documentation(name):
         (len(path.parts) == 1 and path.suffix == ".md")
         or (name.startswith("docs/") and path.suffix == ".md")
         or name in {"android/README.md", "backend/README.md"}
+    )
+
+
+# Paths that only one side builds or tests. Anything else, including packages/contracts,
+# evaluation inputs read by backend tests, shared CI scripts and unknown paths, runs both.
+ANDROID_ONLY_WORKFLOWS = {
+    ".github/workflows/android.yml",
+    ".github/workflows/android-instrumented.yml",
+}
+BACKEND_ONLY_WORKFLOWS = {".github/workflows/backend.yml"}
+
+
+def _ci_script(name, prefix):
+    path = PurePosixPath(name)
+    return (
+        len(path.parts) == 3
+        and name.startswith(".github/scripts/")
+        and path.suffix == ".py"
+        and (path.name.startswith(prefix) or path.name.startswith("test_" + prefix))
+    )
+
+
+def is_android_only(name):
+    return (
+        name.startswith("android/")
+        or name in ANDROID_ONLY_WORKFLOWS
+        or _ci_script(name, "android_")
+    )
+
+
+def is_backend_only(name):
+    return (
+        name.startswith("backend/")
+        or name in BACKEND_ONLY_WORKFLOWS
+        or _ci_script(name, "backend_")
     )
 
 

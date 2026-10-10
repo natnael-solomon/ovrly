@@ -60,6 +60,7 @@ jobs:
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
           cache-provider: enhanced
-          cache-read-only: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+          # Only the main Android checks job writes the Gradle cache; this job reads it.
+          cache-read-only: true
       - name: Run the local pre-commit gates
         run: uv run --project backend --frozen --group quality pre-commit run --all-files

@@ -1662,12 +1662,14 @@ the gate; no advisories are currently ignored.
 
 **Backend CI** runs on PRs to any branch (including stacked targets and
 retargeting), pushes to `main`, and manual dispatch. A lightweight job always
-tests change detection and coverage policy. Only entirely known-documentation
-diffs skip backend execution; unknown paths, evaluation, Android and tooling
-changes conservatively run it. The stable **Backend checks** result fails if
-detection or required validation fails/is cancelled; docs-only skips still
-produce that check. PostgreSQL and Python setup are not started for docs-only
-changes in this Backend CI workflow; the separate Quality checks job still runs.
+tests change detection and coverage policy. Diffs made only of documentation and
+Android-only paths (`android/**`, the Android workflows and their scripts) skip
+backend execution; backend, `packages/contracts`, evaluation, shared tooling and
+unknown paths conservatively run it (see [WORKFLOW](../WORKFLOW.md#continuous-integration)).
+The stable **Backend checks** result fails if detection or required validation
+fails/is cancelled; skips still produce that check. PostgreSQL and Python setup
+are not started for skipped changes in this Backend CI workflow; the separate
+Quality checks job still runs.
 
 The validation job uses Python 3.11, pinned setup-uv, the frozen lockfile, Ruff,
 strict MyPy with the Pydantic plugin, the
@@ -1676,7 +1678,10 @@ server round-trip check (the full contract gate, including OpenAPI, spectral,
 oasdiff and the Android tests, is the separate **Contract checks** workflow),
 tests, PostgreSQL 16, migration upgrade/drift
 checks and the real test suite. Only pushes to `main` save uv caches; PRs can read
-them. Dependabot checks the `/backend` uv project weekly with grouped minor/patch
+them. CI does not use apt: `.github/scripts/media_tools.sh` installs static
+ffmpeg/ffprobe 6.0 from release assets pinned by SHA-256 in `backend.yml`, verified
+on every use and cached by `main`, within a five-minute step limit. Local setup
+still uses the distribution packages above. Dependabot checks the `/backend` uv project weekly with grouped minor/patch
 updates. There are no production secrets or live providers in this workflow.
 
 Run the same test/coverage pipeline locally after fetching `origin/main`, from
