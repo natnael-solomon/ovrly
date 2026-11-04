@@ -27,8 +27,8 @@ dev = [
 quality = [
     "actionlint-py==1.7.12.25",
     "pip-audit==2.10.1",
-    "pre-commit==4.6.2",
-    "zizmor==1.30.1",
+    "pre-commit==4.7.0",
+    "zizmor==1.31.1",
 ]
 # Contract checks only: validates packages/contracts/openapi.json. Not a runtime dependency.
 contracts = [
@@ -36,7 +36,7 @@ contracts = [
 ]
 # Release workflow only: CycloneDX SBOM of the exported runtime requirements. Not a runtime dependency.
 release = [
-    "cyclonedx-bom==7.5.0",
+    "cyclonedx-bom==7.6.0",
 ]
 
 [build-system]
